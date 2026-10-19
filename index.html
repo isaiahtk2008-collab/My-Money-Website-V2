@@ -1,4 +1,4 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}/* ===== Log entry module (additive, prefix .lg-) ===== */
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><script src="https://accounts.google.com/gsi/client" async defer></script><script src="https://cdn.tailwindcss.com"></script><script>tailwind.config = { corePlugins: { preflight: false } };</script><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}/* ===== Log entry module (additive, prefix .lg-) ===== */
 .lg-fab{position:fixed;right:max(20px,env(safe-area-inset-right,0px));bottom:calc(24px + env(safe-area-inset-bottom,0px));z-index:65;width:52px;height:52px;border-radius:16px;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;box-shadow:0 8px 24px rgba(0,0,0,.22);transition:transform .15s ease}
 .lg-fab:hover{transform:translateY(-2px)}
 .lg-fab .lg-bd{position:absolute;top:-6px;right:-6px;min-width:20px;height:20px;padding:0 5px;border-radius:999px;background:var(--warn);color:#fff;font-size:11px;font-weight:800;display:grid;place-items:center;border:2px solid var(--bg)}
@@ -50,6 +50,178 @@
 .lg-ol{margin:8px 0 0;padding-left:20px;color:var(--muted);font-size:13px;display:flex;flex-direction:column;gap:6px}
 .lg-st{font-size:12.5px;font-weight:600;margin-top:8px}.lg-st.good{color:var(--good)}.lg-st.bad{color:var(--bad)}
 </style></head><body>
+<!-- Google OAuth 2.0 Auth Modal Overlay -->
+<style>
+  #auth-modal.hidden { display: none !important; pointer-events: none !important; visibility: hidden !important; }
+</style>
+<script>
+  try {
+    if (sessionStorage.getItem("user_authenticated") === "true") {
+      document.write('<style>#auth-modal{display:none!important;pointer-events:none!important;visibility:hidden!important;}</style>');
+    }
+  } catch(e) {}
+</script>
+<div id="auth-modal" class="fixed inset-0 z-[99999] flex items-center justify-center bg-[#07090d]/90 backdrop-blur-md px-4" style="position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(7,9,13,0.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);padding:16px;">
+  <div class="w-full max-w-md rounded-2xl bg-[#161a21] border border-[#2a303b] p-8 shadow-2xl flex flex-col items-center text-center space-y-6 text-[#e9ecf1]" style="width:100%;max-width:420px;border-radius:20px;background:#161a21;border:1px solid #2a303b;padding:32px 28px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.6);display:flex;flex-direction:column;align-items:center;text-align:center;color:#e9ecf1;box-sizing:border-box;">
+    <!-- Emerald Shield / Lock Icon -->
+    <div class="w-16 h-16 rounded-2xl bg-[#123120] border border-[#5fd19a]/40 flex items-center justify-center text-[#5fd19a] mb-1 shadow-lg shadow-[#10b981]/20" style="width:64px;height:64px;border-radius:18px;background:#123120;border:1px solid rgba(95,209,154,0.4);display:flex;align-items:center;justify-content:center;color:#5fd19a;margin-bottom:8px;box-shadow:0 10px 25px -5px rgba(16,185,129,0.2);">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        <path d="m9 12 2 2 4-4"/>
+      </svg>
+    </div>
+
+    <!-- Title and Subtitle -->
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      <h2 class="text-2xl font-extrabold tracking-tight text-[#e9ecf1]" style="font-size:22px;font-weight:800;letter-spacing:-0.02em;color:#e9ecf1;margin:0;">My Money Dashboard</h2>
+      <p class="text-sm text-[#a2abb9]" style="font-size:13px;color:#a2abb9;margin:0;line-height:1.45;">Sign in with your authorized Google account to access your personal dashboard.</p>
+    </div>
+
+    <!-- Google Sign-In GIS Component -->
+    <div class="w-full flex flex-col items-center justify-center min-h-[46px]" style="width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:46px;margin:8px 0;">
+      <div id="g_id_onload"
+           data-client_id="413169531449-cqpt3ki9lstdqiqeogul7iicgo9kv21o.apps.googleusercontent.com"
+           data-callback="handleCredentialResponse"
+           data-auto_prompt="false">
+      </div>
+      <div class="g_id_signin"
+           data-type="standard"
+           data-size="large"
+           data-theme="filled_black"
+           data-text="sign_in_with"
+           data-shape="rectangular"
+           data-logo_alignment="left"
+           data-width="280">
+      </div>
+      <div id="google-signin-btn"></div>
+    </div>
+
+    <!-- Inline Error Message -->
+    <div id="auth-error" class="hidden text-xs font-semibold text-[#ff8f84] bg-[#3b1b18]/80 border border-[#ff8f84]/40 px-3.5 py-2.5 rounded-xl w-full text-center" style="display:none;font-size:12.5px;font-weight:600;color:#ff8f84;background:rgba(59,27,24,0.8);border:1px solid rgba(255,143,132,0.4);padding:10px 14px;border-radius:12px;width:100%;text-align:center;box-sizing:border-box;line-height:1.4;" role="alert"></div>
+
+    <!-- Security Footnote -->
+    <div class="flex items-center justify-center gap-2 text-xs text-[#7b8595]" style="display:flex;align-items:center;justify-content:center;gap:6px;font-size:11.5px;color:#7b8595;margin-top:8px;">
+      <span class="w-2 h-2 rounded-full bg-[#5fd19a]" style="width:7px;height:7px;border-radius:50%;background:#5fd19a;display:inline-block;"></span>
+      <span>Secured via Google Identity Services</span>
+    </div>
+  </div>
+</div>
+<script>
+/* ================= Google OAuth 2.0 (Identity Services) Authentication ================= */
+(function() {
+  function decodeJwtPayload(token) {
+    try {
+      var base64Url = token.split('.')[1];
+      var base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      var jsonPayload = decodeURIComponent(
+        atob(base64)
+          .split('')
+          .map(function(c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+          })
+          .join('')
+      );
+      return JSON.parse(jsonPayload);
+    } catch (e) {
+      console.error('Failed to decode JWT response:', e);
+      return null;
+    }
+  }
+
+  function renderGsi() {
+    if (window.google && window.google.accounts && window.google.accounts.id) {
+      try {
+        window.google.accounts.id.initialize({
+          client_id: '413169531449-cqpt3ki9lstdqiqeogul7iicgo9kv21o.apps.googleusercontent.com',
+          callback: window.handleCredentialResponse
+        });
+        var btn = document.getElementById('google-signin-btn');
+        if (btn) {
+          window.google.accounts.id.renderButton(btn, {
+            theme: 'filled_black',
+            size: 'large',
+            shape: 'rectangular',
+            text: 'sign_in_with',
+            width: 280
+          });
+        }
+      } catch (err) {
+        console.warn('GSI render notice:', err);
+      }
+    }
+  }
+
+  window.handleCredentialResponse = function(response) {
+    var errorEl = document.getElementById('auth-error');
+    if (!response || !response.credential) {
+      if (errorEl) {
+        errorEl.textContent = 'Sign-in failed. Please try again.';
+        errorEl.classList.remove('hidden');
+        errorEl.style.display = 'block';
+      }
+      return;
+    }
+
+    var payload = decodeJwtPayload(response.credential);
+    var email = payload && payload.email ? payload.email.trim().toLowerCase() : '';
+
+    if (email === 'isaiahtk2008@gmail.com') {
+      try {
+        sessionStorage.setItem('user_authenticated', 'true');
+      } catch (e) {
+        console.warn('sessionStorage setItem warning:', e);
+      }
+      var modal = document.getElementById('auth-modal');
+      if (modal) {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+        modal.style.pointerEvents = 'none';
+      }
+      if (errorEl) {
+        errorEl.textContent = '';
+        errorEl.classList.add('hidden');
+        errorEl.style.display = 'none';
+      }
+    } else {
+      var displayEmail = (payload && payload.email) ? payload.email : 'Unknown user';
+      if (errorEl) {
+        errorEl.textContent = 'Access restricted: ' + displayEmail + ' is not authorized. Access is strictly permitted for isaiahtk2008@gmail.com.';
+        errorEl.classList.remove('hidden');
+        errorEl.style.display = 'block';
+      }
+    }
+  };
+
+  document.addEventListener('DOMContentLoaded', function() {
+    var isAuth = false;
+    try {
+      isAuth = sessionStorage.getItem('user_authenticated') === 'true';
+    } catch (e) {}
+
+    var modal = document.getElementById('auth-modal');
+    if (modal) {
+      if (isAuth) {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+        modal.style.pointerEvents = 'none';
+      } else {
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+        modal.style.pointerEvents = 'auto';
+        renderGsi();
+      }
+    }
+  });
+
+  window.addEventListener('load', function() {
+    try {
+      if (sessionStorage.getItem('user_authenticated') !== 'true') {
+        renderGsi();
+      }
+    } catch (e) {}
+  });
+})();
+</script>
 <title>My Money</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">

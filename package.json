@@ -1,0 +1,11 @@
+{
+  "name": "my-money-dashboard-v2",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server.js",
+    "build": "node -e \"console.log('Build OK')\"",
+    "start": "node server.js"
+  }
+}
