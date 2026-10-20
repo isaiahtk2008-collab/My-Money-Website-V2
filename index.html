@@ -50,9 +50,21 @@
 .lg-ol{margin:8px 0 0;padding-left:20px;color:var(--muted);font-size:13px;display:flex;flex-direction:column;gap:6px}
 .lg-st{font-size:12.5px;font-weight:600;margin-top:8px}.lg-st.good{color:var(--good)}.lg-st.bad{color:var(--bad)}
 </style></head><body>
-<!-- Google OAuth 2.0 Auth Modal Overlay -->
+<!-- Auth Modal Overlay: Google OAuth 2.0 OR local username/password -->
 <style>
   #auth-modal.hidden { display: none !important; pointer-events: none !important; visibility: hidden !important; }
+  /* the modal itself scrolls on short screens (keyboard open, landscape) instead of clipping the card */
+  #auth-modal { overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+  #auth-modal > div { margin: auto; }
+  #auth-modal .am-or { display: flex; align-items: center; gap: 12px; width: 100%; color: #7b8595; font-size: 11px; font-weight: 700; letter-spacing: .16em; margin: 0; }
+  #auth-modal .am-or::before, #auth-modal .am-or::after { content: ""; flex: 1; height: 1px; background: #2a303b; }
+  #auth-modal .am-form { width: 100%; display: flex; flex-direction: column; gap: 8px; text-align: left; margin: 0; }
+  #auth-modal .am-l { font-size: 12px; font-weight: 600; color: #a2abb9; }
+  #auth-modal .am-in { width: 100%; height: 44px; box-sizing: border-box; border-radius: 12px; border: 1px solid #2a303b; background: #0e1116; color: #e9ecf1; padding: 0 14px; font: inherit; font-size: 16px; }
+  #auth-modal .am-in:focus { outline: 2px solid #7fb0ff; outline-offset: 1px; }
+  #auth-modal .am-btn { height: 44px; margin-top: 4px; border: 0; border-radius: 12px; background: #7fb0ff; color: #0b1220; font: inherit; font-size: 15px; font-weight: 700; cursor: pointer; }
+  #auth-modal .am-btn:hover { filter: brightness(1.07); }
+  #auth-modal .am-btn:disabled { opacity: .6; cursor: default; }
 </style>
 <script>
   try {
@@ -61,7 +73,7 @@
     }
   } catch(e) {}
 </script>
-<div id="auth-modal" class="fixed inset-0 z-[99999] flex items-center justify-center bg-[#07090d]/90 backdrop-blur-md px-4" style="position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(7,9,13,0.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);padding:16px;">
+<div id="auth-modal" class="fixed inset-0 z-[99999] flex items-center justify-center bg-[#07090d]/90 backdrop-blur-md px-4" style="position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;display:flex;align-items:flex-start;justify-content:center;background:rgba(7,9,13,0.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);padding:16px;">
   <div class="w-full max-w-md rounded-2xl bg-[#161a21] border border-[#2a303b] p-8 shadow-2xl flex flex-col items-center text-center space-y-6 text-[#e9ecf1]" style="width:100%;max-width:420px;border-radius:20px;background:#161a21;border:1px solid #2a303b;padding:32px 28px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.6);display:flex;flex-direction:column;align-items:center;text-align:center;color:#e9ecf1;box-sizing:border-box;">
     <!-- Emerald Shield / Lock Icon -->
     <div class="w-16 h-16 rounded-2xl bg-[#123120] border border-[#5fd19a]/40 flex items-center justify-center text-[#5fd19a] mb-1 shadow-lg shadow-[#10b981]/20" style="width:64px;height:64px;border-radius:18px;background:#123120;border:1px solid rgba(95,209,154,0.4);display:flex;align-items:center;justify-content:center;color:#5fd19a;margin-bottom:8px;box-shadow:0 10px 25px -5px rgba(16,185,129,0.2);">
@@ -74,27 +86,24 @@
     <!-- Title and Subtitle -->
     <div style="display:flex;flex-direction:column;gap:6px;">
       <h2 class="text-2xl font-extrabold tracking-tight text-[#e9ecf1]" style="font-size:22px;font-weight:800;letter-spacing:-0.02em;color:#e9ecf1;margin:0;">My Money Dashboard</h2>
-      <p class="text-sm text-[#a2abb9]" style="font-size:13px;color:#a2abb9;margin:0;line-height:1.45;">Sign in with your authorized Google account to access your personal dashboard.</p>
+      <p class="text-sm text-[#a2abb9]" style="font-size:13px;color:#a2abb9;margin:0;line-height:1.45;">Sign in with your authorized Google account, or with your username and password.</p>
     </div>
 
-    <!-- Google Sign-In GIS Component -->
+    <!-- Google Sign-In: exactly one render target. The button is drawn by renderGsi() below. -->
     <div class="w-full flex flex-col items-center justify-center min-h-[46px]" style="width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:46px;margin:8px 0;">
-      <div id="g_id_onload"
-           data-client_id="413169531449-cqpt3ki9lstdqiqeogul7iicgo9kv21o.apps.googleusercontent.com"
-           data-callback="handleCredentialResponse"
-           data-auto_prompt="false">
-      </div>
-      <div class="g_id_signin"
-           data-type="standard"
-           data-size="large"
-           data-theme="filled_black"
-           data-text="sign_in_with"
-           data-shape="rectangular"
-           data-logo_alignment="left"
-           data-width="280">
-      </div>
       <div id="google-signin-btn"></div>
     </div>
+
+    <div class="am-or" role="separator" aria-label="or"><span>OR</span></div>
+
+    <!-- Local username / password sign-in -->
+    <form id="auth-local-form" class="am-form" autocomplete="on" novalidate>
+      <label class="am-l" for="auth-user">Username</label>
+      <input id="auth-user" class="am-in" type="text" name="username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Username">
+      <label class="am-l" for="auth-pass">Password</label>
+      <input id="auth-pass" class="am-in" type="password" name="password" autocomplete="current-password" placeholder="Password">
+      <button id="auth-submit" class="am-btn" type="submit">Sign In</button>
+    </form>
 
     <!-- Inline Error Message -->
     <div id="auth-error" class="hidden text-xs font-semibold text-[#ff8f84] bg-[#3b1b18]/80 border border-[#ff8f84]/40 px-3.5 py-2.5 rounded-xl w-full text-center" style="display:none;font-size:12.5px;font-weight:600;color:#ff8f84;background:rgba(59,27,24,0.8);border:1px solid rgba(255,143,132,0.4);padding:10px 14px;border-radius:12px;width:100%;text-align:center;box-sizing:border-box;line-height:1.4;" role="alert"></div>
@@ -107,8 +116,166 @@
   </div>
 </div>
 <script>
-/* ================= Google OAuth 2.0 (Identity Services) Authentication ================= */
+/* ================= Authentication: Google OAuth 2.0 (Identity Services) OR local username/password ================= */
 (function() {
+  'use strict';
+  var ALLOWED_EMAIL = 'isaiahtk2008@gmail.com';
+  var CLIENT_ID = '413169531449-cqpt3ki9lstdqiqeogul7iicgo9kv21o.apps.googleusercontent.com';
+  var CRED_KEY = 'mm.auth.cred';     /* {u: username, s: salt, h: PBKDF2 hash, i: iterations}; the password itself is never stored */
+  var FAIL_KEY = 'mm.auth.f';
+  var UNTIL_KEY = 'mm.auth.u';
+  var METHOD_KEY = 'mm.auth.method';  /* sessionStorage: 'google' | 'local' */
+  var ITER = 150000;
+  var enc = new TextEncoder();
+
+  function byId(id) { return document.getElementById(id); }
+  function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } }
+  function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+  function ssGet(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }
+  function ssDel(k) { try { sessionStorage.removeItem(k); } catch (e) {} }
+
+  /* ---------- error / modal helpers ---------- */
+  function showError(msg) {
+    var el = byId('auth-error');
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.remove('hidden');
+    el.style.display = 'block';
+  }
+  function clearError() {
+    var el = byId('auth-error');
+    if (!el) return;
+    el.textContent = '';
+    el.classList.add('hidden');
+    el.style.display = 'none';
+  }
+  function hideModal() {
+    var modal = byId('auth-modal');
+    if (modal) {
+      modal.classList.add('hidden');
+      modal.style.display = 'none';
+      modal.style.pointerEvents = 'none';
+    }
+  }
+  function markAuthenticated(method) {
+    try {
+      sessionStorage.setItem("user_authenticated", "true");
+      sessionStorage.setItem(METHOD_KEY, method);
+    } catch (e) {
+      console.warn('sessionStorage setItem warning:', e);
+    }
+    clearError();
+    hideModal();
+  }
+
+  /* ---------- salted PBKDF2 credential storage ---------- */
+  function b64(a) { return btoa(String.fromCharCode.apply(null, new Uint8Array(a))); }
+  function unb64(s) { return Uint8Array.from(atob(s), function(c) { return c.charCodeAt(0); }); }
+  function canHash() { return !!(window.crypto && crypto.subtle && window.isSecureContext !== false); }
+  function derive(pass, salt, it) {
+    return crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveBits'])
+      .then(function(k) { return crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: salt, iterations: it }, k, 256); })
+      .then(function(bits) { return new Uint8Array(bits); });
+  }
+  function eq(a, b) {
+    if (a.length !== b.length) return false;
+    var d = 0;
+    for (var i = 0; i < a.length; i++) d |= a[i] ^ b[i];
+    return d === 0;
+  }
+  function normUser(u) { return String(u == null ? '' : u).trim().toLowerCase(); }
+  function readCred() {
+    try {
+      var r = JSON.parse(lsGet(CRED_KEY) || 'null');
+      return (r && r.u && r.s && r.h) ? r : null;
+    } catch (e) { return null; }
+  }
+  function hasCreds() { return !!readCred(); }
+  function savedUsername() { var r = readCred(); return r ? r.u : ''; }
+
+  function waitSecs() {
+    var u = parseInt(lsGet(UNTIL_KEY) || '0', 10) || 0;
+    return Math.max(0, Math.ceil((u - Date.now()) / 1000));
+  }
+  function noteFail() {
+    var f = (parseInt(lsGet(FAIL_KEY) || '0', 10) || 0) + 1;
+    lsSet(FAIL_KEY, String(f));
+    if (f >= 5) lsSet(UNTIL_KEY, String(Date.now() + Math.min(900, 30 * Math.pow(2, f - 5)) * 1000));
+  }
+  function noteOk() { lsDel(FAIL_KEY); lsDel(UNTIL_KEY); }
+
+  /* password alone (used to confirm changes) */
+  function checkPassword(pass) {
+    var r = readCred();
+    if (!r) return Promise.resolve(false);
+    return derive(pass, unb64(r.s), r.i || ITER).then(function(h) { return eq(h, unb64(r.h)); });
+  }
+  /* username + password (sign-in). Always hashes, so timing does not reveal whether the username matched. */
+  function verifyCreds(user, pass) {
+    var r = readCred();
+    if (!r) return Promise.resolve(false);
+    if (waitSecs() > 0) return Promise.resolve(false); /* lockout is enforced here too, not only by the caller */
+    return derive(pass, unb64(r.s), r.i || ITER).then(function(h) {
+      var okHash = eq(h, unb64(r.h));
+      var okUser = normUser(user) === r.u;
+      return okHash && okUser;
+    });
+  }
+
+  function setCreds(user, pass, currentPass) {
+    var u = normUser(user);
+    pass = String(pass == null ? '' : pass);
+    if (!canHash()) return Promise.resolve({ ok: false, msg: 'Username sign-in needs a secure page (https or localhost).' });
+    if (u.length < 3) return Promise.resolve({ ok: false, msg: 'Username must be at least 3 characters.' });
+    if (/\s/.test(u)) return Promise.resolve({ ok: false, msg: 'Username cannot contain spaces.' });
+    if (pass.length < 8) return Promise.resolve({ ok: false, msg: 'Password must be at least 8 characters.' });
+    var w = waitSecs();
+    if (hasCreds() && w > 0) return Promise.resolve({ ok: false, msg: 'Too many attempts. Try again in ' + w + ' seconds.' });
+    var gate = hasCreds() ? checkPassword(currentPass || '') : Promise.resolve(true);
+    return gate.then(function(ok) {
+      if (!ok) { noteFail(); return { ok: false, msg: 'Current password is incorrect.' }; }
+      var salt = crypto.getRandomValues(new Uint8Array(16));
+      return derive(pass, salt, ITER).then(function(h) {
+        var saved = lsSet(CRED_KEY, JSON.stringify({ u: u, s: b64(salt), h: b64(h), i: ITER }));
+        if (!saved) return { ok: false, msg: 'Could not save: browser storage is unavailable or full.' };
+        noteOk();
+        return { ok: true, msg: 'Username and password saved.' };
+      });
+    }).catch(function() { return { ok: false, msg: 'Could not save. Try again.' }; });
+  }
+  function clearCreds(currentPass) {
+    if (!hasCreds()) return Promise.resolve({ ok: true, msg: 'Nothing to remove.' });
+    if (!canHash()) return Promise.resolve({ ok: false, msg: 'This needs a secure page (https or localhost).' });
+    var w = waitSecs();
+    if (w > 0) return Promise.resolve({ ok: false, msg: 'Too many attempts. Try again in ' + w + ' seconds.' });
+    return checkPassword(currentPass || '').then(function(ok) {
+      if (!ok) { noteFail(); return { ok: false, msg: 'Current password is incorrect.' }; }
+      lsDel(CRED_KEY); noteOk();
+      return { ok: true, msg: 'Username and password removed. Google sign-in still works.' };
+    }).catch(function() { return { ok: false, msg: 'Could not remove. Try again.' }; });
+  }
+
+  function signOut() {
+    ssDel('user_authenticated');
+    ssDel(METHOD_KEY);
+    ssDel('mm.unlocked');
+    try { if (window.google && google.accounts && google.accounts.id) google.accounts.id.disableAutoSelect(); } catch (e) {}
+    location.reload();
+  }
+
+  window.mmAuth = {
+    allowedEmail: ALLOWED_EMAIL,
+    hasCreds: hasCreds,
+    savedUsername: savedUsername,
+    canHash: canHash,
+    setCreds: setCreds,
+    clearCreds: clearCreds,
+    signOut: signOut,
+    method: function() { return ssGet(METHOD_KEY) || ''; }
+  };
+
+  /* ---------- Google Identity Services ---------- */
   function decodeJwtPayload(token) {
     try {
       var base64Url = token.split('.')[1];
@@ -128,69 +295,113 @@
     }
   }
 
+  var gsiInit = false;
+  var gsiRendered = false;
+  /* Draws the single Google button. Safe to call repeatedly: it initializes once and never adds a second button. */
   function renderGsi() {
-    if (window.google && window.google.accounts && window.google.accounts.id) {
-      try {
+    if (gsiRendered) return true;
+    var btn = byId('google-signin-btn');
+    if (!btn) return true;
+    if (!(window.google && window.google.accounts && window.google.accounts.id)) return false;
+    try {
+      if (!gsiInit) {
         window.google.accounts.id.initialize({
-          client_id: '413169531449-cqpt3ki9lstdqiqeogul7iicgo9kv21o.apps.googleusercontent.com',
-          callback: window.handleCredentialResponse
+          client_id: CLIENT_ID,
+          callback: window.handleCredentialResponse,
+          auto_select: false
         });
-        var btn = document.getElementById('google-signin-btn');
-        if (btn) {
-          window.google.accounts.id.renderButton(btn, {
-            theme: 'filled_black',
-            size: 'large',
-            shape: 'rectangular',
-            text: 'sign_in_with',
-            width: 280
-          });
-        }
-      } catch (err) {
-        console.warn('GSI render notice:', err);
+        gsiInit = true;
       }
+      btn.innerHTML = '';
+      var host = btn.parentNode;
+      var avail = host && host.clientWidth ? host.clientWidth : 280;
+      window.google.accounts.id.renderButton(btn, {
+        theme: 'filled_black',
+        size: 'large',
+        shape: 'rectangular',
+        text: 'sign_in_with',
+        width: Math.max(200, Math.min(280, avail))
+      });
+      gsiRendered = true;
+    } catch (err) {
+      console.warn('GSI render notice:', err);
     }
+    return gsiRendered;
+  }
+  /* The GSI script loads async, so retry for a few seconds until it is ready. */
+  function ensureGsi() {
+    if (renderGsi()) return;
+    var tries = 0;
+    var t = setInterval(function() {
+      tries++;
+      if (renderGsi() || tries > 40) clearInterval(t);
+    }, 250);
   }
 
   window.handleCredentialResponse = function(response) {
-    var errorEl = document.getElementById('auth-error');
     if (!response || !response.credential) {
-      if (errorEl) {
-        errorEl.textContent = 'Sign-in failed. Please try again.';
-        errorEl.classList.remove('hidden');
-        errorEl.style.display = 'block';
-      }
+      showError('Sign-in failed. Please try again.');
       return;
     }
 
     var payload = decodeJwtPayload(response.credential);
     var email = payload && payload.email ? payload.email.trim().toLowerCase() : '';
 
-    if (email === 'isaiahtk2008@gmail.com') {
-      try {
-        sessionStorage.setItem('user_authenticated', 'true');
-      } catch (e) {
-        console.warn('sessionStorage setItem warning:', e);
-      }
-      var modal = document.getElementById('auth-modal');
-      if (modal) {
-        modal.classList.add('hidden');
-        modal.style.display = 'none';
-        modal.style.pointerEvents = 'none';
-      }
-      if (errorEl) {
-        errorEl.textContent = '';
-        errorEl.classList.add('hidden');
-        errorEl.style.display = 'none';
-      }
+    if (email === ALLOWED_EMAIL) {
+      markAuthenticated('google');
     } else {
       var displayEmail = (payload && payload.email) ? payload.email : 'Unknown user';
-      if (errorEl) {
-        errorEl.textContent = 'Access restricted: ' + displayEmail + ' is not authorized. Access is strictly permitted for isaiahtk2008@gmail.com.';
-        errorEl.classList.remove('hidden');
-        errorEl.style.display = 'block';
-      }
+      showError('Access restricted: ' + displayEmail + ' is not authorized. Google access is strictly permitted for ' + ALLOWED_EMAIL + '.');
     }
   };
+
+  /* ---------- Username / password form ---------- */
+  function bindForm() {
+    var form = byId('auth-local-form');
+    if (!form || form.__mmBound) return;
+    form.__mmBound = true;
+    var busy = false;
+    form.addEventListener('submit', function(e) {
+      e.preventDefault();
+      if (busy) return;
+      var userEl = byId('auth-user'), passEl = byId('auth-pass'), btn = byId('auth-submit');
+      var user = userEl ? userEl.value : '', pass = passEl ? passEl.value : '';
+      var w = waitSecs();
+      if (w > 0) { showError('Too many attempts. Try again in ' + w + ' seconds.'); return; }
+      if (!normUser(user) || !pass) { showError('Enter your username and password.'); return; }
+      if (!hasCreds()) {
+        showError('No username and password is set up on this device yet. Sign in with Google, then add them under Security & Settings (the $ icon, top left).');
+        return;
+      }
+      if (!canHash()) { showError('Username sign-in needs a secure page (https or localhost). Use Google sign-in instead.'); return; }
+      busy = true;
+      if (btn) btn.disabled = true;
+      verifyCreds(user, pass).then(function(ok) {
+        busy = false;
+        if (btn) btn.disabled = false;
+        if (passEl) passEl.value = '';
+        if (ok) {
+          noteOk();
+          markAuthenticated('local');
+        } else {
+          noteFail();
+          var w2 = waitSecs();
+          showError(w2 > 0 ? 'Incorrect username or password. Try again in ' + w2 + ' seconds.' : 'Incorrect username or password.');
+        }
+      }, function() {
+        busy = false;
+        if (btn) btn.disabled = false;
+        showError('Could not check the credentials. Try again.');
+      });
+    });
+    var clear = function() { clearError(); };
+    var u = byId('auth-user'), p = byId('auth-pass');
+    if (u) u.addEventListener('input', clear);
+    if (p) p.addEventListener('input', clear);
+    /* nothing behind the modal should react to keys typed into it */
+    var modal = byId('auth-modal');
+    if (modal) modal.addEventListener('keydown', function(e) { e.stopPropagation(); });
+  }
 
   document.addEventListener('DOMContentLoaded', function() {
     var isAuth = false;
@@ -198,17 +409,16 @@
       isAuth = sessionStorage.getItem('user_authenticated') === 'true';
     } catch (e) {}
 
-    var modal = document.getElementById('auth-modal');
+    var modal = byId('auth-modal');
     if (modal) {
       if (isAuth) {
-        modal.classList.add('hidden');
-        modal.style.display = 'none';
-        modal.style.pointerEvents = 'none';
+        hideModal();
       } else {
         modal.classList.remove('hidden');
         modal.style.display = 'flex';
         modal.style.pointerEvents = 'auto';
-        renderGsi();
+        bindForm();
+        ensureGsi();
       }
     }
   });
@@ -216,7 +426,8 @@
   window.addEventListener('load', function() {
     try {
       if (sessionStorage.getItem('user_authenticated') !== 'true') {
-        renderGsi();
+        bindForm();
+        ensureGsi();
       }
     } catch (e) {}
   });
@@ -262,6 +473,11 @@ h3{font-size:14px;font-weight:700;letter-spacing:-.005em}
 .app{display:grid;grid-template-columns:var(--rail) minmax(0,1fr);min-height:100vh}
 .rail{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;align-items:center;gap:6px;padding:calc(18px + env(safe-area-inset-top,0px)) 0 16px max(0px,env(safe-area-inset-left,0px));border-right:1px solid var(--line);background:var(--bg);z-index:30}
 .logo{width:40px;height:40px;border-radius:14px;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font-weight:800;font-size:17px;margin-bottom:12px}
+button.logo{cursor:pointer;border:0;padding:0;font-family:inherit}
+button.logo:hover{filter:brightness(1.1)}
+#secbtn{display:none;font-weight:800;font-size:16px}
+.sec-row{display:flex;gap:10px;align-items:center;justify-content:space-between;border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:10px 0;background:var(--surface2)}
+.sec-row b{display:block;font-size:13.5px}.sec-row small{color:var(--muted);font-size:12px}
 .nav{display:flex;flex-direction:column;align-items:center;gap:3px;width:60px;padding:8px 0 6px;border-radius:16px;color:var(--muted);font-size:10.5px;font-weight:600}
 .nav svg{width:22px;height:22px}
 .nav:hover{background:var(--surface2)}
@@ -438,12 +654,18 @@ details.iss p{color:var(--muted);margin:8px 0 0 2px;font-size:13px}
   .app{grid-template-columns:minmax(0,1fr);padding-bottom:calc(66px + env(safe-area-inset-bottom,0px))}
   .rail{position:fixed;top:auto;bottom:0;left:0;right:0;height:auto;flex-direction:row;justify-content:space-around;padding:6px max(6px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(6px,env(safe-area-inset-left,0px));border-right:0;border-top:1px solid var(--line);z-index:70}
   .logo,.rail .sp{display:none}
+  #secbtn{display:inline-flex}
   .nav{width:auto;flex:1;font-size:10px;padding:6px 0 4px}
   .nav svg{width:20px;height:20px}
   .main{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
   .search{min-width:0}.search span,.search kbd{display:none}
   .kpi .val{font-size:24px}
   .bar{grid-template-columns:minmax(96px,1.4fr) minmax(24px,1fr) auto}
+  /* Scroll fix: the header block (title + tools + date chips) used to stay pinned, so only the lower half scrolled.
+     On phones the whole page now scrolls as one continuous surface. */
+  html,body{height:auto;min-height:100%;overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch}
+  .app{min-height:100vh;min-height:100dvh}
+  .top{position:static}
 }
 /* ---- v3 additions: velocity heatmap, burn rate, sync pill, backup banner ---- */
 .vh{display:grid;grid-template-columns:minmax(84px,1fr) repeat(5,minmax(40px,1fr)) minmax(64px,auto);gap:4px;align-items:center;font-size:12.5px}
@@ -1191,7 +1413,7 @@ function setupTop(){
   $('#ttl').textContent=S.view==='home'?(h<12?'Good morning':h<18?'Good afternoon':'Good evening')+', Isaiah':({spending:'Spending',reselling:'Reselling',inventory:'Stock',investing:'Investing',data:'Data & sync'})[S.view];
   $('#sub').textContent=S.view==='home'?new Date().toLocaleDateString('en-CA',{weekday:'long',month:'long',day:'numeric'})+' · '+store.source.name+', '+ago(store.syncedAt):SUBS[S.view];
   document.title='My Money';
-  $('#rail').innerHTML=`<div class="logo" aria-hidden="true">$</div>`+VIEW_NAMES.map(v=>`<button class="nav" data-act="go" data-v="${v}" ${S.view===v?'aria-current="page"':''}>${ICON[VIEW_ICON[v]]}<span>${VIEW_LABEL[v]}</span></button>`).join('')+'<span class="sp"></span>';
+  $('#rail').innerHTML=`<button type="button" class="logo" data-sec="open" aria-label="Security &amp; Settings" title="Security &amp; Settings">$</button>`+VIEW_NAMES.map(v=>`<button class="nav" data-act="go" data-v="${v}" ${S.view===v?'aria-current="page"':''}>${ICON[VIEW_ICON[v]]}<span>${VIEW_LABEL[v]}</span></button>`).join('')+'<span class="sp"></span>';
   $('#tools').innerHTML=`<button class="ibtn search" data-act="palette" aria-label="Search">${ICON.search}<span>Search</span><kbd>⌘K</kbd></button>
     <button class="ibtn" data-act="theme" aria-label="Theme: ${S.theme}" title="Theme: ${S.theme}">${ICON[S.theme==='dark'?'moon':S.theme==='light'?'sun':'auto']}</button>
     <button class="ibtn" data-act="privacy" aria-pressed="${S.privacy}" aria-label="Hide amounts" title="Hide amounts (P)">${S.privacy?ICON.eyeoff:ICON.eye}</button>
@@ -1435,8 +1657,16 @@ const fOf=k=>cur&&cur.f.find(x=>x.k===k);
 
 /* ---------- Data helpers (read from the site's own data, never modify it) ---------- */
 const unsold=kind=>{try{return store.D.items.filter(i=>i.kind===kind&&!i.sold).map(i=>({l:String(i.label||i.name),it:i}))}catch(e){return[]}};
-const cats=()=>{try{const m={};(store.raw.Expenses.rows||[]).forEach(r=>{const c=String(r['Category']||'').trim();if(c)m[c]=(m[c]||0)+1});
-  const a=Object.keys(m).filter(c=>m[c]>=3&&c!=='Other').sort((x,y)=>m[y]-m[x]);return a}catch(e){return[]}};
+/* Expense categories offered in the form. Names are written to the sheet's "Category" column exactly as shown here.
+   Existing names match the sheet's own spelling; spelling variants are merged through CAT_MAP so a duplicate never shows
+   (for example "Transportation & Vehicle" and the "Trasportation" typo both fold into "Transportation"). */
+const STD_CATS=['Food & Dining','Groceries','Transportation','Clothing & Apparel','Electronics & Tech','Entertainment & Leisure','Shopping','Personal Care','Health & Medical','Sports & Fitness','Hobbies & Interests','Gifts & Donations','School Expenses','Subscriptions','Utilities','Housing & Rent','Insurance','Travel','Fees & Banking'];
+const cats=()=>{try{const canon=c=>{const t=String(c||'').trim();return CAT_MAP[t.toLowerCase()]||t};
+  /* count case-insensitively so "groceries" and "Groceries" are one entry; show the most common spelling */
+  const m={},sp={};(store.raw.Expenses.rows||[]).forEach(r=>{const c=canon(r['Category']);if(!c)return;const k=c.toLowerCase();m[k]=(m[k]||0)+1;(sp[k]=sp[k]||{})[c]=(sp[k][c]||0)+1});
+  const used=Object.keys(m).filter(k=>m[k]>=3&&k!=='other').sort((x,y)=>m[y]-m[x]).map(k=>Object.keys(sp[k]).sort((a,b)=>sp[k][b]-sp[k][a])[0]);
+  const seen=new Set(used.map(c=>c.toLowerCase()));
+  return used.concat(STD_CATS.filter(c=>!seen.has(c.toLowerCase())))}catch(e){return STD_CATS.slice()}};
 const hist=()=>J('lg.hist',{});
 const sugList=kind=>{let ex=[];try{if(kind==='seller')ex=store.D.items.map(i=>i.seller);else if(kind==='est')ex=(store.raw.Expenses.rows||[]).map(r=>r['Establishment']).reverse()}catch(e){}
   return [...new Set([...(hist()[kind]||[]),...ex.filter(Boolean).map(s=>String(s).trim())])].slice(0,60)};
@@ -1472,8 +1702,9 @@ function menuScreen(){
   const url=LS.get('lgUrl'),q=qn();
   const status=url?(q?`<button class="chip-b" data-lg="settings"><i class="dot" style="background:var(--warn)"></i>${q} waiting to send</button>`:`<button class="chip-b" data-lg="settings"><i class="dot" style="background:var(--good)"></i>Connected to your sheet</button>`)
     :`<button class="chip-b" data-lg="settings"><i class="dot" style="background:var(--warn)"></i>Not connected: saving on this device${q?' ('+q+')':''}</button>`;
-  let n=0;
-  const groups=['Buying','Selling','Money'].map(g=>`<h4 class="lg-gh">${g}</h4><div class="list">${FORMS.filter(f=>f.g===g).map(f=>{n++;const d=J('lg.d.'+f.id,null);
+  /* order: Money (expense + investment), Buying, Selling, then the Tools section (margin calculator) at the bottom.
+     Dot colours follow each form's position in FORMS so they stay the same as before the reorder. */
+  const groups=['Money','Buying','Selling'].map(g=>`<h4 class="lg-gh">${g}</h4><div class="list">${FORMS.filter(f=>f.g===g).map(f=>{const n=FORMS.indexOf(f)+1;const d=J('lg.d.'+f.id,null);
     return `<button class="li" data-lg="open" data-id="${f.id}"><span class="ic"><i class="dot" style="background:var(--c${n})"></i></span><span class="tx"><b>${E(f.t)}</b><span>${E(f.s)}</span></span>${d&&d.v?'<span class="pill warn">Draft</span>':''}${chev()}</button>`}).join('')}</div>`).join('');
   return `<div class="lg-top"><div><h2>Log an entry</h2><p>Goes straight to your sheet</p></div><div class="lg-r"><button class="ibtn" data-lg="settings" aria-label="Sheet connection and queue">${ICO.cfg}</button>${xbtn()}</div></div>${status}${groups}<h4 class="lg-gh">Tools</h4><div class="list"><button class="li" data-lg="calc"><span class="tx"><b>Margin calculator</b><span>Work out a listing price from cost and target profit</span></span>${chev()}</button></div><div style="height:24px"></div>`;
 }
@@ -1754,6 +1985,63 @@ setTimeout(showBackupBanner,2500);
 const _flushOrig=flush;flush=function(silent){return LOCK.on?Promise.resolve(0):_flushOrig(silent)};
 window.__mmAfterUnlock=()=>{try{flush(true)}catch(e){}try{showBackupBanner()}catch(e){}};
 window.__mmShowSettings=()=>show(settingsScreen());
+
+/* ================= SECURITY & SETTINGS (opened from the "$" logo; additive, namespaced data-sec) =================
+   Sign-in status, optional username/password, the existing app passcode lock, sheet connection, sign out.
+   Reuses lockSettingsHtml(); the wrapper below keeps lkSave/lkOff re-rendering this panel instead of the log settings. */
+const _showLogSettings=window.__mmShowSettings;
+const secOpen=()=>!!$('#overlay [data-sec-root]');
+window.__mmShowSettings=function(){if(secOpen())renderSecurity();else _showLogSettings()};
+function secHtml(){
+  const A=window.mmAuth||{},m=A.method?A.method():'',has=!!(A.hasCreds&&A.hasCreds()),can=!!(A.canHash&&A.canHash()),user=has?A.savedUsername():'';
+  const who=m==='google'?'Signed in with Google':m==='local'?'Signed in with username'+(user?' “'+E(user)+'”':''):'Signed in';
+  const pw=!can?'<p class="hint" style="color:var(--muted)">Not available here. Username sign-in needs a secure page (https, localhost or a local file).</p>'
+   :`<p class="hint" style="color:var(--muted);margin-bottom:10px">${has?'Username sign-in is on for this device. Google sign-in still works too.':'Optional. Add a username and password so you can sign in without Google on this device.'} Credentials are stored on this device only, as a salted hash.</p>
+   <div class="lg-f"><label class="lg-l" for="sec-u">Username (3 or more characters)</label><input type="text" class="lg-set" id="sec-u" autocomplete="username" autocapitalize="none" spellcheck="false" value="${E(user)}"></div>
+   ${has?'<div class="lg-f"><label class="lg-l" for="sec-cur">Current password</label><input type="password" class="lg-set" id="sec-cur" autocomplete="current-password"></div>':''}
+   <div class="lg-f"><label class="lg-l" for="sec-n1">${has?'New password':'Password'} (8 or more characters)</label><input type="password" class="lg-set" id="sec-n1" autocomplete="new-password"></div>
+   <div class="lg-f"><label class="lg-l" for="sec-n2">Repeat password</label><input type="password" class="lg-set" id="sec-n2" autocomplete="new-password"></div>
+   <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-sec="save">${has?'Update username and password':'Save username and password'}</button>${has?'<button class="btn sec" data-sec="remove">Remove</button>':''}</div><p class="lg-st" id="sec-st" role="status"></p>`;
+  return `<div class="lg-top"><div><h2>Security &amp; Settings</h2><p>Sign-in, passcode and sheet connection</p></div><div class="lg-r">${xbtn()}</div></div>
+  <div data-sec-root class="sec-row"><div><b>${who}</b><small>Google access is limited to ${E(A.allowedEmail||'')}</small></div><button class="btn sec" data-sec="signout">Sign out</button></div>
+  <h3 style="margin:20px 0 4px">Username and password</h3>${pw}
+  ${lockSettingsHtml()}
+  <h3 style="margin:20px 0 4px">Sheet connection</h3>
+  <div class="sec-row"><div><b>Google Sheet and waiting entries</b><small>Connection link, test and send queue</small></div><button class="btn sec" data-sec="sheet">Open</button></div>
+  <div style="height:24px"></div>`;
+}
+function renderSecurity(){
+  const html=secHtml(),d=$('#overlay .drawer.lg');
+  if(d){d.innerHTML=html;d.scrollTop=0}
+  else openOverlay(`<div class="drawer lg" role="dialog" aria-modal="true" aria-label="Security and settings">${html}</div>`);
+}
+async function secSave(){
+  const st=$('#sec-st'),say=(m,bad)=>{if(st){st.className='lg-st '+(bad?'bad':'good');st.textContent=m}};
+  const A=window.mmAuth;if(!A)return say('Sign-in is not available on this page.',1);
+  const u=($('#sec-u')||{}).value||'',n1=($('#sec-n1')||{}).value||'',n2=($('#sec-n2')||{}).value||'',cur=($('#sec-cur')||{}).value||'';
+  if(n1!==n2)return say('The two passwords do not match.',1);
+  const r=await A.setCreds(u,n1,cur);
+  if(!r.ok)return say(r.msg,1);
+  renderSecurity();toast('Username and password saved');
+}
+async function secRemove(){
+  const st=$('#sec-st'),say=(m,bad)=>{if(st){st.className='lg-st '+(bad?'bad':'good');st.textContent=m}};
+  const A=window.mmAuth;if(!A)return;
+  const r=await A.clearCreds(($('#sec-cur')||{}).value||'');
+  if(!r.ok)return say(r.msg,1);
+  renderSecurity();toast('Username and password removed');
+}
+document.addEventListener('click',e=>{
+  const t=e.target.closest&&e.target.closest('[data-sec]');if(!t)return;
+  switch(t.dataset.sec){
+    case 'open':renderSecurity();break;
+    case 'save':secSave();break;
+    case 'remove':secRemove();break;
+    case 'sheet':_showLogSettings();break;
+    case 'signout':window.mmAuth&&window.mmAuth.signOut();break;
+  }
+});
+(()=>{const tl=$('#tools');if(tl&&tl.parentNode&&!$('#secbtn')){const b=document.createElement('button');b.type='button';b.id='secbtn';b.className='ibtn';b.dataset.sec='open';b.setAttribute('aria-label','Security & Settings');b.title='Security & Settings';b.textContent='$';tl.parentNode.insertBefore(b,tl)}})();
 
 setTimeout(()=>flush(true),2500);
 setInterval(()=>{if(qn()&&!document.hidden)flush(true)},60000);
