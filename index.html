@@ -1,4 +1,4 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><script src="https://accounts.google.com/gsi/client" async defer></script><script src="https://cdn.tailwindcss.com"></script><script>tailwind.config = { corePlugins: { preflight: false } };</script><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}/* ===== Log entry module (additive, prefix .lg-) ===== */
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><script src="https://accounts.google.com/gsi/client" async defer></script><script src="https://cdn.tailwindcss.com"></script><script>if(window.tailwind){tailwind.config = { corePlugins: { preflight: false } };}</script><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}/* ===== Log entry module (additive, prefix .lg-) ===== */
 .lg-fab{position:fixed;right:max(20px,env(safe-area-inset-right,0px));bottom:calc(24px + env(safe-area-inset-bottom,0px));z-index:65;width:52px;height:52px;border-radius:16px;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;box-shadow:0 8px 24px rgba(0,0,0,.22);transition:transform .15s ease}
 .lg-fab:hover{transform:translateY(-2px)}
 .lg-fab .lg-bd{position:absolute;top:-6px;right:-6px;min-width:20px;height:20px;padding:0 5px;border-radius:999px;background:var(--warn);color:#fff;font-size:11px;font-weight:800;display:grid;place-items:center;border:2px solid var(--bg)}
@@ -755,7 +755,7 @@ const diffD=(a,b)=>Math.round((sod(b)-sod(a))/DAY);
 const fd=d=>d?MO[d.getMonth()]+' '+d.getDate():'—';
 const fdy=d=>d?fd(d)+', '+d.getFullYear():'—';
 const dkey=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-const pd=v=>{if(!v)return null;const m=String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);return m?new Date(+m[1],+m[2]-1,+m[3]):null};
+const pd=v=>{if(!v)return null;const m=String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);if(!m)return null;const y=+m[1],mo=+m[2]-1,d=+m[3];if(y<1990||y>2100)return null;const dt=new Date(y,mo,d);return dt.getFullYear()===y&&dt.getMonth()===mo&&dt.getDate()===d?dt:null};
 const rel=d=>{if(!d)return'—';const n=diffD(d,TODAY);if(n===0)return'today';if(n===1)return'yesterday';if(n<0)return'in '+(-n)+' days';if(n<14)return n+' days ago';if(n<60)return Math.round(n/7)+' weeks ago';if(n<365)return Math.round(n/30)+' months ago';return (n/365).toFixed(1)+' years ago'};
 const sum=(a,f=x=>x)=>a.reduce((s,x)=>s+(f(x)||0),0);
 const avg=(a,f=x=>x)=>{const v=a.map(f).filter(x=>x!=null&&isFinite(x));return v.length?sum(v)/v.length:null};
@@ -808,9 +808,10 @@ function normalize(raw){
     const sold=String(r['Status']||'').trim().toUpperCase()==='SOLD';
     const rawCond=r['Condition'];const condition=canonCondition(rawCond);
     if(rawCond&&condition!==String(rawCond).trim())flag('fixed',sheet,rowN,'Condition',`Condition "${String(rawCond).trim()}" was standardised`,'Use the same dropdown wording');
+    const nn=(v,field)=>{const n=num(v);if(n<0){flag('warn',sheet,rowN,field,`Negative price "${v}" was treated as $0`,'Enter a positive dollar amount');return 0}return n};
     const it={id:'i'+items.length,kind:def.kind,name:def.name(r)||'Unnamed',label:r['Device Label']||r['Item Label']||null,condition,
-      buyPrice:num(r['Purchase Price']),buyDate:pd(r[def.buyDate]),seller:r[def.seller]||null,sold,status:sold?'SOLD':'IN INVENTORY',
-      sellPrice:num(r['Sale Price']),sellDate:pd(r['Sale Date']),buyer:r[def.buyer]||null,profit:null,roi:null,days:null,age:null,
+      buyPrice:nn(r['Purchase Price'],'Purchase Price'),buyDate:pd(r[def.buyDate]),seller:r[def.seller]||null,sold,status:sold?'SOLD':'IN INVENTORY',
+      sellPrice:nn(r['Sale Price'],'Sale Price'),sellDate:pd(r['Sale Date']),buyer:r[def.buyer]||null,profit:null,roi:null,days:null,age:null,
       clicks:num(r['Clicks on Listing']),notes:def.notes(r)||r['Notes (Sold)']||r['Sale Notes']||null,specs:{},row:rowN,sheet};
     if(def.kind==='Phone'){it.specs={Color:r['Color'],Storage:r['Storage (GB)'],'Original box':r['Original Box'],Case:r['Case'],Charger:r['Charger'],IMEI:r['IMEI']}}
     if(def.kind==='PC'){const ram=canonRam(r['RAM']);if(r['RAM']&&ram!==String(r['RAM']).trim())flag('fixed',sheet,rowN,'RAM',`RAM "${String(r['RAM']).trim()}" was standardised to ${ram}`,'Use values like 16GB');
@@ -861,7 +862,7 @@ function GoogleSheetSource(sheetId,tabs=TABS){
     }
     return out}};
 }
-function parseSheetId(s){const m=String(s).match(/\/d\/([a-zA-Z0-9_-]+)/);return m?m[1]:String(s).trim()}
+function parseSheetId(s){const str=String(s??'').trim(),m=str.match(/\/d\/([a-zA-Z0-9_-]+)/),id=m?m[1]:str;return /^[A-Za-z0-9_-]{20,}$/.test(id)?id:''}
 
 /* ================= STORE ================= */
 const store={raw:null,D:null,source:EmbeddedSource,syncedAt:null,
@@ -1085,7 +1086,7 @@ function fillTable(id){
       empty('No rows match',st.q?'Try a different search.':'Nothing here for the current filters.',`<button class="btn sec" data-act="clearall" data-t="${id}">Clear filters</button>`));
 }
 function tableCSV(id){
-  const cfg=TC[id],st=TS[id];const cols=cfg.cols.filter(c=>!st.hidden.has(c.k));const q=v=>{v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+  const cfg=TC[id],st=TS[id];const cols=cfg.cols.filter(c=>!st.hidden.has(c.k));const q=v=>{let s=typeof v==='string'?(v&&/^[=+\-@\t\r]/.test(v)?`'${v}`:v):v==null?'':String(v);return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s};
   return [cols.map(c=>q(c.h)).join(','),...tableRows(id).map(r=>cols.map(c=>q(c.csv?c.csv(r):(c.val?c.val(r):r[c.k]))).join(','))].join('\n');
 }
 
@@ -1439,7 +1440,7 @@ function cycleTheme(){S.theme=({auto:'light',light:'dark',dark:'auto'})[S.theme]
 function togglePrivacy(){S.privacy=!S.privacy;LS.set('privacy',S.privacy?'1':'0');document.body.classList.toggle('privacy',S.privacy);render();toast(S.privacy?'Amounts hidden':'Amounts shown')}
 function syncMsg(t){const n=$('#syncmsg');if(n)n.textContent=t;toast(t)}
 async function connectSheet(){
-  const id=parseSheetId($('#sheeturl').value);if(!id){toast('Paste a Google Sheet link or ID first');return}
+  const raw=($('#sheeturl').value||'').trim(),id=parseSheetId(raw);if(!id){toast(raw?'That does not look like a Google Sheet link or ID':'Paste a Google Sheet link or ID first');return}
   try{await store.load(GoogleSheetSource(id));LS.set('sheetId',id);toast('Connected. Showing live data')}
   catch(e){syncMsg(e&&e.message==='private'||/HTTP 40[13]/.test(e&&e.message||'')?'Google refused access. Share the sheet as "Anyone with the link can view" and try again.':'This page cannot reach Google from here. Live sync works when My Money opens as its own web page or file.')}
 }
@@ -1586,7 +1587,7 @@ async function lkOff(){
     applyTheme();document.body.classList.toggle('privacy',S.privacy);
     const h=location.hash.slice(1);if(VIEW_NAMES.includes(h))S.view=h;
     store.set(MM_RAW,EmbeddedSource);
-    const sid=LS.get('sheetId');if(sid)store.load(GoogleSheetSource(sid)).catch(()=>toast('Could not reach your Google Sheet. Showing the saved snapshot.'));
+    const sid=parseSheetId(LS.get('sheetId')||'');if(sid)store.load(GoogleSheetSource(sid)).catch(()=>toast('Could not reach your Google Sheet. Showing the saved snapshot.'));
     setInterval(()=>{if(store.source.kind==='google'&&!document.hidden)store.load(store.source).catch(()=>{})},300000);
   }catch(err){
     console.error(err);$('#view').innerHTML=`<div class="card"><div class="empty"><b>Something went wrong loading My Money</b>${esc(err.message||err)}<div style="margin-top:12px"><button class="btn" onclick="location.reload()">Reload</button></div></div></div>`;
@@ -1597,11 +1598,11 @@ async function lkOff(){
 /* ===== LOG ENTRY MODULE (additive). To uninstall, delete this block and the .lg- CSS block. ===== */
 (function logModule(){
 try{
-const APPS_SCRIPT="// My Money entry receiver. Paste into Extensions > Apps Script, then Deploy > New deployment > Web app.\n// Execute as: Me. Who has access: Anyone.\nconst SECRET = ''; // optional: set a word here and the same word in My Money > Log > Sheet connection\n\n// Only these tabs can ever be written to (matched ignoring case and spaces). Summary, Master Inventory and the other formula tabs are NOT listed, so they can never be touched.\nconst ALLOWED_TABS = ['Form Responses - Bought', 'Form Responses - PCs', 'Bought Access - Form', 'Form Responses - Sold', 'Form Responses - Sold PCs', 'Sold Access - Form', 'Expenses', 'Investment Tracking Sheet'];\n\nfunction json(obj) {\n  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);\n}\n\nfunction doGet() {\n  return json({ ok: true, service: 'my-money-entry' });\n}\n\nfunction seenId(id) {\n  if (!id) return false;\n  const cache = CacheService.getScriptCache();\n  if (cache.get('id:' + id)) return true;\n  try {\n    const map = JSON.parse(PropertiesService.getScriptProperties().getProperty('SEEN_IDS') || '{}');\n    if (map[id]) { cache.put('id:' + id, '1', 21600); return true; }\n  } catch (e) {}\n  return false;\n}\n\nfunction markId(id) {\n  if (!id) return;\n  CacheService.getScriptCache().put('id:' + id, '1', 21600);\n  const props = PropertiesService.getScriptProperties();\n  let map = {};\n  try { map = JSON.parse(props.getProperty('SEEN_IDS') || '{}') || {}; } catch (e) {}\n  const now = Date.now();\n  map[id] = now;\n  let entries = Object.keys(map).map(k => [k, map[k]]).filter(p => p[1] >= now - 30 * 86400000);\n  if (entries.length > 200) { entries.sort((a, b) => b[1] - a[1]); entries = entries.slice(0, 200); }\n  const out = {};\n  entries.forEach(p => { out[p[0]] = p[1]; });\n  props.setProperty('SEEN_IDS', JSON.stringify(out));\n}\n\nfunction doPost(e) {\n  const lock = LockService.getScriptLock();\n  try {\n    lock.waitLock(20000);\n    const body = JSON.parse(e.postData.contents || '{}');\n    if (SECRET && body.secret !== SECRET) return json({ ok: false, error: 'auth' });\n\n    // Ignore retries of an entry that already landed\n    if (seenId(body.id)) return json({ ok: true, dup: true });\n\n    // Find the tab (ignores case and trailing spaces)\n    const ss = SpreadsheetApp.getActiveSpreadsheet();\n    const reqTab = String(body.tab || '').trim().toLowerCase();\n    if (!ALLOWED_TABS.some(t => t.toLowerCase() === reqTab)) return json({ ok: false, error: 'tab not allowed: ' + body.tab });\n    const sheet = ss.getSheets().find(s => s.getName().trim().toLowerCase() === reqTab);\n    if (!sheet) return json({ ok: false, error: 'no tab: ' + body.tab });\n\n    // Match incoming field names to column headers\n    const norm = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');\n    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn() || 1).getValues()[0].map(norm);\n    const inVals = body.values || {};\n    const matchedCols = {}, matchedKeys = new Set();\n\n    headers.forEach((h, idx) => {\n      if (h === 'timestamp') {\n        matchedCols[idx + 1] = new Date();\n      } else {\n        const k = Object.keys(inVals).find(key => norm(key) === h);\n        if (k !== undefined) {\n          matchedKeys.add(k);\n          let v = inVals[k];\n          if (v && typeof v === 'object' && v.$date) {\n            const [y, m, d] = v.$date.split('-').map(Number);\n            v = new Date(y, m - 1, d);\n          }\n          matchedCols[idx + 1] = v;\n        }\n      }\n    });\n    const unmatched = Object.keys(inVals).filter(k => !matchedKeys.has(k));\n\n    // Next free row, judged only by the columns we write (formula columns are left alone)\n    const cols = Object.keys(matchedCols).map(Number);\n    let targetRow = 2;\n    const maxRows = sheet.getMaxRows();\n    if (maxRows > 1 && cols.length > 0) {\n      const data = sheet.getRange(2, 1, maxRows - 1, sheet.getLastColumn()).getValues();\n      for (let r = data.length - 1; r >= 0; r--) {\n        if (cols.some(c => data[r][c - 1] !== '')) {\n          targetRow = r + 3;\n          break;\n        }\n      }\n    }\n\n    // Safety: never overwrite anything. Refuse if any target cell already holds a value or a formula.\n    if (targetRow <= maxRows) {\n      const clash = cols.some(c => { const cell = sheet.getRange(targetRow, c); return cell.getFormula() !== '' || cell.getValue() !== ''; });\n      if (clash) return json({ ok: false, error: 'target row not empty' });\n    }\n\n    // Write only the cells we have values for\n    if (targetRow > maxRows) sheet.insertRowsAfter(maxRows, targetRow - maxRows);\n    cols.forEach(c => sheet.getRange(targetRow, c).setValue(matchedCols[c]));\n\n    markId(body.id);\n    return json({ ok: true, row: targetRow, unmatched });\n  } catch (err) {\n    return json({ ok: false, error: String(err) });\n  } finally {\n    lock.releaseLock();\n  }\n}\n";
+const APPS_SCRIPT="// My Money entry receiver. Paste into Extensions > Apps Script, then Deploy > New deployment > Web app.\n// Execute as: Me. Who has access: Anyone.\nconst SECRET = ''; // optional: set a word here and the same word in My Money > Log > Sheet connection\n\n// Only these tabs can ever be written to (matched ignoring case and spaces). Summary, Master Inventory and the other formula tabs are NOT listed, so they can never be touched.\nconst ALLOWED_TABS = ['Form Responses - Bought', 'Form Responses - PCs', 'Bought Access - Form', 'Form Responses - Sold', 'Form Responses - Sold PCs', 'Sold Access - Form', 'Expenses', 'Investment Tracking Sheet'];\n\nfunction json(obj) {\n  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);\n}\n\nfunction doGet() {\n  return json({ ok: true, service: 'my-money-entry' });\n}\n\nfunction seenId(id) {\n  if (!id) return false;\n  const cache = CacheService.getScriptCache();\n  if (cache.get('id:' + id)) return true;\n  try {\n    const map = JSON.parse(PropertiesService.getScriptProperties().getProperty('SEEN_IDS') || '{}');\n    if (map[id]) { cache.put('id:' + id, '1', 21600); return true; }\n  } catch (e) {}\n  return false;\n}\n\nfunction markId(id) {\n  if (!id) return;\n  CacheService.getScriptCache().put('id:' + id, '1', 21600);\n  const props = PropertiesService.getScriptProperties();\n  let map = {};\n  try { map = JSON.parse(props.getProperty('SEEN_IDS') || '{}') || {}; } catch (e) {}\n  const now = Date.now();\n  map[id] = now;\n  let entries = Object.keys(map).map(k => [k, map[k]]).filter(p => p[1] >= now - 30 * 86400000);\n  if (entries.length > 200) { entries.sort((a, b) => b[1] - a[1]); entries = entries.slice(0, 200); }\n  const out = {};\n  entries.forEach(p => { out[p[0]] = p[1]; });\n  props.setProperty('SEEN_IDS', JSON.stringify(out));\n}\n\nfunction doPost(e) {\n  const lock = LockService.getScriptLock();\n  try {\n    lock.waitLock(20000);\n    const body = JSON.parse(e.postData.contents || '{}');\n    if (SECRET && body.secret !== SECRET) return json({ ok: false, error: 'auth' });\n\n    // Ignore retries of an entry that already landed\n    if (seenId(body.id)) return json({ ok: true, dup: true });\n\n    // Find the tab (ignores case and trailing spaces)\n    const ss = SpreadsheetApp.getActiveSpreadsheet();\n    const reqTab = String(body.tab || '').trim().toLowerCase();\n    if (!ALLOWED_TABS.some(t => t.toLowerCase() === reqTab)) return json({ ok: false, error: 'tab not allowed: ' + body.tab });\n    const sheet = ss.getSheets().find(s => s.getName().trim().toLowerCase() === reqTab);\n    if (!sheet) return json({ ok: false, error: 'no tab: ' + body.tab });\n\n    // Match incoming field names to column headers\n    const norm = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');\n    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn() || 1).getValues()[0].map(norm);\n    const inVals = body.values || {};\n    const matchedCols = {}, matchedKeys = new Set();\n\n    headers.forEach((h, idx) => {\n      if (h === 'timestamp') {\n        matchedCols[idx + 1] = new Date();\n      } else {\n        const k = Object.keys(inVals).find(key => norm(key) === h);\n        if (k !== undefined) {\n          matchedKeys.add(k);\n          let v = inVals[k];\n          if (v && typeof v === 'object' && v.$date) {\n            const [y, m, d] = v.$date.split('-').map(Number);\n            v = new Date(y, m - 1, d);\n          }\n          matchedCols[idx + 1] = v;\n        }\n      }\n    });\n    const unmatched = Object.keys(inVals).filter(k => !matchedKeys.has(k));\n\n    // Next free row, judged only by the columns we write (formula columns are left alone)\n    const cols = Object.keys(matchedCols).map(Number);\n    let targetRow = 2;\n    const maxRows = sheet.getMaxRows();\n    if (maxRows > 1 && cols.length > 0) {\n      const data = sheet.getRange(2, 1, maxRows - 1, sheet.getLastColumn()).getValues();\n      for (let r = data.length - 1; r >= 0; r--) {\n        if (cols.some(c => data[r][c - 1] !== '')) {\n          targetRow = r + 3;\n          break;\n        }\n      }\n    }\n\n    // Safety: never overwrite anything. Refuse if any target cell already holds a value or a formula.\n    if (targetRow <= maxRows) {\n      const clash = cols.some(c => { const cell = sheet.getRange(targetRow, c); return cell.getFormula() !== '' || cell.getValue() !== ''; });\n      if (clash) return json({ ok: false, error: 'target row not empty' });\n    }\n\n    // Write only the cells we have values for\n    if (targetRow > maxRows) sheet.insertRowsAfter(maxRows, targetRow - maxRows);\n    cols.forEach(c => {\n      const cell = sheet.getRange(targetRow, c);\n      const v = matchedCols[c];\n      // Text that starts like a formula (= + - @) is stored as plain text so it can never run as a formula\n      if (typeof v === 'string' && v.length && ('=+-@'.indexOf(v.charAt(0)) !== -1 || v.charCodeAt(0) === 9 || v.charCodeAt(0) === 13)) cell.setNumberFormat('@');\n      cell.setValue(v);\n    });\n\n    markId(body.id);\n    return json({ ok: true, row: targetRow, unmatched });\n  } catch (err) {\n    return json({ ok: false, error: String(err) });\n  } finally {\n    lock.releaseLock();\n  }\n}\n";
 const pad=n=>String(n).padStart(2,'0');
 const iso=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
 const dayISO=n=>{const d=new Date();d.setDate(d.getDate()-n);return iso(d)};
-const J=(k,d)=>{try{const v=LS.get(k);return v?JSON.parse(v):d}catch(e){return d}};
+const J=(k,d)=>{try{const v=LS.get(k);if(!v)return d;const r=JSON.parse(v);if(d!==null&&typeof d==='object'){const isArr=Array.isArray(d);return r!==null&&typeof r==='object'&&(Array.isArray(r)===isArr&&(!isArr?r.constructor===Object||Object.getPrototypeOf(r)===Object.prototype:true))?r:d}return r}catch(e){return d}};
 const W=(k,v)=>LS.set(k,JSON.stringify(v));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 const E=esc;
@@ -1754,7 +1755,7 @@ const meaningful=()=>cur&&Object.keys(V).some(k=>{const x=fOf(k.replace(/#$/,'')
 function saveDraft(){clearTimeout(saveT);saveT=setTimeout(()=>{if(!cur)return;if(meaningful())W(dKey(cur.id),{v:V,ts:Date.now()});else LS.set(dKey(cur.id),'')},300)}
 function openForm(id,rep){
   cur=BY[id];V={};let ts=0;const d=J(dKey(id),null);
-  if(!rep&&d&&d.v){V=d.v;ts=d.ts||Date.now()}
+  if(!rep&&d&&d.v&&typeof d.v==='object'&&!Array.isArray(d.v)){V=d.v;ts=+d.ts||Date.now()}
   else if(rep){const l=J('lg.last.'+id,{});cur.f.forEach(x=>{if(x.c&&l[x.k]!=null)V[x.k]=l[x.k];if(l[x.k+'#'])V[x.k+'#']=l[x.k+'#']})}
   cur.f.forEach(x=>{if(x.t==='date'&&!V[x.k])V[x.k]=dayISO(0)});
   show(formScreen(cur,ts));setTimeout(()=>{ctx();imeiWarn()},0);
@@ -1815,8 +1816,8 @@ function validate(f){let first=null;
   f.f.forEach(x=>{const s=getVal(x);let m='';
     if(!s){if(x.r)m='Required'}
     else if(x.t==='money'||x.t==='pct'||x.t==='int'){const n=numOf(s);
-      if(n==null)m='Enter a number';else if(n<0&&!x.neg)m="Can't be negative";else if(x.t==='int'&&!Number.isInteger(n))m='Whole number please'}
-    else if(x.t==='date'&&!/^\d{4}-\d{2}-\d{2}$/.test(s))m='Pick a date';
+      if(n==null)m='Enter a number';else if(Math.abs(n)>1000000000)m='That number is too large';else if(n<0&&!x.neg)m="Can't be negative";else if(x.t==='int'&&!Number.isInteger(n))m='Whole number please'}
+    else if(x.t==='date'&&(!/^\d{4}-\d{2}-\d{2}$/.test(s)||pd(s)===null))m=!/^\d{4}-\d{2}-\d{2}$/.test(s)?'Pick a date':'Pick a real date between 1990 and 2100';
     setErr(x.k,m);if(m&&!first)first=x.k});
   if(first){const w=$$('.lg-f').find(e=>e.dataset.f===first);w&&w.scrollIntoView({block:'center',behavior:'smooth'});if(!$('#toasts .toast'))toast('Check the highlighted fields')}
   return !first}
@@ -1847,16 +1848,17 @@ async function submit(){
   busy=true;const btn=$('[data-lg="submit"]');if(btn){btn.disabled=true;btn.textContent='Sending…'}
   let st='queued',err='';
   if(LS.get('lgUrl')&&navigator.onLine!==false){try{const r=await send(item);st=r.unverified?'unsure':'sent'}catch(e){if(e&&e.fatal){err=e.message;item.err=err}}}
-  if(st==='queued'){const q=J('lg.q',[]);q.push(item);W('lg.q',q)}
+  let saved=true;if(st==='queued'){const q=J('lg.q',[]);q.push(item);saved=W('lg.q',q)}
   clearTimeout(saveT);remember(f);LS.set(dKey(f.id),'');busy=false;bumpChanges();badge();setTimeout(showBackupBanner,600);
   if(st!=='queued')afterSend();
   const ok=st==='sent',w=st!=='sent';
-  const msg=st==='sent'?`Added to the “${E(f.tab)}” tab.`
+  const msg=st==='queued'&&!saved?'NOT saved: this device is out of storage. Copy the details you typed before closing, then free some space (Settings, Copy as JSON).'
+   :st==='sent'?`Added to the “${E(f.tab)}” tab.`
    :st==='unsure'?'Sent to Google, but the reply could not be read. Glance at the sheet to confirm it landed.'
    :err?`The sheet script said: ${E(err)}. The entry is saved in your queue so nothing is lost.`
    :!LS.get('lgUrl')?'Saved on this device. Connect your sheet in settings and it will send itself.'
    :'Saved on this device. It will send automatically when this page can reach Google.';
-  show(`<div class="lg-top"><span></span>${xbtn()}</div><div class="lg-done"><div class="ok ${w?'w':''}">${ok?'✓':st==='unsure'?'✓':'•'}</div><h2>${st==='queued'?'Saved':'Logged'}</h2><p>${msg}</p>
+  show(`<div class="lg-top"><span></span>${xbtn()}</div><div class="lg-done"><div class="ok ${w?'w':''}">${ok?'✓':st==='unsure'?'✓':'•'}</div><h2>${st==='queued'?(saved?'Saved':'Not saved'):'Logged'}</h2><p>${msg}</p>
    <div class="row"><button class="btn" data-lg="again" data-id="${f.id}">Add another</button><button class="btn sec" data-lg="menu">All forms</button>${st==='queued'?'<button class="btn sec" data-lg="settings">Connection</button>':''}</div></div>`);
 }
 
