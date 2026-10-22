@@ -685,16 +685,38 @@ details.iss p{color:var(--muted);margin:8px 0 0 2px;font-size:13px}
 .bk-banner button{font:inherit;font-weight:600;border-radius:999px;padding:6px 14px;cursor:pointer;border:1px solid var(--line);background:var(--accent-soft);color:var(--ink)}
 .bk-banner button[data-bk=dl]{background:var(--accent);color:var(--accent-ink);border-color:transparent}
 @media (max-width:599.98px){.bk-banner{right:16px;max-width:none}}
-/* ---- App lock ---- */
-body.locked>*:not(#lockscr){visibility:hidden}
-#lockscr{position:fixed;inset:0;z-index:3000;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px;padding-bottom:calc(24px + env(safe-area-inset-bottom,0px))}
-.lk-card{width:min(360px,100%);background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:28px 24px;text-align:center;display:flex;flex-direction:column;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,.12)}
-.lk-logo{width:44px;height:44px;border-radius:14px;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font-weight:800;font-size:22px;margin:0 auto 4px}
-.lk-card h2{margin:0;font-size:20px}.lk-sub{margin:0;color:var(--muted);font-size:13.5px}
-.lk-in{width:100%;height:46px;font-size:16px;text-align:center;letter-spacing:.12em;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:12px;padding:0 12px}
-.lk-in:focus{outline:2px solid var(--accent);outline-offset:1px}
-.lk-err{margin:0;color:var(--bad);font-size:13px;font-weight:600}
-.lk-card .btn{height:44px;font-size:15px}.lk-card .btn:disabled{opacity:.6}
+/* ---- Data & sync (redesign) ---- */
+.dh-wrap{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
+.dh-ring{position:relative;width:116px;height:116px;flex:none}
+.dh-ring svg{width:100%;height:100%;display:block;overflow:visible}
+.dh-arc{stroke-dasharray:var(--dh-c);stroke-dashoffset:var(--dh-o);animation:dh-draw .9s ease-out}
+.dh-arc.still{animation:none}
+@keyframes dh-draw{from{stroke-dashoffset:var(--dh-c)}to{stroke-dashoffset:var(--dh-o)}}
+.dh-score{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1}
+.dh-score b{font-size:32px;font-weight:800;letter-spacing:-.03em}
+.dh-of{font-size:11px;color:var(--faint);margin-top:3px}
+.dh-side{display:flex;flex-direction:column;gap:12px;flex:1;min-width:190px}
+.dh-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.dh-title{font-size:16px;font-weight:800;letter-spacing:-.01em}
+.dh-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.dh-stat{background:var(--surface2);border-radius:12px;padding:8px 10px;min-width:0}
+.dh-n{font-size:20px;font-weight:800;letter-spacing:-.02em;line-height:1.2}
+.dh-l{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dh-stat.warn .dh-n{color:var(--warn)}
+.dh-stat.good .dh-n{color:var(--good)}
+.dh-rows{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:8px}
+.dh-row{background:var(--surface2);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;gap:1px;min-width:0}
+.dh-row b{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.2}
+.dh-row span{font-weight:600}
+.dh-row small{color:var(--faint);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dh-status{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.dh-chip{display:inline-flex;align-items:center;gap:7px;background:var(--surface2);color:var(--muted);border:1px solid transparent;border-radius:999px;padding:5px 12px;font-size:12.5px;font-weight:600}
+.dh-chip i{width:8px;height:8px;border-radius:50%;background:currentColor;flex:none}
+.dh-chip.good{background:var(--good-soft);color:var(--good)}
+.dh-chip.warn{background:var(--warn-soft);color:var(--warn)}
+button.dh-chip{cursor:pointer}
+button.dh-chip:hover{border-color:var(--accent)}
+@media (prefers-reduced-motion:reduce){.dh-arc{animation:none}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 @media print{.rail,.top .tools,.rangebar .chips,.toolbar{display:none}.card{box-shadow:none;break-inside:avoid}.app{display:block}.top{position:static}}
 </style>
@@ -727,7 +749,6 @@ if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostnam
 /* ================= UTILITIES ================= */
 const $=(s,r=document)=>r.querySelector(s);
 const $$=(s,r=document)=>[...r.querySelectorAll(s)];
-var LOCK={on:false};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const LS=(()=>{let lastToast=0;
   const evict=()=>{const rm=[];try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith('mm.')){const b=k.slice(3);if(b.startsWith('lg.d.')||b==='lg.hist'||b.startsWith('lg.last.'))rm.push(k)}}}catch(e){}
@@ -1385,16 +1406,34 @@ function vInvesting(){
   }};
 }
 
+/* Data health ring: SVG so the arc can animate; same score and colours as before. */
+function dhHtml(score,col,warn,info,fixed){
+  const s=Math.max(0,Math.min(100,Math.round(score))),C=2*Math.PI*42,off=C*(1-s/100);
+  const tone=s>=90?'good':s>=70?'warn':'bad',still=window.__dhScore===s;window.__dhScore=s;
+  return `<div class="dh-wrap">
+    <div class="dh-ring"><svg viewBox="0 0 100 100" role="img" aria-label="Data health score ${s} out of 100">
+      <circle cx="50" cy="50" r="42" fill="none" stroke="var(--surface2)" stroke-width="9"/>
+      <circle class="dh-arc${still?' still':''}" cx="50" cy="50" r="42" fill="none" stroke="${col}" stroke-width="9" stroke-linecap="round" transform="rotate(-90 50 50)" style="--dh-c:${C.toFixed(2)};--dh-o:${off.toFixed(2)}"/>
+    </svg><div class="dh-score"><b>${s}</b><span class="dh-of">/100</span></div></div>
+    <div class="dh-side">
+      <div class="dh-head"><span class="dh-title">${s>=90?'Looks healthy':s>=70?'A few things to tidy':'Needs attention'}</span><span class="pill ${tone}">${s>=90?'Healthy':s>=70?'Tidy up':'Attention'}</span></div>
+      <div class="dh-stats">
+        <div class="dh-stat${warn>0?' warn':''}"><div class="dh-n">${warn}</div><div class="dh-l">To fix</div></div>
+        <div class="dh-stat"><div class="dh-n">${info}</div><div class="dh-l">Notes</div></div>
+        <div class="dh-stat${fixed>0?' good':''}"><div class="dh-n">${fixed}</div><div class="dh-l">Auto-cleaned</div></div>
+      </div>
+    </div></div>`}
 function vData(){
   const D=store.D,src=store.source;
   const warn=sum(D.issues.filter(x=>x.sev==='warn'),x=>x.rows.length),info=sum(D.issues.filter(x=>x.sev==='info'),x=>x.rows.length);
   const score=Math.max(0,Math.round(100-warn*3-info*.15));const col=score>=90?'var(--good)':score>=70?'var(--warn)':'var(--bad)';
   const bySheet=[...groupBy(D.issues,x=>x.sheet).entries()];
+  const dhQ=(()=>{try{const a=JSON.parse(LS.get('lg.q')||'[]');return Array.isArray(a)?a.length:0}catch(e){return 0}})();
   const html=`<div class="grid g2">
-    ${card('Data health',`<div class="health"><div class="ring" style="background:conic-gradient(${col} ${score}%,var(--surface2) 0)"><span style="background:var(--surface);width:66px;height:66px;border-radius:50%;display:grid;place-items:center">${score}</span></div><div><b>${score>=90?'Looks healthy':score>=70?'A few things to tidy':'Needs attention'}</b><p class="hint">${plural(warn,'problem')} to fix · ${plural(info,'note')} · ${plural(sum(D.issues.filter(x=>x.sev==='fixed'),x=>x.rows.length),'value')} cleaned up automatically</p></div></div>`)}
-    ${card('Rows loaded',`<div class="list">${Object.entries(D.counts).map(([k,v])=>`<div class="li"><span class="tx"><b>${k}</b><span>${esc(TABS[k])}</span></span><span class="rt">${v}</span></div>`).join('')}</div>`)}
+    ${card('Data health',dhHtml(score,col,warn,info,sum(D.issues.filter(x=>x.sev==='fixed'),x=>x.rows.length)))}
+    ${card('Rows loaded',`<div class="dh-rows">${Object.entries(D.counts).map(([k,v])=>`<div class="dh-row"><b>${v}</b><span>${k}</span><small>${esc(TABS[k])}</small></div>`).join('')}</div>`)}
   </div>
-  ${card('Data source',`<div class="list"><div class="li"><span class="tx"><b>${esc(src.name)}</b><span>Last loaded ${ago(store.syncedAt)}</span></span><span class="pill ${src.kind==='google'?'good':''}">${src.kind==='google'?'Live':'Snapshot'}</span></div></div>
+  ${card('Data source',`<div class="dh-status"><span class="dh-chip ${src.kind==='google'?'good':''}"><i></i>${esc(src.name)} · ${src.kind==='google'?'Live':'Snapshot'}</span><span class="dh-chip"><i></i>Last loaded ${ago(store.syncedAt)}</span><button type="button" class="dh-chip ${dhQ?'warn':''}" data-lg="settings"><i></i>${dhQ?dhQ+' waiting to send':'Nothing waiting to send'}</button></div>
     <p class="hint" style="margin:10px 0">Every screen reads one normalised copy of your sheet, so a new source only has to return the same rows.</p>
     <div class="sheet-form"><input type="text" id="sheeturl" placeholder="Paste a Google Sheet link or ID" value="${esc(src.sheetId||'')}" aria-label="Google Sheet link or ID"><button class="btn" data-act="connect">Connect</button><button class="btn sec" data-act="useemb">Use snapshot</button><button class="btn sec" data-act="refresh">${ICON.refresh.replace('<svg','<svg width="16" height="16" style="vertical-align:-3px;margin-right:6px"')}Refresh</button></div>
     <p class="note" id="syncmsg" style="margin-top:10px">The sheet must be shared as "Anyone with the link can view". Live sync works when My Money opens as its own web page. Inside Claude the page cannot reach Google, so ask Claude to refresh the snapshot there.</p>
@@ -1426,7 +1465,7 @@ function setupTop(){
   }else{rb.hidden=true;rb.innerHTML=''}
 }
 function render(){
-  if(LOCK.on||!store.D)return;
+  if(!store.D)return;
   const y=window.scrollY;destroyCharts();setupTop();
   const v=VIEWS[S.view]();$('#view').innerHTML=v.html;
   $$('[data-tbl]').forEach(el=>fillTable(el.dataset.tbl));
@@ -1478,7 +1517,7 @@ document.addEventListener('click',e=>{
     case 'connect':connectSheet();break;
     case 'useemb':{LS.set('sheetId','');store.load(EmbeddedSource).then(()=>toast('Using the embedded snapshot'));break}
     case 'refresh':store.load(store.source).then(()=>toast('Refreshed')).catch(()=>syncMsg('Could not refresh. Check the connection and sharing settings.'));break;
-    case 'copysnap':copyText(JSON.stringify(store.raw),'Snapshot copied');break;
+    case 'copysnap':copyText(JSON.stringify(store.base||store.raw),'Snapshot copied');break;
   }
 });
 document.addEventListener('keydown',e=>{
@@ -1504,80 +1543,8 @@ document.addEventListener('change',e=>{if(e.target.id==='cs'||e.target.id==='ce'
 window.addEventListener('hashchange',()=>{const v=location.hash.slice(1);if(VIEW_NAMES.includes(v)&&v!==S.view){S.view=v;render();window.scrollTo(0,0)}});
 matchMedia('(prefers-color-scheme:dark)').addEventListener&&matchMedia('(prefers-color-scheme:dark)').addEventListener('change',()=>{if(S.theme==='auto')render()});
 
-/* ================= APP LOCK =================
-   A screen lock: the passcode is stored only as a salted PBKDF2 hash in this browser. It hides the dashboard
-   on this device and pauses rendering and background sending while locked. It is not encryption of the page file. */
-const lkEnc=new TextEncoder();
-const lkB64=a=>btoa(String.fromCharCode(...new Uint8Array(a)));
-const lkUn=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
-const lkOK=()=>!!(window.crypto&&crypto.subtle&&window.isSecureContext!==false);
-const lkN=k=>{const n=parseInt(LS.get(k)||'0',10);return isNaN(n)?0:n};
-async function lkHash(pin,salt,it){const k=await crypto.subtle.importKey('raw',lkEnc.encode(pin),'PBKDF2',false,['deriveBits']);
-  return new Uint8Array(await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt,iterations:it},k,256))}
-const lkRec=()=>{try{const v=LS.get('lock.v');return v?JSON.parse(v):null}catch(e){return null}};
-const lkHas=()=>{const r=lkRec();return !!(r&&r.h&&r.s)};
-function lkEq(a,b){if(a.length!==b.length)return false;let d=0;for(let i=0;i<a.length;i++)d|=a[i]^b[i];return d===0}
-async function lkCheck(pin){const r=lkRec();if(!r)return true;return lkEq(await lkHash(pin,lkUn(r.s),r.i||150000),lkUn(r.h))}
-async function lkSet(pin){const salt=crypto.getRandomValues(new Uint8Array(16)),it=150000;const h=await lkHash(pin,salt,it);
-  return LS.set('lock.v',JSON.stringify({s:lkB64(salt),h:lkB64(h),i:it}))}
-function lkFail(){const f=lkN('lock.f')+1;LS.set('lock.f',String(f));if(f>=5)LS.set('lock.u',String(Date.now()+Math.min(900,30*Math.pow(2,f-5))*1000))}
-const lkWait=()=>Math.max(0,Math.ceil((lkN('lock.u')-Date.now())/1000));
-function lkBuild(){
-  if($('#lockscr'))return;const d=document.createElement('div');d.id='lockscr';d.setAttribute('role','dialog');d.setAttribute('aria-modal','true');d.setAttribute('aria-label','My Money is locked');
-  d.innerHTML='<form class="lk-card" autocomplete="off"><div class="lk-logo" aria-hidden="true">$</div><h2>My Money</h2><p class="lk-sub">Enter your passcode to unlock</p><input type="password" id="lk-in" class="lk-in" autocomplete="current-password" aria-label="Passcode"><p class="lk-err" id="lk-err" role="alert" hidden></p><button class="btn" type="submit" id="lk-go">Unlock</button></form>';
-  document.body.appendChild(d);
-  let lkBusy=false;
-  d.querySelector('form').addEventListener('submit',async e=>{e.preventDefault();if(lkBusy)return;
-    const inp=$('#lk-in'),err=$('#lk-err'),go=$('#lk-go');const say=m=>{err.textContent=m;err.hidden=!m};
-    const w=lkWait();if(w>0){say('Too many tries. Wait '+w+' seconds.');return}
-    if(!lkOK()){say('This page cannot verify passcodes here. Open it from where you set the lock.');return}
-    lkBusy=true;go.disabled=true;let ok=false;try{ok=await lkCheck(inp.value)}catch(x){say('Could not check the passcode. Try again.');go.disabled=false;lkBusy=false;return}
-    go.disabled=false;lkBusy=false;
-    if(ok){LS.set('lock.f','0');LS.set('lock.u','0');lkOpen()}
-    else{lkFail();inp.value='';const w2=lkWait();say(w2>0?'Wrong passcode. Wait '+w2+' seconds.':'Wrong passcode.');inp.focus()}});
-}
-function lkOpen(){LOCK.on=false;try{sessionStorage.setItem('mm.unlocked','1')}catch(e){}
-  document.body.classList.remove('locked');const d=$('#lockscr');d&&d.remove();
-  try{render()}catch(e){console.error(e)}try{window.__mmAfterUnlock&&window.__mmAfterUnlock()}catch(e){}}
-function lockNow(){
-  if(!lkHas())return;LOCK.on=true;try{sessionStorage.removeItem('mm.unlocked')}catch(e){}
-  try{closeOverlay()}catch(e){}try{destroyCharts()}catch(e){}const v=$('#view');if(v)v.innerHTML='';
-  document.body.classList.add('locked');lkBuild();setTimeout(()=>{const i=$('#lk-in');i&&i.focus()},30)}
-function syncLockUi(){const b=$('#lockbtn');if(b)b.hidden=!lkHas()}
-/* nothing outside the lock screen reacts to the keyboard while locked */
-document.addEventListener('keydown',e=>{if(!LOCK.on)return;e.stopImmediatePropagation();
-  if(!(e.target.closest&&e.target.closest('#lockscr'))){e.preventDefault();const i=$('#lk-in');i&&i.focus()}},true);
-document.addEventListener('click',e=>{if(e.target.closest&&e.target.closest('#lockbtn'))lockNow()});
-/* decide at startup, before anything renders */
-(function(){try{if(!lkHas())return;let ok=false;try{ok=sessionStorage.getItem('mm.unlocked')==='1'}catch(e){}
-  if(!ok){LOCK.on=true;document.body.classList.add('locked');lkBuild();setTimeout(()=>{const i=$('#lk-in');i&&i.focus()},30)}}catch(e){}})();
-
-function lockSettingsHtml(){
-  const on=lkHas(),h='<h3 style="margin:20px 0 4px">App lock</h3>';
-  if(!lkOK())return h+'<p class="hint" style="color:var(--muted)">Not available here. The lock needs a secure page (https, localhost or a local file).</p>';
-  return h+`<p class="hint" style="color:var(--muted);margin-bottom:10px">${on?'Lock is on. You stay unlocked until you close this tab or press Lock now.':'Ask for a passcode when My Money opens. This hides the dashboard on this device.'}</p>
-  ${on?'<div class="lg-f"><label class="lg-l" for="lk-cur">Current passcode</label><input type="password" class="lg-set" id="lk-cur" autocomplete="current-password"></div>':''}
-  <div class="lg-f"><label class="lg-l" for="lk-n1">${on?'New passcode':'Passcode'} (4 or more characters)</label><input type="password" class="lg-set" id="lk-n1" autocomplete="new-password"></div>
-  <div class="lg-f"><label class="lg-l" for="lk-n2">Repeat passcode</label><input type="password" class="lg-set" id="lk-n2" autocomplete="new-password"></div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-lg="lksave">${on?'Change passcode':'Turn on lock'}</button>${on?'<button class="btn sec" data-lg="locknow">Lock now</button><button class="btn sec" data-lg="lkoff">Turn off</button>':''}</div><p class="lg-st" id="lk-st" role="status"></p>`;
-}
-async function lkSave(){
-  const st=$('#lk-st'),say=(m,bad)=>{if(st){st.className='lg-st '+(bad?'bad':'good');st.textContent=m}};
-  const on=lkHas(),n1=($('#lk-n1')||{}).value||'',n2=($('#lk-n2')||{}).value||'';
-  try{
-    if(on&&!(await lkCheck(($('#lk-cur')||{}).value||'')))return say('The current passcode is not right.',1);
-    if(n1.length<4)return say('Use at least 4 characters.',1);
-    if(n1!==n2)return say('The two passcodes do not match.',1);
-    if(!(await lkSet(n1)))return say('Could not save. Device storage is full.',1);
-    LS.set('lock.f','0');LS.set('lock.u','0');try{sessionStorage.setItem('mm.unlocked','1')}catch(e){}
-    syncLockUi();window.__mmShowSettings&&window.__mmShowSettings();toast(on?'Passcode changed':'Lock turned on');
-  }catch(e){say('Something went wrong. Try again.',1)}
-}
-async function lkOff(){
-  const st=$('#lk-st'),say=m=>{if(st){st.className='lg-st bad';st.textContent=m}};
-  try{if(!(await lkCheck(($('#lk-cur')||{}).value||'')))return say('Enter your current passcode to turn the lock off.');
-    LS.set('lock.v','');syncLockUi();window.__mmShowSettings&&window.__mmShowSettings();toast('Lock turned off')}catch(e){say('Something went wrong. Try again.')}
-}
+/* The on-device passcode lock was removed. Forget any old passcode so nobody is left locked out. */
+(function(){try{['lock.v','lock.f','lock.u'].forEach(function(k){localStorage.removeItem('mm.'+k)});sessionStorage.removeItem('mm.unlocked')}catch(e){}})();
 
 /* ================= BOOT ================= */
 (function boot(){
@@ -1923,7 +1890,6 @@ function settingsScreen(){
    <li>Copy the Web app link (ends in /exec) and paste it above.</li>
    <li>Optional: put a secret word in <code>SECRET</code> at the top of the script and the same word above, so only this page can add rows.</li></ol>
    <button class="btn sec" style="margin-top:12px" data-lg="copyscript">Copy the script</button></details>
-  ${lockSettingsHtml()}
   <h3 style="margin:20px 0 4px">Waiting to send (${q.length})</h3>
   ${q.length?q.map(it=>`<div class="lg-q"><div><b>${E(it.sum||it.form)}</b><small class="${it.err?'e':''}">${it.err?E(it.err):E(agoTxt(it.ts))}</small></div><button class="btn sec" style="height:32px;padding:0 12px" data-lg="qdel" data-id="${E(it.id)}">Remove</button></div>`).join('')
    +`<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn" data-lg="flush">Send now</button><button class="btn sec" data-lg="qcopy">Copy as JSON</button></div>`
@@ -1949,9 +1915,6 @@ document.addEventListener('click',e=>{
     case 'repeat':openForm(cur.id,true);break;
     case 'discard':LS.set(dKey(cur.id),'');openForm(cur.id,false);break;
     case 'settings':cur=null;show(settingsScreen());break;
-    case 'lksave':lkSave();break;
-    case 'lkoff':lkOff();break;
-    case 'locknow':lockNow();break;
     case 'pill':{if(qn()&&LS.get('lgUrl')&&navigator.onLine!==false){toast('Sending…');flush(false).then(()=>{updatePill();showBackupBanner()})}else{cur=null;show(settingsScreen())}break}
     case 'calc':cur=null;show(calcScreen());calcUpdate();break;
     case 'submit':submit();break;
@@ -2015,7 +1978,6 @@ function downloadBackup(){try{
   document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
   LS.set('bk.last',String(Date.now()));LS.set('bk.n','0');LS.set('bk.snooze','0');removeBackupBanner();toast('Backup downloaded')}catch(e){}}
 function showBackupBanner(){try{
-  if(LOCK.on)return;
   if(!LS.get('bk.last'))LS.set('bk.last',String(Date.now()));
   if(!backupDue()||$('.bk-banner'))return;
   const b=document.createElement('div');b.className='bk-banner';b.setAttribute('role','status');
@@ -2027,17 +1989,13 @@ document.addEventListener('click',e=>{const t=e.target.closest&&e.target.closest
 /* ---------- Entry point + boot ---------- */
 const fab=document.createElement('button');fab.type='button';fab.className='lg-fab';fab.dataset.lg='menu';fab.title='Log an entry (N)';
 fab.innerHTML=ICO.plus+'<span class="lg-bd" hidden></span>';document.body.appendChild(fab);badge();
-(()=>{const tl=$('#tools');if(tl&&tl.parentNode){const p=document.createElement('button');p.type='button';p.id='syncpill';p.className='chip-b';p.dataset.lg='pill';tl.parentNode.insertBefore(p,tl);const lb=document.createElement('button');lb.type='button';lb.id='lockbtn';lb.className='ibtn';lb.setAttribute('aria-label','Lock My Money');lb.title='Lock now';lb.hidden=!lkHas();lb.innerHTML='<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';tl.parentNode.insertBefore(lb,tl)}updatePill()})();
+(()=>{const tl=$('#tools');if(tl&&tl.parentNode){const p=document.createElement('button');p.type='button';p.id='syncpill';p.className='chip-b';p.dataset.lg='pill';tl.parentNode.insertBefore(p,tl);}updatePill()})();
 window.addEventListener('online',()=>{updatePill();flush(true).then(updatePill)});window.addEventListener('offline',updatePill);
 setTimeout(showBackupBanner,2500);
-/* app lock hooks: pause background sending while locked; let the lock screen call back in */
-const _flushOrig=flush;flush=function(silent){return LOCK.on?Promise.resolve(0):_flushOrig(silent)};
-window.__mmAfterUnlock=()=>{try{flush(true)}catch(e){}try{showBackupBanner()}catch(e){}};
 window.__mmShowSettings=()=>show(settingsScreen());
 
 /* ================= SECURITY & SETTINGS (opened from the "$" logo; additive, namespaced data-sec) =================
-   Sign-in status, optional username/password, the existing app passcode lock, sheet connection, sign out.
-   Reuses lockSettingsHtml(); the wrapper below keeps lkSave/lkOff re-rendering this panel instead of the log settings. */
+   Sign-in status, optional on-device username/password, sheet connection, sign out. */
 const _showLogSettings=window.__mmShowSettings;
 const secOpen=()=>!!$('#overlay [data-sec-root]');
 window.__mmShowSettings=function(){if(secOpen())renderSecurity();else _showLogSettings()};
@@ -2045,16 +2003,15 @@ function secHtml(){
   const A=window.mmAuth||{},m=A.method?A.method():'',has=!!(A.hasCreds&&A.hasCreds()),can=!!(A.canHash&&A.canHash()),user=has?A.savedUsername():'';
   const who=m==='google'?'Signed in with Google':m==='local'?'Signed in with username'+(user?' “'+E(user)+'”':''):'Signed in';
   const pw=!can?'<p class="hint" style="color:var(--muted)">Not available here. Username sign-in needs a secure page (https, localhost or a local file).</p>'
-   :`<p class="hint" style="color:var(--muted);margin-bottom:10px">${has?'Username sign-in is on for this device. Google sign-in still works too.':'Optional. Add a username and password so you can sign in without Google on this device.'} Credentials are stored on this device only, as a salted hash.</p>
+   :`<p class="hint" style="color:var(--muted);margin-bottom:10px">${has?'Username sign-in is on for this device. Google sign-in still works too.':'Optional. Add a username and password so you can sign in without Google on this device.'} Credentials are stored on this device only, as a salted hash. On another device, use Google sign-in.</p>
    <div class="lg-f"><label class="lg-l" for="sec-u">Username (3 or more characters)</label><input type="text" class="lg-set" id="sec-u" autocomplete="username" autocapitalize="none" spellcheck="false" value="${E(user)}"></div>
    ${has?'<div class="lg-f"><label class="lg-l" for="sec-cur">Current password</label><input type="password" class="lg-set" id="sec-cur" autocomplete="current-password"></div>':''}
    <div class="lg-f"><label class="lg-l" for="sec-n1">${has?'New password':'Password'} (8 or more characters)</label><input type="password" class="lg-set" id="sec-n1" autocomplete="new-password"></div>
    <div class="lg-f"><label class="lg-l" for="sec-n2">Repeat password</label><input type="password" class="lg-set" id="sec-n2" autocomplete="new-password"></div>
    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-sec="save">${has?'Update username and password':'Save username and password'}</button>${has?'<button class="btn sec" data-sec="remove">Remove</button>':''}</div><p class="lg-st" id="sec-st" role="status"></p>`;
-  return `<div class="lg-top"><div><h2>Security &amp; Settings</h2><p>Sign-in, passcode and sheet connection</p></div><div class="lg-r">${xbtn()}</div></div>
-  <div data-sec-root class="sec-row"><div><b>${who}</b><small>Google access is limited to ${E(A.allowedEmail||'')}</small></div><button class="btn sec" data-sec="signout">Sign out</button></div>
+  return `<div class="lg-top"><div><h2>Security &amp; Settings</h2><p>Sign-in and sheet connection</p></div><div class="lg-r">${xbtn()}</div></div>
+  <div data-sec-root class="sec-row"><div><b>${who}</b><small>Google sign-in works on any device and is limited to ${E(A.allowedEmail||'')}</small></div><button class="btn sec" data-sec="signout">Sign out</button></div>
   <h3 style="margin:20px 0 4px">Username and password</h3>${pw}
-  ${lockSettingsHtml()}
   <h3 style="margin:20px 0 4px">Sheet connection</h3>
   <div class="sec-row"><div><b>Google Sheet and waiting entries</b><small>Connection link, test and send queue</small></div><button class="btn sec" data-sec="sheet">Open</button></div>
   <div style="height:24px"></div>`;
