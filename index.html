@@ -351,7 +351,7 @@
       markAuthenticated('google');
     } else {
       var displayEmail = (payload && payload.email) ? payload.email : 'Unknown user';
-      showError('Access restricted: ' + displayEmail + ' is not authorized. Google access is strictly permitted for ' + ALLOWED_EMAIL + '.');
+      showError('Access Restricted: Authentication Failed');
     }
   };
 
@@ -692,7 +692,7 @@ details.iss p{color:var(--muted);margin:8px 0 0 2px;font-size:13px}
 .dh-arc{stroke-dasharray:var(--dh-c);stroke-dashoffset:var(--dh-o);animation:dh-draw .9s ease-out}
 .dh-arc.still{animation:none}
 @keyframes dh-draw{from{stroke-dashoffset:var(--dh-c)}to{stroke-dashoffset:var(--dh-o)}}
-.dh-score{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1}
+.dh-score{pointer-events:none;position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1}
 .dh-score b{font-size:32px;font-weight:800;letter-spacing:-.03em}
 .dh-of{font-size:11px;color:var(--faint);margin-top:3px}
 .dh-side{display:flex;flex-direction:column;gap:12px;flex:1;min-width:190px}
@@ -716,6 +716,14 @@ details.iss p{color:var(--muted);margin:8px 0 0 2px;font-size:13px}
 .dh-chip.warn{background:var(--warn-soft);color:var(--warn)}
 button.dh-chip{cursor:pointer}
 button.dh-chip:hover{border-color:var(--accent)}
+button.dh-stat{border:0;font:inherit;color:inherit;text-align:left;cursor:pointer}
+button.dh-stat:hover,.dh-stat.on{box-shadow:inset 0 0 0 2px var(--accent)}
+.dh-seg{cursor:pointer;transition:opacity .15s,stroke-width .15s}
+.dh-seg:hover,.dh-seg:focus-visible{opacity:.8;outline:none}
+.dh-seg.on{stroke-width:7}
+.dh-chip.on{border-color:var(--accent)}
+button.iss-btn{display:flex;gap:10px;align-items:center;width:100%;background:none;border:0;border-top:1px solid var(--line);padding:10px 2px;font:inherit;color:inherit;text-align:left;cursor:pointer}
+button.iss-btn:hover,button.iss-btn:focus-visible{background:var(--surface2)}
 @media (prefers-reduced-motion:reduce){.dh-arc{animation:none}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 @media print{.rail,.top .tools,.rangebar .chips,.toolbar{display:none}.card{box-shadow:none;break-inside:avoid}.app{display:block}.top{position:static}}
@@ -1020,7 +1028,7 @@ const ICON={
 const KIND_ICON={Phone:ICON.tag,PC:ICON.box,Accessory:ICON.tag};
 
 /* ----- app state ----- */
-const S={view:'home',range:'90d',cs:'',ce:'',kind:'All',gran:null,F:{},rstat:'All',theme:'auto',privacy:false,off:{},bucket:null,palIdx:0};
+const S={view:'home',range:'90d',cs:'',ce:'',kind:'All',gran:null,F:{},rstat:'All',theme:'auto',privacy:false,off:{},bucket:null,palIdx:0,dhf:'all'};
 const VIEW_NAMES=['home','spending','reselling','inventory','investing','data'];
 const VIEW_LABEL={home:'Home',spending:'Spending',reselling:'Reselling',inventory:'Stock',investing:'Investing',data:'Data'};
 const VIEW_ICON={home:'home',spending:'spend',reselling:'resell',inventory:'box',investing:'invest',data:'data'};
@@ -1189,7 +1197,7 @@ function openPalette(){
   window._palPaint=paint;
 }
 function openHelp(){
-  const rows=[['/ or ⌘K','Search everything'],['g then h','Home'],['g then s','Spending'],['g then r','Reselling'],['g then i','Stock'],['g then v','Investing'],['g then d','Data & sync'],['p','Hide or show amounts'],['t','Switch theme'],['?','This sheet'],['Esc','Close any panel']];
+  const rows=[['/ or ⌘K','Search everything'],['g then h','Home'],['g then s','Spending'],['g then r','Reselling'],['g then i','Stock'],['g then v','Investing'],['g then d','Data & sync'],['p','Hide or show amounts'],['t','Switch theme'],['r','Refresh data'],['?','This sheet'],['Esc','Close any panel']];
   openOverlay(`<div class="palbox" style="padding:20px" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts"><div class="dh"><h2>Keyboard shortcuts</h2><button class="ibtn" data-act="close" aria-label="Close" data-focus>${ICON.x}</button></div><div class="kbdgrid">${rows.map(r=>`<span><kbd>${r[0]}</kbd></span><span>${r[1]}</span>`).join('')}</div></div>`,'pal');
 }
 /* ================= VIEWS ================= */
@@ -1583,6 +1591,32 @@ function vInvesting(){
   }};
 }
 
+/* Data health helpers: clickable ring segments, filter chips, and a READ-ONLY fix menu (never writes to the Sheet). */
+function dhSegmentsSvg(warn,info,fixed,active){
+  const total=warn+info+fixed;if(!total)return '';
+  const C=2*Math.PI*33;let off=0;
+  return [{key:'warn',n:warn,color:'var(--warn)',label:'to-fix issues'},{key:'info',n:info,color:'var(--accent)',label:'notes'},{key:'fixed',n:fixed,color:'var(--good)',label:'auto-cleaned issues'}].map(g=>{
+    if(!g.n)return '';
+    const share=C*g.n/total,len=Math.max(0.5,share-2),o=off;off+=share;const t=`Show ${g.n} ${g.label}`;
+    return `<circle class="dh-seg${active===g.key?' on':''}" cx="50" cy="50" r="33" fill="none" stroke="${g.color}" stroke-width="5" transform="rotate(-90 50 50)" stroke-dasharray="${len.toFixed(2)} ${(C-len).toFixed(2)}" stroke-dashoffset="${(-o).toFixed(2)}" data-act="dhfilter" data-f="${g.key}" tabindex="0" role="button" aria-label="${t}"><title>${t}</title></circle>`}).join('')}
+function dhChipsHtml(warn,info,fixed,active){
+  const c=(f,l,n)=>`<button type="button" class="dh-chip${active===f?' on':''}" data-act="dhfilter" data-f="${f}" aria-pressed="${active===f}"><i></i>${l}${n==null?'':' ('+n+')'}</button>`;
+  return `<div class="dh-status">${c('all','All',warn+info+fixed)}${c('warn','To fix',warn)}${c('info','Notes',info)}${c('fixed','Auto-cleaned',fixed)}</div>`}
+const issueMatches=(sev,f)=>!f||f==='all'||f===sev;
+function openIssueFix(idx){
+  const x=store.D.issues[idx];if(!x)return;
+  const pill=x.sev==='warn'?'<span class="pill warn">Fix</span>':x.sev==='fixed'?'<span class="pill good">Cleaned</span>':'<span class="pill">Note</span>';
+  const sid=store.source&&store.source.sheetId;
+  openOverlay(`<div class="palbox" style="padding:20px" role="dialog" aria-modal="true" aria-label="Fix this issue"><div class="dh"><h2>Fix this issue</h2><button class="ibtn" data-act="close" aria-label="Close" data-focus>${ICON.x}</button></div>
+    <p style="display:flex;gap:10px;align-items:center;margin:0 0 10px">${pill}<span>${esc(x.msg)}</span></p>
+    <p><b>Sheet:</b> ${esc(x.sheet)} · <b>Field:</b> ${esc(x.field)}</p>
+    <p><b>Sheet rows (${x.rows.length}):</b> ${esc(x.rows.join(', '))}</p>
+    <p><b>Suggested fix:</b> ${esc(x.fix)}</p>
+    <p class="hint" style="color:var(--muted)">Edit these rows in your Google Sheet, then press Refresh. My Money never changes your sheet from here.</p>
+    <div class="sheet-form" style="margin-top:14px"><button class="btn sec" data-act="issuecopy" data-i="${idx}">Copy row numbers</button>${sid?`<a class="btn" target="_blank" rel="noopener noreferrer" href="https://docs.google.com/spreadsheets/d/${encodeURIComponent(sid)}/edit">Open Google Sheet</a>`:''}</div></div>`,'pal')}
+function copyIssueRows(idx){
+  const x=store.D.issues[idx];if(!x)return;const text=x.rows.join(', '),fail=()=>toast('Could not copy. Select the numbers manually.');
+  try{if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(text).then(()=>toast('Row numbers copied'),fail);else fail()}catch(e){fail()}}
 /* Data health ring: SVG so the arc can animate; same score and colours as before. */
 function dhHtml(score,col,warn,info,fixed){
   const s=Math.max(0,Math.min(100,Math.round(score))),C=2*Math.PI*42,off=C*(1-s/100);
@@ -1591,13 +1625,14 @@ function dhHtml(score,col,warn,info,fixed){
     <div class="dh-ring"><svg viewBox="0 0 100 100" role="img" aria-label="Data health score ${s} out of 100">
       <circle cx="50" cy="50" r="42" fill="none" stroke="var(--surface2)" stroke-width="9"/>
       <circle class="dh-arc${still?' still':''}" cx="50" cy="50" r="42" fill="none" stroke="${col}" stroke-width="9" stroke-linecap="round" transform="rotate(-90 50 50)" style="--dh-c:${C.toFixed(2)};--dh-o:${off.toFixed(2)}"/>
+      ${dhSegmentsSvg(warn,info,fixed,S.dhf)}
     </svg><div class="dh-score"><b>${s}</b><span class="dh-of">/100</span></div></div>
     <div class="dh-side">
       <div class="dh-head"><span class="dh-title">${s>=90?'Looks healthy':s>=70?'A few things to tidy':'Needs attention'}</span><span class="pill ${tone}">${s>=90?'Healthy':s>=70?'Tidy up':'Attention'}</span></div>
       <div class="dh-stats">
-        <div class="dh-stat${warn>0?' warn':''}"><div class="dh-n">${warn}</div><div class="dh-l">To fix</div></div>
-        <div class="dh-stat"><div class="dh-n">${info}</div><div class="dh-l">Notes</div></div>
-        <div class="dh-stat${fixed>0?' good':''}"><div class="dh-n">${fixed}</div><div class="dh-l">Auto-cleaned</div></div>
+        <button type="button" class="dh-stat${warn>0?' warn':''}${S.dhf==='warn'?' on':''}" data-act="dhfilter" data-f="warn" aria-pressed="${S.dhf==='warn'}"><div class="dh-n">${warn}</div><div class="dh-l">To fix</div></button>
+        <button type="button" class="dh-stat${S.dhf==='info'?' on':''}" data-act="dhfilter" data-f="info" aria-pressed="${S.dhf==='info'}"><div class="dh-n">${info}</div><div class="dh-l">Notes</div></button>
+        <button type="button" class="dh-stat${fixed>0?' good':''}${S.dhf==='fixed'?' on':''}" data-act="dhfilter" data-f="fixed" aria-pressed="${S.dhf==='fixed'}"><div class="dh-n">${fixed}</div><div class="dh-l">Auto-cleaned</div></button>
       </div>
     </div></div>`}
 function vData(){
@@ -1615,7 +1650,7 @@ function vData(){
     <div class="sheet-form"><input type="text" id="sheeturl" placeholder="Paste a Google Sheet link or ID" value="${esc(src.sheetId||'')}" aria-label="Google Sheet link or ID"><button class="btn" data-act="connect">Connect</button><button class="btn sec" data-act="useemb">Use snapshot</button><button class="btn sec" data-act="refresh">${ICON.refresh.replace('<svg','<svg width="16" height="16" style="vertical-align:-3px;margin-right:6px"')}Refresh</button></div>
     <p class="note" id="syncmsg" style="margin-top:10px">If your entry script link is saved (Log, then Sheet connection), My Money reads through it and the sheet can stay private. Otherwise the sheet must be shared as "Anyone with the link can view". Live sync works when My Money opens as its own web page. Inside Claude the page cannot reach Google, so ask Claude to refresh the snapshot there.</p>
     <div class="sheet-form" style="margin-top:10px"><label class="btn sec" style="display:inline-flex;align-items:center;cursor:pointer">Import snapshot file<input id="snapfile" type="file" accept=".json,application/json" hidden></label><button class="btn sec" data-act="copysnap">Copy snapshot JSON</button></div>`)}
-  ${card('Issues found',D.issues.length?bySheet.map(([sh,list])=>`<h3 style="margin:14px 0 4px">${esc(sh)}</h3>${list.map(x=>`<details class="iss"><summary><span class="pill ${x.sev==='warn'?'warn':x.sev==='fixed'?'good':''}">${x.sev==='warn'?'Fix':x.sev==='fixed'?'Cleaned':'Note'}</span><span style="flex:1">${esc(x.msg)}</span><span class="hint" style="color:var(--muted)">${plural(x.rows.length,'row')}</span></summary><p><b>Field:</b> ${esc(x.field)} · <b>Sheet rows:</b> ${x.rows.slice(0,15).join(', ')}${x.rows.length>15?' and '+(x.rows.length-15)+' more':''}</p><p><b>Suggested fix:</b> ${esc(x.fix)}</p></details>`).join('')}`).join(''):'<div class="empty"><b>No issues</b>Your sheet is clean.</div>')}`;
+  ${card('Issues found',D.issues.length?dhChipsHtml(warn,info,sum(D.issues.filter(x=>x.sev==='fixed'),x=>x.rows.length),S.dhf)+(()=>{const g=[...groupBy(D.issues.filter(x=>issueMatches(x.sev,S.dhf)),x=>x.sheet).entries()];return g.length?g.map(([sh,list])=>`<h3 style="margin:14px 0 4px">${esc(sh)}</h3>${list.map(x=>`<button type="button" class="iss-btn" data-act="issuefix" data-i="${D.issues.indexOf(x)}" aria-label="Open fix menu: ${esc(x.msg)}"><span class="pill ${x.sev==='warn'?'warn':x.sev==='fixed'?'good':''}">${x.sev==='warn'?'Fix':x.sev==='fixed'?'Cleaned':'Note'}</span><span style="flex:1">${esc(x.msg)}</span><span class="hint" style="color:var(--muted)">${plural(x.rows.length,'row')}</span><span aria-hidden="true" style="color:var(--faint)">›</span></button>`).join('')}`).join(''):'<div class="empty"><b>Nothing in this view</b>No issues match this filter. Choose All to see everything.</div>'})():'<div class="empty"><b>No issues</b>Your sheet is clean.</div>')}`;
   return {html,mount(){
     const f=$('#snapfile');if(f)f.addEventListener('change',()=>{const file=f.files[0];if(!file)return;const r=new FileReader();r.onload=()=>{try{const j=JSON.parse(r.result);if(!j.Expenses)throw 0;store.set(j,{name:'Imported file',kind:'file'});toast('Snapshot imported')}catch(e){toast('That file is not a My Money snapshot')}};r.readAsText(file)});
   }};
@@ -1633,6 +1668,7 @@ function setupTop(){
   $('#tools').innerHTML=`<button class="ibtn search" data-act="palette" aria-label="Search">${ICON.search}<span>Search</span><kbd>⌘K</kbd></button>
     <button class="ibtn" data-act="theme" aria-label="Theme: ${S.theme}" title="Theme: ${S.theme}">${ICON[S.theme==='dark'?'moon':S.theme==='light'?'sun':'auto']}</button>
     <button class="ibtn" data-act="privacy" aria-pressed="${S.privacy}" aria-label="Hide amounts" title="Hide amounts (P)">${S.privacy?ICON.eyeoff:ICON.eye}</button>
+    <button class="ibtn" data-act="refresh" aria-label="Refresh data" title="Refresh data (R)">${ICON.refresh}</button>
     <button class="ibtn" data-act="help" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">${ICON.kbd}</button>`;
   const rb=$('#rangebar');
   if(['home','spending','reselling'].includes(S.view)){const R=RG();
@@ -1654,6 +1690,11 @@ function applyTheme(){const r=document.documentElement;if(S.theme==='auto')r.rem
 function cycleTheme(){S.theme=({auto:'light',light:'dark',dark:'auto'})[S.theme];LS.set('theme',S.theme);applyTheme();render();toast('Theme: '+S.theme)}
 function togglePrivacy(){S.privacy=!S.privacy;LS.set('privacy',S.privacy?'1':'0');document.body.classList.toggle('privacy',S.privacy);render();toast(S.privacy?'Amounts hidden':'Amounts shown')}
 function syncMsg(t){const n=$('#syncmsg');if(n)n.textContent=t;toast(t)}
+let _refreshing=false;
+function doRefresh(){
+  if(_refreshing)return;_refreshing=true;
+  store.load(store.source).then(()=>toast('Refreshed')).catch(()=>syncMsg('Could not refresh. Check the connection and sharing settings.')).finally(()=>{_refreshing=false});
+}
 async function connectSheet(){
   const id=parseSheetId($('#sheeturl').value);if(!id){toast('Paste a Google Sheet link or ID first');return}
   try{await store.load(GoogleSheetSource(id));LS.set('sheetId',id);toast('Connected. Showing live data')}
@@ -1693,11 +1734,15 @@ document.addEventListener('click',e=>{
     case 'palrun':{const it=(window._pal||[])[+d.i];if(it){closeOverlay();it.a()}break}
     case 'connect':connectSheet();break;
     case 'useemb':{LS.set('sheetId','');store.load(EmbeddedSource).then(()=>toast('Using the embedded snapshot'));break}
-    case 'refresh':store.load(store.source).then(()=>toast('Refreshed')).catch(()=>syncMsg('Could not refresh. Check the connection and sharing settings.'));break;
+    case 'refresh':doRefresh();break;
+    case 'dhfilter':S.dhf=(d.f==='all'||S.dhf===d.f)?'all':d.f;render();break;
+    case 'issuefix':openIssueFix(+d.i);break;
+    case 'issuecopy':copyIssueRows(+d.i);break;
     case 'copysnap':copyText(JSON.stringify(store.base||store.raw),'Snapshot copied');break;
   }
 });
 document.addEventListener('keydown',e=>{
+  if((e.key==='Enter'||e.key===' ')&&e.target.classList&&e.target.classList.contains('dh-seg')){e.preventDefault();e.target.dispatchEvent(new MouseEvent('click',{bubbles:true}));return}
   if(e.key==='Enter'||e.key===' '){const tr=e.target.closest&&e.target.closest('tr[data-act="open"]');if(tr){e.preventDefault();tr.click();return}}
   const ov=$('#overlay .overlay');
   if(e.key==='Escape'&&ov){closeOverlay();return}
@@ -1713,7 +1758,7 @@ document.addEventListener('keydown',e=>{
   if(e.ctrlKey)return;
   if(window._g){const m={h:'home',s:'spending',r:'reselling',i:'inventory',v:'investing',d:'data'}[e.key];window._g=0;if(m){go(m);return}}
   if(e.key==='g'){window._g=1;setTimeout(()=>window._g=0,900);return}
-  if(e.key==='/'){e.preventDefault();openPalette()}else if(e.key==='p')togglePrivacy();else if(e.key==='t')cycleTheme();else if(e.key==='?')openHelp();
+  if(e.key==='/'){e.preventDefault();openPalette()}else if(e.key==='p')togglePrivacy();else if(e.key==='t')cycleTheme();else if(e.key==='?')openHelp();else if(e.key==='r'){e.preventDefault();doRefresh()}
 });
 document.addEventListener('input',e=>{const q=e.target.dataset&&e.target.dataset.q;if(q){TS[q].q=e.target.value;TS[q].shown=50;fillTable(q)}});
 document.addEventListener('change',e=>{if(e.target.id==='cs'||e.target.id==='ce'){S.cs=$('#cs').value;S.ce=$('#ce').value;render()}});
