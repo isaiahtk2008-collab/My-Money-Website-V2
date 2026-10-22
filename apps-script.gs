@@ -19,8 +19,17 @@ const READ_TABS = {
   Investments: { tab: 'Investment Tracking Sheet', keys: ['Investment Type', 'Date', 'Total Portfolio Value'] }
 };
 
+// Every reply is JSON. `status` is added alongside the existing `ok` flag so older and newer callers both work.
 function json(obj) {
+  if (obj && typeof obj === 'object' && obj.status === undefined) obj.status = obj.ok ? 'success' : 'error';
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+// Optional flat view for simple callers: every real row from every read tab as one array, each tagged with its tab key.
+function flatten(tabs) {
+  const data = [];
+  Object.keys(tabs).forEach(key => { tabs[key].rows.forEach(row => data.push(Object.assign({ _tab: key }, row))); });
+  return data;
 }
 
 function findSheet(ss, name) {
@@ -148,7 +157,10 @@ function doGet(e) {
   if (SECRET && p.secret !== SECRET) return json({ ok: false, error: 'auth' });
   try {
     if (p.action === 'check') return json({ ok: true, version: 3, at: new Date().toISOString(), tabs: checkAll() });
-    return json({ ok: true, version: 3, at: new Date().toISOString(), tabs: readAll() });
+    const tabs = readAll();
+    const reply = { ok: true, version: 3, at: new Date().toISOString(), tabs: tabs };
+    if (p.flat === '1') reply.data = flatten(tabs); // ?action=read&flat=1 -> { status: "success", data: [...] }
+    return json(reply);
   } catch (err) {
     return json({ ok: false, error: String(err) });
   }
@@ -185,7 +197,9 @@ function doPost(e) {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(20000);
-    const body = JSON.parse(e.postData.contents || '{}');
+    let body;
+    try { body = JSON.parse((e && e.postData && e.postData.contents) || '{}'); } catch (parseErr) { return json({ ok: false, error: 'bad json' }); }
+    if (!body || typeof body !== 'object') return json({ ok: false, error: 'bad json' });
     if (SECRET && body.secret !== SECRET) return json({ ok: false, error: 'auth' });
 
     // Ignore retries of an entry that already landed
