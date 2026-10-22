@@ -1193,7 +1193,165 @@ const ago=d=>{if(!d)return 'never';const s=Math.round((Date.now()-d)/1000);if(s<
 const kindWord=k=>({Phone:'Phones',PC:'PCs',Accessory:'Accessories'}[k]||k);
 function totalSeries(D){const last={};const out=[];D.investments.forEach(e=>{if(e.value==null)return;last[e.portfolio]=e.value;out.push({d:e.date,v:sum(Object.values(last))})});return out}
 
+/* INSIGHTS-LIB:START (60-insight library + deterministic daily rotation; read-only, never touches the Google Sheet) */
+const INSIGHT_VIEW={spending:'spending',reselling:'reselling',inventory:'inventory',investing:'investing',data:'data',habits:'spending',tips:'spending'};
+const INSIGHT_CAT={sp:'spending',rs:'reselling',in:'inventory',iv:'investing',hb:'habits',dh:'data',ev:'tips'};
+const INSIGHT_ICONS=['spend','clock','up','down','user','alert','bulb','tag','cart','invest'];
+const INSIGHT_LIB=[
+/* ---- spending (12) ---- */
+{id:'sp01',run:c=>{const h=c.h,ss=c.ss;if(!ss||!ss.prevCats||!ss.cats)return null;const pm=new Map(ss.prevCats.map(x=>[x.k,x.v]));
+  const ch=ss.cats.map(x=>({k:x.k,cur:x.v,prev:pm.get(x.k)||0})).filter(x=>x.prev>=25&&x.cur>=25).map(x=>({...x,d:(x.cur-x.prev)/x.prev})).filter(x=>Math.abs(x.d)>=.1).sort((a,b)=>Math.abs(b.cur-b.prev)-Math.abs(a.cur-a.prev))[0];
+  if(!ch)return null;return {i:'spend',t:'<b>'+h.esc(ch.k)+'</b> is '+(ch.d>0?'up':'down')+' '+Math.abs(ch.d*100).toFixed(0)+'% on the previous '+c.R.len+' days ('+h.SM(ch.cur-ch.prev)+').',act:'goto',v:'spending',k:'cat',x:ch.k}}},
+{id:'sp02',run:c=>{const h=c.h,ss=c.ss;if(!ss||!ss.dow||ss.dow.length!==7||!(ss.total>0))return null;const dw=[...ss.dow].sort((a,b)=>b.v-a.v)[0];if(!dw||!(dw.v>0))return null;
+  return {i:'bulb',t:'<b>'+h.pct(dw.v/ss.total)+'</b> of your spending lands on '+['Sundays','Mondays','Tuesdays','Wednesdays','Thursdays','Fridays','Saturdays'][h.DOW.indexOf(dw.n)]+'.',act:'goto',v:'spending'}}},
+{id:'sp03',run:c=>{const s=c.ss;if(!s||s.count<3||!s.biggest)return null;return {i:'cart',t:'Biggest purchase: <b>'+c.h.esc(s.biggest.item)+'</b> for '+c.h.mny(s.biggest.amount)+'.',act:'open',id:s.biggest.id}}},
+{id:'sp04',run:c=>{const s=c.ss;if(!s||!(s.prevTotal>0)||!(s.days>0))return null;const perNow=s.total/s.days,perPrev=s.prevTotal/s.days,change=(perNow-perPrev)/perPrev;if(Math.abs(change)<0.1)return null;const dir=change>0?'up':'down';
+  return {i:dir,t:'You are spending <b>'+c.h.mny(perNow)+'</b> a day, '+dir+' '+c.h.pct(Math.abs(change))+' on the previous period.',act:'goto',v:'spending'}}},
+{id:'sp05',run:c=>{const s=c.ss;if(!s||!(s.total>0)||!s.places||!s.places.length)return null;const p=s.places[0],share=p.v/s.total;if(share<0.15||p.k==='—')return null;
+  return {i:'tag',t:'<b>'+c.h.esc(p.k)+'</b> takes '+c.h.pct(share)+' of your spending ('+c.h.mny(p.v)+').',act:'goto',v:'spending'}}},
+{id:'sp06',run:c=>{const s=c.ss;if(!s||!s.freq||!s.freq.length||s.freq[0].n<3)return null;
+  return {i:'tag',t:'You bought <b>'+c.h.esc(s.freq[0].k)+'</b> '+s.freq[0].n+' times for '+c.h.mny(s.freq[0].v)+' in total.',act:'goto',v:'spending'}}},
+{id:'sp07',run:c=>{const s=c.ss;if(!s||!(s.refundTotal>0))return null;return {i:'down',t:'Refunds returned <b>'+c.h.mny(s.refundTotal)+'</b> to you in this range.',act:'goto',v:'spending'}}},
+{id:'sp08',run:c=>{const s=c.ss;if(!s||!(s.total>0)||!s.pays||s.pays.length<2)return null;const p=s.pays[0],share=p.v/s.total;if(p.k==='—')return null;
+  return {i:'user',t:'<b>'+c.h.pct(share)+'</b> of your spending goes through <b>'+c.h.esc(p.k)+'</b>.',act:'goto',v:'spending'}}},
+{id:'sp09',run:c=>{const s=c.ss;if(!s||!(s.total>0)||!s.tags)return null;const b=s.tags.find(t=>t.k==='Business'),p=s.tags.find(t=>t.k==='Personal');if(!b||!p)return null;
+  return {i:'tag',t:'<b>'+c.h.pct(b.v/s.total)+'</b> of your spending is tagged Business.',act:'goto',v:'spending'}}},
+{id:'sp10',run:c=>{const s=c.ss;if(!s||!(s.prevCount>=5))return null;const change=(s.count-s.prevCount)/s.prevCount;if(Math.abs(change)<0.2)return null;
+  return {i:change>0?'up':'down',t:'You made <b>'+s.count+'</b> purchases, '+(change>0?'up ':'down ')+c.h.pct(Math.abs(change))+' on the previous period ('+s.prevCount+').',act:'goto',v:'spending'}}},
+{id:'sp11',run:c=>{const s=c.ss;if(!s||!(s.total>0)||!s.dow||s.dow.length!==7)return null;const share=(s.dow[0].v+s.dow[6].v)/s.total,diff=share-2/7;if(Math.abs(diff)<0.08)return null;
+  return {i:'bulb',t:'<b>'+c.h.pct(share)+'</b> of your spending happens on weekends, '+(diff>0?'above':'below')+' an even spread.',act:'goto',v:'spending'}}},
+{id:'sp12',run:c=>{const s=c.ss;if(!s||!(s.total>0)||!s.cats||!s.cats.length)return null;const share=s.cats[0].v/s.total;if(share<0.3)return null;
+  return {i:'spend',t:'<b>'+c.h.esc(s.cats[0].k)+'</b> is '+c.h.pct(share)+' of everything you spent.',act:'goto',v:'spending'}}},
+/* ---- reselling (15) ---- */
+{id:'rs01',run:c=>{const h=c.h,sold=c.D.items.filter(i=>i.sold&&i.days!=null);
+  const byK=['Phone','PC','Accessory'].map(k=>({k,n:sold.filter(i=>i.kind===k).length,d:h.avg(sold.filter(i=>i.kind===k),i=>i.days)})).filter(x=>x.n>=3&&x.d!=null).sort((a,b)=>a.d-b.d);
+  if(byK.length<2)return null;return {i:'clock',t:'<b>'+h.kindWord(byK[0].k)+'</b> sell in '+Math.round(byK[0].d)+' days on average. <b>'+h.kindWord(byK[byK.length-1].k)+'</b> take '+Math.round(byK[byK.length-1].d)+'.',act:'goto',v:'reselling'}}},
+{id:'rs02',run:c=>{const h=c.h,fl=c.D.items.filter(i=>i.sold&&i.profit!=null).sort((a,b)=>b.profit-a.profit);if(!fl.length)return null;
+  return {i:'up',t:'Best flip so far: <b>'+h.esc(fl[0].name)+'</b> for '+h.SM(fl[0].profit)+(fl[0].days!=null?' in '+h.plural(fl[0].days,'day'):'')+'.',act:'open',id:fl[0].id}}},
+{id:'rs03',run:c=>{const h=c.h,fl=c.D.items.filter(i=>i.sold&&i.profit!=null);
+  const src=[...h.groupBy(fl.filter(i=>i.seller),i=>i.seller.toLowerCase()).values()].map(g=>({k:g[0].seller,n:g.length,t:h.sum(g,i=>i.profit)})).filter(x=>x.n>=2).sort((a,b)=>b.t-a.t)[0];
+  if(!src)return null;return {i:'user',t:'Top source: <b>'+h.esc(src.k)+'</b>, '+h.plural(src.n,'deal')+' for '+h.SM(src.t)+' profit.',act:'goto',v:'reselling'}}},
+{id:'rs04',run:c=>{const r=c.rs;if(!r||!(r.prevProfit>0)||r.sold.length<2)return null;const change=(r.profit-r.prevProfit)/r.prevProfit;if(Math.abs(change)<0.1)return null;
+  return {i:change>0?'up':'down',t:'Reselling profit is <b>'+c.h.mny(r.profit)+'</b>, '+(change>0?'up ':'down ')+c.h.pct(Math.abs(change))+' on the previous period.',act:'goto',v:'reselling'}}},
+{id:'rs05',run:c=>{const r=c.rs;if(!r||r.win==null||r.sold.length<5)return null;
+  return {i:r.win>=0.8?'up':'bulb',t:'<b>'+c.h.pct(r.win)+'</b> of your sales this period made a profit ('+r.sold.length+' sales).',act:'goto',v:'reselling'}}},
+{id:'rs06',run:c=>{const r=c.rs;if(!r||r.roi==null||r.sold.length<3)return null;return {i:'invest',t:'Your average return on a flip is <b>'+c.h.pct(Math.abs(r.roi))+'</b>.',act:'goto',v:'reselling'}}},
+{id:'rs07',run:c=>{const r=c.rs;if(!r||r.sold.length<3)return null;const withD=r.sold.filter(i=>i.days!=null);if(!withD.length)return null;const f=withD.reduce((a,b)=>a.days<=b.days?a:b);
+  return {i:'clock',t:'<b>'+c.h.esc(f.name)+'</b> sold fastest, in '+c.h.plural(f.days,'day')+'.',act:'open',id:f.id}}},
+{id:'rs08',run:c=>{const r=c.rs;if(!r)return null;const items=r.sold.filter(i=>i.profit<0);if(items.length<1)return null;
+  return {i:'alert',t:'<b>'+c.h.plural(items.length,'sale')+'</b> lost money this period, <b>'+c.h.mny(Math.abs(c.h.sum(items,i=>i.profit)))+'</b> combined.',act:'goto',v:'reselling'}}},
+{id:'rs09',run:c=>{const r=c.rs;if(!r||!r.cond||r.cond.length<2||r.cond[0].n<2||r.cond[0].avg==null)return null;
+  return {i:'up',t:'<b>'+c.h.esc(r.cond[0].k)+'</b> items earn you the most, <b>'+c.h.mny(r.cond[0].avg)+'</b> profit each on average.',act:'goto',v:'reselling'}}},
+{id:'rs10',run:c=>{const s=c.rs&&c.rs.src;if(!s||s.length<2)return null;const w=s[s.length-1];if(!w||w.n<2||!(w.tot<0))return null;
+  return {i:'alert',t:'Deals from <b>'+c.h.esc(w.k)+'</b> lost <b>'+c.h.mny(Math.abs(w.tot))+'</b> over '+c.h.plural(w.n,'purchase')+'.',act:'goto',v:'reselling'}}},
+{id:'rs11',run:c=>{const r=c.rs;if(!r||r.sellThrough==null)return null;return {i:'bulb',t:'You have sold <b>'+c.h.pct(r.sellThrough)+'</b> of everything you have bought.',act:'goto',v:'reselling'}}},
+{id:'rs12',run:c=>{const r=c.rs;if(!r||r.days==null||!(r.prevDays>0))return null;const change=(r.days-r.prevDays)/r.prevDays;if(Math.abs(change)<0.15)return null;
+  return {i:'clock',t:'Items are selling <b>'+(change<0?'faster':'slower')+'</b> than last period: <b>'+Math.round(r.days)+' days</b> on average, before: '+Math.round(r.prevDays)+' days.',act:'goto',v:'reselling'}}},
+{id:'rs13',run:c=>{const l=c.rs&&c.rs.lead;if(!l||l.length<2)return null;const top=l.reduce((a,b)=>a.tot>=b.tot?a:b);if(top.n<2||!(top.tot>0))return null;
+  return {i:'up',t:'<b>'+c.h.esc(top.k)+'</b> is your best product line: '+c.h.plural(top.n,'sale')+', '+c.h.mny(top.tot)+' profit.',act:'goto',v:'reselling'}}},
+{id:'rs14',run:c=>{const r=c.rs;if(!r||r.sold.length<3)return null;return {i:'spend',t:'The average sale earns you <b>'+c.h.mny(r.profit/r.sold.length)+'</b> profit.',act:'goto',v:'reselling'}}},
+{id:'rs15',run:c=>{const k=((c.rs&&c.rs.kinds)||[]).filter(x=>x.n>=2&&x.avg!=null);if(k.length<2)return null;const top=k.reduce((a,b)=>a.avg>=b.avg?a:b);
+  return {i:'up',t:'<b>'+c.h.kindWord(top.k)+'</b> earn the most per sale: '+c.h.mny(top.avg)+' on average.',act:'goto',v:'reselling'}}},
+/* ---- inventory (9) ---- */
+{id:'in01',run:c=>{const h=c.h,old=c.D.items.filter(i=>!i.sold&&i.age!=null).sort((a,b)=>b.age-a.age)[0];if(!old||old.age<=30)return null;
+  return {i:'alert',t:'<b>'+h.esc(old.name)+'</b> has been in stock '+old.age+' days. Consider lowering the price.',act:'open',id:old.id}}},
+{id:'in02',run:c=>{const s=c.st;if(!s||s.stock.length<3||!(s.cost>0))return null;return {i:'spend',t:'<b>'+c.h.mny(s.cost)+'</b> of your cash is sitting in unsold stock.',act:'goto',v:'inventory'}}},
+{id:'in03',run:c=>{const s=c.st;if(!s||s.stock.length<4)return null;const old=s.stock.filter(i=>i.age>30);if(old.length<1)return null;
+  return {i:'clock',t:'<b>'+old.length+' of '+s.stock.length+'</b> items in stock are older than 30 days.',act:'goto',v:'inventory'}}},
+{id:'in04',run:c=>{const s=c.st;if(!s||!s.buckets||s.buckets.length<4)return null;const b=s.buckets[3];if(!b||!b.items||b.items.length<1)return null;
+  return {i:'alert',t:'<b>'+b.items.length+'</b> items have sat for 61+ days, tying up '+c.h.mny(c.h.sum(b.items,i=>i.buyPrice))+'.',act:'goto',v:'inventory'}}},
+{id:'in05',run:c=>{const s=c.st;if(!s||s.stock.length<3)return null;const p=s.stock.filter(i=>i.buyPrice!=null);if(!p.length)return null;const m=p.reduce((a,b)=>a.buyPrice>=b.buyPrice?a:b);
+  return {i:'tag',t:'Your priciest unsold item is <b>'+c.h.esc(m.name)+'</b> at '+c.h.mny(m.buyPrice)+'.',act:'open',id:m.id}}},
+{id:'in06',run:c=>{const s=c.st;if(!s)return null;const f=s.stock.filter(i=>i.age!=null&&i.age<=7);if(f.length<1)return null;
+  return {i:'cart',t:'You added <b>'+c.h.plural(f.length,'item')+'</b> to stock in the last 7 days.',act:'goto',v:'inventory'}}},
+{id:'in07',run:c=>{const s=c.st;if(!s||s.stock.length<4)return null;const cnt={};s.stock.forEach(i=>{cnt[i.kind]=(cnt[i.kind]||0)+1});const ks=Object.keys(cnt);if(ks.length<2)return null;
+  const top=ks.reduce((a,b)=>cnt[a]>=cnt[b]?a:b),share=cnt[top]/s.stock.length;if(share<0.5)return null;
+  return {i:'bulb',t:'<b>'+c.h.pct(share)+'</b> of your stock is '+c.h.kindWord(top)+'.',act:'goto',v:'inventory'}}},
+{id:'in08',run:c=>{const s=c.st;if(!s||!s.med)return null;const e=Object.entries(s.med).filter(([k,v])=>v!=null&&v>0);if(e.length<2)return null;const best=e.reduce((a,b)=>a[1]>=b[1]?a:b);
+  return {i:'up',t:'A typical <b>'+c.h.kindWord(best[0]).replace(/s$/,'')+'</b> flip earns <b>'+c.h.mny(best[1])+'</b> profit (median).',act:'goto',v:'inventory'}}},
+{id:'in09',run:c=>{const s=c.st;if(!s||s.avgAge==null||s.stock.length<3||s.avgAge<20)return null;
+  return {i:'clock',t:'Your stock has been waiting <b>'+Math.round(s.avgAge)+'</b> days on average to sell.',act:'goto',v:'inventory'}}},
+/* ---- investing (8) ---- */
+{id:'iv01',run:c=>{const v=c.inv;if(!v||!v.P.length||!(v.contrib>0)||!(v.total>0))return null;const g=v.gain,dir=g>=0?'up':'down';
+  return {i:dir,t:'Your investments are <b>'+dir+' '+c.h.mny(Math.abs(g))+'</b> overall ('+c.h.pct(Math.abs(g/v.contrib))+').',act:'goto',v:'investing'}}},
+{id:'iv02',run:c=>{const v=c.inv;if(!v)return null;const l=v.P.filter(p=>p.ret!=null);if(l.length<2)return null;const b=l.reduce((a,x)=>a.ret>=x.ret?a:x);if(!(b.ret>0))return null;
+  return {i:'up',t:'<b>'+c.h.esc(b.name)+'</b> is your best performer at <b>'+c.h.pct(b.ret)+'</b> return.',act:'goto',v:'investing'}}},
+{id:'iv03',run:c=>{const v=c.inv;if(!v||v.P.length<2||!(v.total>0))return null;const share=v.P[0].value/v.total;if(share<0.5)return null;
+  return {i:'bulb',t:'<b>'+c.h.pct(share)+'</b> of your investments sit in <b>'+c.h.esc(v.P[0].name)+'</b>.',act:'goto',v:'investing'}}},
+{id:'iv04',run:c=>{const v=c.inv;if(!v||!v.updated)return null;const days=c.h.diffD(v.updated,c.today);if(days<14)return null;
+  return {i:'clock',t:'Your investment values were last updated <b>'+c.h.plural(days,'day')+'</b> ago ('+c.h.fd(v.updated)+'). Time for a refresh?',act:'goto',v:'investing'}}},
+{id:'iv05',run:c=>{const v=c.inv;if(!v||!(v.contrib>0)||v.P.length<1)return null;return {i:'invest',t:'You have put <b>'+c.h.mny(v.contrib)+'</b> into investments so far.',act:'goto',v:'investing'}}},
+{id:'iv06',run:c=>{const v=c.inv;if(!v)return null;const l=v.P.filter(p=>p.ret!=null);if(l.length<2)return null;const w=l.reduce((a,x)=>a.ret<=x.ret?a:x);if(!(w.ret<0))return null;
+  return {i:'down',t:'<b>'+c.h.esc(w.name)+'</b> is down <b>'+c.h.pct(Math.abs(w.ret))+'</b> against what you put in.',act:'goto',v:'investing'}}},
+{id:'iv07',run:c=>{const v=c.inv;if(!v||v.P.length<2)return null;return {i:'bulb',t:'You are tracking <b>'+c.h.plural(v.P.length,'account')+'</b>, worth <b>'+c.h.mny(v.total)+'</b> in total.',act:'goto',v:'investing'}}},
+{id:'iv08',run:c=>{const v=c.inv;if(!v)return null;const l=v.P.filter(p=>p.gain!=null);if(l.length<2)return null;const t=l.reduce((a,x)=>a.gain>=x.gain?a:x);if(!(t.gain>0))return null;
+  return {i:'up',t:'<b>'+c.h.esc(t.name)+'</b> has earned you the most: <b>'+c.h.mny(t.gain)+'</b>.',act:'goto',v:'investing'}}},
+/* ---- habits (8) ---- */
+{id:'hb01',run:c=>{const rows=(c.ss&&c.ss.rows)||[];if(rows.length<5)return null;const ago=r=>c.h.diffD(r.date,c.today);
+  const a=c.h.sum(rows.filter(r=>ago(r)>=0&&ago(r)<=6),r=>r.amount),b=c.h.sum(rows.filter(r=>ago(r)>=7&&ago(r)<=13),r=>r.amount);if(!(b>0))return null;const ch=(a-b)/b;if(Math.abs(ch)<0.15)return null;
+  return {i:ch>0?'up':'down',t:'The last 7 days came to <b>'+c.h.mny(a)+'</b>, '+(ch>0?'up ':'down ')+c.h.pct(Math.abs(ch))+' on the week before.',act:'goto',v:'spending'}}},
+{id:'hb02',run:c=>{const rows=(c.ss&&c.ss.rows)||[];if(rows.length<5||!c.R||c.R.len<14)return null;const days=new Set(rows.map(r=>c.h.diffD(r.date,c.today)));let n=0;for(let k=0;k<14;k++)if(!days.has(k))n++;if(n<3)return null;
+  return {i:'up',t:'You had <b>'+c.h.plural(n,'no-spend day')+'</b> in the last two weeks.',act:'goto',v:'spending'}}},
+{id:'hb03',run:c=>{const s=c.ss;if(!s||s.count<8||!s.dow||s.dow.length!==7)return null;const top=[...s.dow].sort((a,b)=>b.c-a.c)[0];if(!top||top.c<3)return null;
+  const names=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];return {i:'bulb',t:'You make the most purchases on <b>'+names[s.dow.indexOf(top)]+'s</b> ('+top.c+' so far).',act:'goto',v:'spending'}}},
+{id:'hb04',run:c=>{const s=c.ss;if(!s||s.prevCount<5||s.count<5||!(s.prevTotal>0))return null;const now=s.total/s.count,before=s.prevTotal/s.prevCount,ch=(now-before)/before;if(Math.abs(ch)<0.15)return null;
+  return {i:ch>0?'up':'down',t:'Your average purchase is <b>'+c.h.mny(now)+'</b>, '+(ch>0?'up ':'down ')+c.h.pct(Math.abs(ch))+' on the previous period.',act:'goto',v:'spending'}}},
+{id:'hb05',run:c=>{const rows=(c.ss&&c.ss.rows)||[];if(rows.length<8)return null;const small=rows.filter(r=>r.amount>0&&r.amount<10);if(small.length<4)return null;
+  return {i:'spend',t:'<b>'+small.length+'</b> purchases under '+c.h.mny(10)+' added up to <b>'+c.h.mny(c.h.sum(small,r=>r.amount))+'</b>.',act:'goto',v:'spending'}}},
+{id:'hb06',run:c=>{const s=c.ss;if(!s||!s.cats||s.cats.length<2)return null;const top=[...s.cats].sort((a,b)=>b.n-a.n)[0];if(top.n<4)return null;
+  return {i:'tag',t:'You made the most purchases in <b>'+c.h.esc(top.k)+'</b>: '+top.n+'.',act:'goto',v:'spending'}}},
+{id:'hb07',run:c=>{const rows=(c.ss&&c.ss.rows)||[];const t=c.today;const m=rows.filter(r=>r.date.getFullYear()===t.getFullYear()&&r.date.getMonth()===t.getMonth());if(m.length<3)return null;
+  return {i:'spend',t:'<b>'+c.h.mny(c.h.sum(m,r=>r.amount))+'</b> spent so far this month (day '+t.getDate()+').',act:'goto',v:'spending'}}},
+{id:'hb08',run:c=>{const rows=(c.ss&&c.ss.rows)||[];const cnt={};rows.forEach(r=>{if(r.place&&c.h.diffD(r.date,c.today)>=0&&c.h.diffD(r.date,c.today)<=29)cnt[r.place]=(cnt[r.place]||0)+1});
+  const e=Object.entries(cnt).sort((a,b)=>b[1]-a[1]);if(!e.length||e[0][1]<4)return null;
+  return {i:'user',t:'You visited <b>'+c.h.esc(e[0][0])+'</b> '+e[0][1]+' times in the last 30 days.',act:'goto',v:'spending'}}},
+/* ---- data health (4) and tips (4) ---- */
+{id:'dh01',run:c=>{const n=c.h.sum(c.D.issues.filter(x=>x.sev==='warn'),x=>x.rows.length);if(n<1)return null;return {i:'alert',t:'<b>'+c.h.plural(n,'data problem')+'</b> in your sheet are worth a look.',act:'goto',v:'data'}}},
+{id:'dh02',run:c=>{const e=c.D.expenses.filter(x=>x.category==='Other'&&!x.isRefund);if(e.length<3)return null;return {i:'tag',t:'<b>'+c.h.plural(e.length,'expense')+'</b> sit under Other. A real category makes your charts sharper.',act:'goto',v:'spending'}}},
+{id:'dh03',run:c=>{const s=c.D.items.filter(x=>x.sold&&!x.buyer);if(s.length<3)return null;return {i:'user',t:'<b>'+c.h.plural(s.length,'sold item')+'</b> have no buyer recorded.',act:'goto',v:'reselling'}}},
+{id:'dh04',run:c=>{const e=c.D.expenses.filter(x=>!x.place&&!x.isRefund);if(e.length<5)return null;return {i:'tag',t:'<b>'+c.h.plural(e.length,'expense')+'</b> have no place recorded.',act:'goto',v:'spending'}}},
+{id:'ev01',run:c=>{if(c.D.expenses.length<1)return null;return {i:'bulb',t:'Log a purchase the day you make it. It takes ten seconds and keeps your history honest.',act:'goto',v:'spending'}}},
+{id:'ev02',run:c=>{if(c.D.items.length<1)return null;return {i:'bulb',t:'Record the sale date and price as soon as an item sells so your profit and speed stats stay accurate.',act:'goto',v:'reselling'}}},
+{id:'ev03',run:c=>{if(c.D.items.length<1)return null;return {i:'clock',t:'Once a week, scan your oldest unsold items and decide whether to relist or lower the price.',act:'goto',v:'inventory'}}},
+{id:'ev04',run:c=>{if(c.D.investments.length<1)return null;return {i:'invest',t:'Update your investment values on a regular day each month so the trend line means something.',act:'goto',v:'investing'}}}
+].map(d=>({...d,cat:INSIGHT_CAT[d.id.slice(0,2)]}));
+/* Small deterministic string hash (FNV-1a). Same input always gives the same number. */
+function insightHash(s){let h=2166136261>>>0;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)>>>0}return h>>>0}
+/* Fixed order of the library, the same on every day and device. Insights are shuffled by hash inside each category,
+   then the categories are interleaved evenly, so any run of consecutive entries mixes topics (never 6 spending tips in a row). */
+const INSIGHT_ORDER=(()=>{const by={};INSIGHT_LIB.forEach(d=>{(by[d.cat]=by[d.cat]||[]).push(d.id)});const keyed=[];
+  Object.values(by).forEach(ids=>{ids.sort((a,b)=>insightHash('ord:'+a)-insightHash('ord:'+b)||(a<b?-1:1));ids.forEach((id,i)=>keyed.push({id,k:(i+.5)/ids.length,t:insightHash('tie:'+id)}))});
+  return keyed.sort((a,b)=>a.k-b.k||a.t-b.t||(a.id<b.id?-1:1)).map(x=>x.id)})();
+const insightDayNum=d=>Math.floor(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())/864e5);
+const insightQuota=dn=>4+insightHash('q:'+dn)%5; /* 4 to 8 per day */
+/* Running total of every earlier day's quota: each day's window starts exactly where the previous day's ended,
+   so the whole library is walked through evenly and nothing is skipped for weeks. Cached only as a speed-up. */
+let _insCur=null;
+function insightCursor(dn){let from=0,sum=0;if(_insCur&&_insCur.dn<=dn){from=_insCur.dn;sum=_insCur.sum}
+  for(let k=from;k<dn;k++)sum+=insightQuota(k);_insCur={dn,sum};return sum}
+function insightCtx(D,R,ss,rs,today){let st=null,inv=null;
+  return{D,R,ss,rs,today,get st(){return st||(st=inventoryStats(D))},get inv(){return inv||(inv=investingStats(D))},
+    h:{esc,mny,pct,plural,sum,avg,median,groupBy,diffD,fd,kindWord,SM,DOW}}}
+/* Runs every library entry once. A broken or data-starved entry is skipped, never fatal. */
+function insightPool(c){const pool=new Map();
+  INSIGHT_LIB.forEach(d=>{try{const r=d.run(c);if(!r||typeof r.t!=='string'||!r.t||/NaN|undefined|Infinity|\bnull\b/.test(r.t))return;
+    const act=r.act==='open'?'open':'goto';if(act==='open'&&!r.id)return;
+    pool.set(d.id,{...r,id:act==='open'?r.id:'',act,v:r.v||INSIGHT_VIEW[d.cat]||'spending',i:INSIGHT_ICONS.includes(r.i)?r.i:'bulb',_k:d.id,_cat:d.cat})}catch(e){}});
+  return pool}
+/* Picks the day's 4 to 8 insights. Pure: depends only on the calendar date and which insights have data. */
+function pickInsights(pool,today){
+  const dn=insightDayNum(today),want=insightQuota(dn),ids=INSIGHT_ORDER.filter(id=>pool.has(id)),n=ids.length;if(!n)return[];
+  const start=insightCursor(dn)%n,out=[];
+  for(let k=0;k<Math.min(want,n);k++)out.push(pool.get(ids[(start+k)%n]));
+  return out}
+let _insDay=null;
 function insights(D,R,ss,rs){
+  try{const today=sod(new Date());_insDay=dkey(today);return pickInsights(insightPool(insightCtx(D,R,ss,rs,today)),today)}
+  catch(e){console.error(e);return insightsLegacy(D,R,ss,rs)}}
+/* Re-render Home when the calendar day changes while the app stays open. */
+setInterval(()=>{try{if(_insDay&&dkey(new Date())!==_insDay&&!document.hidden&&store.D&&S.view==='home')render()}catch(e){}},60000);
+/* INSIGHTS-LIB:END */
+function insightsLegacy(D,R,ss,rs){
   const out=[];
   const pm=new Map(ss.prevCats.map(c=>[c.k,c.v]));
   const ch=ss.cats.map(c=>({k:c.k,cur:c.v,prev:pm.get(c.k)||0})).filter(c=>c.prev>=25&&c.cur>=25).map(c=>({...c,d:(c.cur-c.prev)/c.prev})).filter(c=>Math.abs(c.d)>=.1).sort((a,b)=>Math.abs(b.cur-b.prev)-Math.abs(a.cur-a.prev))[0];
@@ -1240,7 +1398,7 @@ function vHome(){
     ${kpi({label:'Invested',val:M(inv.total),delta:undefined,spark:ts.map(x=>x.v),sub:`<span class="${inv.gain>=0?'pos':'neg'}">${SM(inv.gain)}</span> all-time`,tip:'Latest logged value of every portfolio. Gain = value − everything you added.',act:'goto',v:'investing'})}
     ${kpi({label:'Cash tied up in stock',val:M(st.cost),sub:plural(st.stock.length,'item')+avgAge,tip:'What you paid for devices that have not sold yet.',act:'goto',v:'inventory'})}
   </div>
-  ${card('Insights',ins.length?`<div class="insights">${ins.map(x=>`<button class="ins" data-act="${x.act}" data-v="${x.v||''}" data-k="${x.k||''}" data-x="${esc(x.x||'')}" data-id="${x.id||''}"><span class="ic">${ICON[x.i]||ICON.bulb}</span><p>${x.t}</p></button>`).join('')}</div>`:'<div class="empty">Insights appear once there is enough history.</div>','<span class="hint">Worked out from your sheet</span>')}
+  ${card('Insights',ins.length?`<div class="insights">${ins.map(x=>`<button class="ins" data-act="${x.act}" data-v="${x.v||''}" data-k="${x.k||''}" data-x="${esc(x.x||'')}" data-id="${x.id||''}"><span class="ic">${ICON[x.i]||ICON.bulb}</span><p>${x.t}</p></button>`).join('')}</div>`:'<div class="empty">Insights appear once there is enough history.</div>','<span class="hint">Fresh picks every day</span>')}
   <div class="grid g21">
     ${card('Money in and out, last 12 months',chartBox('homeChart'),'<span class="hint">Bars: spending · Line: reselling profit</span>')}
     <div class="grid" style="align-content:start">
