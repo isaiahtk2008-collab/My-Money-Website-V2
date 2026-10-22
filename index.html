@@ -849,7 +849,7 @@ function GoogleSheetSource(sheetId,tabs=TABS){
   return {name:'Google Sheet',kind:'google',sheetId,async load(){
     const out={};
     for(const [key,tab] of Object.entries(tabs)){
-      const res=await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(tab)}`);
+      const res=await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(tab)}&_=${Date.now()}`);
       if(!res.ok)throw new Error('HTTP '+res.status);
       const txt=await res.text();const m=txt.match(/setResponse\(([\s\S]*)\);?\s*$/);if(!m)throw new Error('private');
       const j=JSON.parse(m[1]);if(j.status==='error')throw new Error('private');
@@ -1831,12 +1831,61 @@ async function send(item){
     await fetch(url,{method:'POST',mode:'no-cors',headers:h,body});return {ok:true,unverified:true}}
 }
 function badge(){try{updatePill()}catch(e){}const n=qn(),b=$('.lg-fab .lg-bd');if(b){b.textContent=n;b.hidden=!n}const fb=$('.lg-fab');if(fb)fb.setAttribute('aria-label',n?`Log an entry (${n} waiting to send)`:'Log an entry')}
-function afterSend(){try{if(store.source&&store.source.kind==='google')setTimeout(()=>store.load(store.source).catch(()=>{}),4000)}catch(e){}}
+/* ---------- Show new entries immediately ----------
+   A sent entry is kept in a small on-device overlay and merged into what every screen reads, until the sheet itself
+   returns a matching row. This never writes to the sheet. The sheet refresh then retries a few times (Google can
+   take a while to show a new row) and always skips Google's cache. */
+const OVL_KEY='lg.overlay',OVL_TABS={'Expenses':'Expenses','Investment Tracking Sheet':'Investments'};
+const OVL_FIELDS={Expenses:['Item Purchased','Amount','Date of Purchase'],Investments:['Investment Type','Total Portfolio Value','Date']};
+const ovlRead=()=>{const a=J(OVL_KEY,[]);return Array.isArray(a)?a:[]};
+const ovlStr=v=>String(v==null?'':v).trim();
+const ovlSame=(a,b)=>{const x=ovlStr(a),y=ovlStr(b),nx=parseFloat(x.replace(/[$,]/g,'')),ny=parseFloat(y.replace(/[$,]/g,''));return x===y||(!isNaN(nx)&&nx===ny)};
+function ovlHit(key,r,o){const f=OVL_FIELDS[key];
+  if(!ovlSame(r[f[0]],o[f[0]])||!ovlSame(r[f[1]],o[f[1]]))return false;
+  const a=ovlStr(r[f[2]]).slice(0,10),b=ovlStr(o[f[2]]).slice(0,10),iso=/^\d{4}-\d{2}-\d{2}$/;
+  return !(iso.test(a)&&iso.test(b))||a===b}
+const ovlSig=e=>{const f=OVL_FIELDS[e.key],a=ovlStr(e.row[f[1]]).replace(/[$,]/g,'');return e.key+'|'+ovlStr(e.row[f[0]]).toLowerCase()+'|'+(parseFloat(a)||a)+'|'+ovlStr(e.row[f[2]]).slice(0,10)};
+const ovlCount=(raw,key,row)=>{const t=raw&&raw[key];return t&&Array.isArray(t.rows)?t.rows.filter(r=>ovlHit(key,r,row)).length:0};
+/* An entry counts as synced once the sheet holds more matching rows than it did when the entry was added
+   (so a second identical expense still shows until the sheet really has both). */
+function ovlMerge(raw){
+  const now=Date.now(),keep=[],out=Object.assign({},raw),copied={},rank={};
+  ovlRead().forEach(e=>{
+    if(!e||!e.row||!(now-e.ts<864e5))return;
+    const t=raw&&raw[e.key];
+    if(!t||!Array.isArray(t.rows)){keep.push(e);return}
+    const s=ovlSig(e),k=rank[s]||0;rank[s]=k+1;
+    if(ovlCount(raw,e.key,e.row)>=(e.pre||0)+k+1)return;
+    if(!copied[e.key]){out[e.key]=Object.assign({},t,{rows:t.rows.slice()});copied[e.key]=1}
+    out[e.key].rows.push(e.row);keep.push(e)});
+  return {raw:out,keep}}
+const _storeSet=store.set.bind(store);
+store.set=function(raw,source){store.base=raw;const m=ovlMerge(raw);if(m.keep.length!==ovlRead().length)W(OVL_KEY,m.keep);return _storeSet(m.raw,source)};
+function addOverlay(it){try{const key=OVL_TABS[it.tab];if(!key||!it.values)return;
+  const b=store.base||store.raw;if(b)W(OVL_KEY,ovlMerge(b).keep);   /* settle anything the sheet already returned first */
+  const a=ovlRead();if(a.some(e=>e.id===it.id))return;
+  const row=Object.assign({},it.values,{Timestamp:new Date().toISOString()});
+  a.push({id:it.id,key,row,pre:b?ovlCount(b,key,row):0,ts:Date.now()});W(OVL_KEY,a);
+  if(b)store.set(b,store.source)}catch(e){}}
+let rfBusy=false;
+async function refreshAfterSend(){
+  if(rfBusy)return;rfBusy=true;let tries=0,fails=0;
+  try{
+    const sid=LS.get('sheetId');
+    const src=store.source&&store.source.kind==='google'?store.source:(sid?GoogleSheetSource(sid):null);
+    if(!src)return;
+    const pending=ovlRead().length>0;
+    for(const d of [3000,8000,20000,45000]){
+      await new Promise(r=>setTimeout(r,d));tries++;
+      try{await store.load(src);if(pending&&!ovlRead().length)return}catch(e){fails++}}
+    if(tries&&fails===tries)toast('Saved. Could not refresh from Google yet, showing your new entry from this device.')
+  }finally{rfBusy=false}}
+function afterSend(){try{refreshAfterSend()}catch(e){}}
 async function flush(silent){
   const url=LS.get('lgUrl');const q=J('lg.q',[]);if(!url||!q.length||flushing||navigator.onLine===false)return 0;
   flushing=true;let sent=0;const keep=[];
   for(let n=0;n<q.length;n++){const it=q[n];
-    try{await send(it);sent++}catch(e){it.err=e&&e.fatal?e.message:null;keep.push(it);if(!(e&&e.fatal)){keep.push(...q.slice(n+1));break}}}
+    try{await send(it);sent++;addOverlay(it)}catch(e){it.err=e&&e.fatal?e.message:null;keep.push(it);if(!(e&&e.fatal)){keep.push(...q.slice(n+1));break}}}
   W('lg.q',keep);flushing=false;badge();
   if(sent){afterSend();if(!silent)toast(sent===1?'Sent 1 waiting entry':`Sent ${sent} waiting entries`)}
   return sent}
@@ -1849,7 +1898,7 @@ async function submit(){
   if(LS.get('lgUrl')&&navigator.onLine!==false){try{const r=await send(item);st=r.unverified?'unsure':'sent'}catch(e){if(e&&e.fatal){err=e.message;item.err=err}}}
   if(st==='queued'){const q=J('lg.q',[]);q.push(item);W('lg.q',q)}
   clearTimeout(saveT);remember(f);LS.set(dKey(f.id),'');busy=false;bumpChanges();badge();setTimeout(showBackupBanner,600);
-  if(st!=='queued')afterSend();
+  if(st!=='queued'){addOverlay(item);afterSend()}
   const ok=st==='sent',w=st!=='sent';
   const msg=st==='sent'?`Added to the “${E(f.tab)}” tab.`
    :st==='unsure'?'Sent to Google, but the reply could not be read. Glance at the sheet to confirm it landed.'
