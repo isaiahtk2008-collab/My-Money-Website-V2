@@ -909,7 +909,11 @@ function resolveRange(S){
   const end=TODAY;let start;const y=TODAY.getFullYear(),m=TODAY.getMonth();
   const D=store.D;const allDates=[...D.expenses.map(e=>e.date),...D.items.flatMap(i=>[i.buyDate,i.sellDate]).filter(Boolean)];
   const first=allDates.length?new Date(Math.min(...allDates)):addD(TODAY,-364);
-  switch(S.range){case'month':start=new Date(y,m,1);break;case'30d':start=addD(end,-29);break;case'90d':start=addD(end,-89);break;
+  switch(S.range){case'month':start=new Date(y,m,1);break;
+    case'today':start=TODAY;break;
+    case'wtd':start=addD(TODAY,-((TODAY.getDay()+6)%7));break;
+    case'wbw':start=addD(TODAY,-((TODAY.getDay()+6)%7)-77);break;
+    case'30d':start=addD(end,-29);break;case'90d':start=addD(end,-89);break;
     case'ytd':start=new Date(y,0,1);break;case'12m':start=addD(end,-364);break;case'all':start=first;break;
     case'custom':{const a=pd(S.cs),b=pd(S.ce);start=a||addD(end,-29);if(b)return mk(start,b);break}default:start=addD(end,-89)}
   return mk(start,end);
@@ -1020,7 +1024,7 @@ const S={view:'home',range:'90d',cs:'',ce:'',kind:'All',gran:null,F:{},rstat:'Al
 const VIEW_NAMES=['home','spending','reselling','inventory','investing','data'];
 const VIEW_LABEL={home:'Home',spending:'Spending',reselling:'Reselling',inventory:'Stock',investing:'Investing',data:'Data'};
 const VIEW_ICON={home:'home',spending:'spend',reselling:'resell',inventory:'box',investing:'invest',data:'data'};
-const RANGES=[['month','This month'],['30d','30D'],['90d','90D'],['ytd','YTD'],['12m','12M'],['all','All'],['custom','Custom']];
+const RANGES=[['month','This month'],['today','Today'],['wtd','WTD'],['wbw','Week by week'],['30d','30D'],['90d','90D'],['ytd','YTD'],['12m','12M'],['all','All'],['custom','Custom']];
 const RG=()=>resolveRange(S);
 const cv=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const PAL=()=>[1,2,3,4,5,6,7,8].map(i=>cv('--c'+i));
@@ -1197,7 +1201,7 @@ function insights(D,R,ss,rs){
   const out=[];
   const pm=new Map(ss.prevCats.map(c=>[c.k,c.v]));
   const ch=ss.cats.map(c=>({k:c.k,cur:c.v,prev:pm.get(c.k)||0})).filter(c=>c.prev>=25&&c.cur>=25).map(c=>({...c,d:(c.cur-c.prev)/c.prev})).filter(c=>Math.abs(c.d)>=.1).sort((a,b)=>Math.abs(b.cur-b.prev)-Math.abs(a.cur-a.prev))[0];
-  if(ch)out.push({i:'spend',t:`<b>${esc(ch.k)}</b> is ${ch.d>0?'up':'down'} ${Math.abs(ch.d*100).toFixed(0)}% on the previous ${R.len} days (${SM(ch.cur-ch.prev)}).`,act:'goto',v:'spending',k:'cat',x:ch.k});
+  if(ch)out.push({i:'spend',t:`<b>${esc(ch.k)}</b> is ${ch.d>0?'up':'down'} ${Math.abs(ch.d*100).toFixed(0)}% on the previous ${plural(R.len,'day')} (${SM(ch.cur-ch.prev)}).`,act:'goto',v:'spending',k:'cat',x:ch.k});
   const sold=D.items.filter(i=>i.sold&&i.days!=null);
   const byK=['Phone','PC','Accessory'].map(k=>({k,n:sold.filter(i=>i.kind===k).length,d:avg(sold.filter(i=>i.kind===k),i=>i.days)})).filter(x=>x.n>=3&&x.d!=null).sort((a,b)=>a.d-b.d);
   if(byK.length>=2)out.push({i:'clock',t:`<b>${kindWord(byK[0].k)}</b> sell in ${Math.round(byK[0].d)} days on average. <b>${kindWord(byK[byK.length-1].k)}</b> take ${Math.round(byK[byK.length-1].d)}.`,act:'goto',v:'reselling'});
@@ -2027,6 +2031,7 @@ function secHtml(){
   return `<div class="lg-top"><div><h2>Security &amp; Settings</h2><p>Sign-in and sheet connection</p></div><div class="lg-r">${xbtn()}</div></div>
   <div data-sec-root class="sec-row"><div><b>${who}</b><small>Google sign-in works on any device and is limited to ${E(A.allowedEmail||'')}</small></div><button class="btn sec" data-sec="signout">Sign out</button></div>
   <h3 style="margin:20px 0 4px">Username and password</h3>${pw}
+  ${typeof window.__mmNotifSettingsHtml==='function'?window.__mmNotifSettingsHtml():''}
   <h3 style="margin:20px 0 4px">Sheet connection</h3>
   <div class="sec-row"><div><b>Google Sheet and waiting entries</b><small>Connection link, test and send queue</small></div><button class="btn sec" data-sec="sheet">Open</button></div>
   <div style="height:24px"></div>`;
@@ -2063,6 +2068,80 @@ document.addEventListener('click',e=>{
   }
 });
 (()=>{const tl=$('#tools');if(tl&&tl.parentNode&&!$('#secbtn')){const b=document.createElement('button');b.type='button';b.id='secbtn';b.className='ibtn';b.dataset.sec='open';b.setAttribute('aria-label','Security & Settings');b.title='Security & Settings';b.textContent='$';tl.parentNode.insertBefore(b,tl)}})();
+
+/* ================= WEEKLY CONTRIBUTION REMINDER (in-app only; device-local; never touches the sheet or network) ================= */
+(()=>{try{
+/* NOTIF-CORE-START */
+const NOTIF_DEFAULTS={enabled:false,day:4,time:'17:00'};   // day = JS getDay(): 0=Sun..6=Sat, 4=Thursday
+
+function notifNormalize(raw) {
+  const r = (raw && typeof raw === 'object') ? raw : {};
+  return {
+    enabled: r.enabled === true,
+    day: (Number.isInteger(r.day) && r.day >= 0 && r.day <= 6) ? r.day : NOTIF_DEFAULTS.day,
+    time: (typeof r.time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(r.time)) ? r.time : NOTIF_DEFAULTS.time
+  };
+}
+
+function notifWeekKey(now) {
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function notifDue(cfg, now, lastShownWeek, lastDismissedWeek) {
+  if (!cfg.enabled) return false;
+  const order = x => (x + 6) % 7;
+  const nowOrder = order(now.getDay());
+  const cfgOrder = order(cfg.day);
+  const mins = now.getHours() * 60 + now.getMinutes();
+  const [hh, mm] = cfg.time.split(':').map(Number);
+  const cfgMins = hh * 60 + mm;
+  const dayReached = nowOrder > cfgOrder || (nowOrder === cfgOrder && mins >= cfgMins);
+  return dayReached && notifWeekKey(now) !== lastDismissedWeek;
+}
+/* NOTIF-CORE-END */
+
+function notifLoad(){ try{ return notifNormalize(JSON.parse(localStorage.getItem('mm.notif'))) }catch(e){ return notifNormalize(null) } }
+function notifSave(cfg){ try{ localStorage.setItem('mm.notif',JSON.stringify(notifNormalize(cfg))) }catch(e){} }
+function notifDismissedWeek(){ try{ return localStorage.getItem('mm.notif.dismissed')||'' }catch(e){ return '' } }
+
+function notifSettingsHtml(){ const c=notifLoad();
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  return `
+    <h3 style="margin:20px 0 4px">Reminders</h3>
+    <p class="hint" style="color:var(--muted);margin-bottom:10px">Shows a reminder inside the app, while it is open, to make your weekly investment contribution. Default is Thursday at 5:00 PM. It only uses this device and never touches your sheet.</p>
+    <div class="sec-row"><div><b>Weekly contribution reminder</b><small>Show a banner when it is time</small></div><label><input type="checkbox" id="notif-on" ${c.enabled?'checked':''}> On</label></div>
+    <div class="lg-f"><label class="lg-l" for="notif-day">Day</label><select class="lg-set" id="notif-day">${days.map((day, index) => `<option value="${index}" ${index===c.day?'selected':''}>${day}</option>`).join('')}</select></div>
+    <div class="lg-f"><label class="lg-l" for="notif-time">Time</label><input type="time" class="lg-set" id="notif-time" value="${c.time}"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn sec" data-notif="test">Preview reminder</button></div>
+  `;
+}
+function notifShowBanner(preview){
+  let b=document.getElementById('notif-banner');
+  if(!b){
+    b=document.createElement('div');
+    b.id='notif-banner';
+    b.setAttribute('role','status');
+    b.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:9998;max-width:340px;padding:14px 16px;border-radius:14px;border:1px solid var(--line,#2a303b);background:var(--surface,#14181f);color:var(--ink,#e9ecf1);box-shadow:0 8px 30px rgba(0,0,0,.35);font-size:14px;line-height:1.4';
+    b.innerHTML = '<div style="margin-bottom:10px"><b>Contribution reminder</b><br>Time to make this week\'s investment contribution.</div><button type="button" class="btn sec" data-notif="dismiss">Dismiss</button>';
+    document.body.appendChild(b);
+  }
+  b.dataset.preview=preview?'1':'';
+}
+function notifHideBanner(){ const b=document.getElementById('notif-banner'); if(b) b.remove(); }
+
+function notifCheck(){ try{ if(notifDue(notifLoad(),new Date(),'',notifDismissedWeek())) notifShowBanner(false); else if(!notifLoad().enabled){ const b=document.getElementById('notif-banner'); if(b&&!b.dataset.preview) notifHideBanner(); } }catch(e){} }
+
+document.addEventListener('change',e=>{ try{ const t=e.target; if(!t||!t.id) return; if(t.id!=='notif-on'&&t.id!=='notif-day'&&t.id!=='notif-time') return;
+  const c=notifLoad(); if(t.id==='notif-on') c.enabled=t.checked; if(t.id==='notif-day') c.day=Number(t.value); if(t.id==='notif-time') c.time=t.value; notifSave(c); try{ localStorage.removeItem('mm.notif.dismissed') }catch(e2){} notifCheck(); }catch(err){} });
+document.addEventListener('click',e=>{ try{ const t=e.target&&e.target.closest?e.target.closest('[data-notif]'):null; if(!t) return;
+  if(t.dataset.notif==='test') notifShowBanner(true);
+  if(t.dataset.notif==='dismiss'){ const b=document.getElementById('notif-banner'); if(!(b&&b.dataset.preview)){ try{ localStorage.setItem('mm.notif.dismissed',notifWeekKey(new Date())) }catch(e2){} } notifHideBanner(); } }catch(err){} });
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) notifCheck(); });
+setTimeout(notifCheck,3000); setInterval(notifCheck,60000);
+window.__mmNotifSettingsHtml=notifSettingsHtml;
+}catch(err){console.error('Reminder module failed to start (site unaffected):',err)}})();
 
 setTimeout(()=>flush(true),2500);
 setInterval(()=>{if(qn()&&!document.hidden)flush(true)},60000);
