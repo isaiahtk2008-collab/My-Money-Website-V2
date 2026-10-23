@@ -436,6 +436,7 @@
 <title>My Money</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=block">
 <style>
 /* Layout concept: slim nav rail + calm card canvas. Summary first, every number drills into detail. */
 :root{
@@ -478,6 +479,76 @@ button.logo:hover{filter:brightness(1.1)}
 #secbtn{display:none;font-weight:800;font-size:16px}
 .sec-row{display:flex;gap:10px;align-items:center;justify-content:space-between;border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:10px 0;background:var(--surface2)}
 .sec-row b{display:block;font-size:13.5px}.sec-row small{color:var(--muted);font-size:12px}
+/* ===== Security & Settings: Material 3 cards (additive, m3- prefixed) ===== */
+.m3-scope {
+  --md-sys-color-surface: #f8f9fa;
+  --md-sys-color-surface-container: #ffffff;
+  --md-sys-color-outline-variant: #dadce0;
+  --md-sys-color-on-surface: #1f1f1f;
+  --md-sys-color-on-surface-variant: #5f6368;
+  --md-sys-color-primary: #0b57d0;
+  font-family: "Google Sans", Inter, system-ui, sans-serif;
+  color: var(--md-sys-color-on-surface);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .m3-scope {
+    --md-sys-color-surface: #1f1f1f;
+    --md-sys-color-surface-container: #2d2d2d;
+    --md-sys-color-outline-variant: #444746;
+    --md-sys-color-on-surface: #e3e3e3;
+    --md-sys-color-on-surface-variant: #c4c7c5;
+    --md-sys-color-primary: #a8c7fa;
+  }
+}
+:root[data-theme="dark"] .m3-scope {
+  --md-sys-color-surface: #1f1f1f;
+  --md-sys-color-surface-container: #2d2d2d;
+  --md-sys-color-outline-variant: #444746;
+  --md-sys-color-on-surface: #e3e3e3;
+  --md-sys-color-on-surface-variant: #c4c7c5;
+  --md-sys-color-primary: #a8c7fa;
+}
+.m3-card {
+  background: var(--md-sys-color-surface-container);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 16px;
+  padding: 16px 20px;
+  margin: 12px 0;
+}
+.m3-card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.m3-card-title { font-weight: 500; font-size: 16px; }
+.m3-card-sub { font-size: 13px; color: var(--md-sys-color-on-surface-variant); }
+.m3-icon {
+  font-family: 'Material Symbols Outlined';
+  font-size: 24px;
+  color: var(--md-sys-color-primary);
+  font-weight: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  font-feature-settings: 'liga';
+  flex: none;
+}
+.m3-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; }
+.m3-row small { color: var(--md-sys-color-on-surface-variant); font-size: 12px; }
+.m3-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 13px;
+}
+.m3-chip.on { color: var(--md-sys-color-primary); border-color: var(--md-sys-color-primary); }
+.m3-chip.off { color: var(--md-sys-color-on-surface-variant); }
+.m3-scope .lg-set {
+  background: var(--md-sys-color-surface);
+  border-color: var(--md-sys-color-outline-variant);
+  color: var(--md-sys-color-on-surface);
+}
+.m3-scope .hint { color: var(--md-sys-color-on-surface-variant) !important; }
 .nav{display:flex;flex-direction:column;align-items:center;gap:3px;width:60px;padding:8px 0 6px;border-radius:16px;color:var(--muted);font-size:10.5px;font-weight:600}
 .nav svg{width:22px;height:22px}
 .nav:hover{background:var(--surface2)}
@@ -2362,13 +2433,25 @@ function secHtml(){
    <div class="lg-f"><label class="lg-l" for="sec-n1">${has?'New password':'Password'} (8 or more characters)</label><input type="password" class="lg-set" id="sec-n1" autocomplete="new-password"></div>
    <div class="lg-f"><label class="lg-l" for="sec-n2">Repeat password</label><input type="password" class="lg-set" id="sec-n2" autocomplete="new-password"></div>
    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-sec="save">${has?'Update username and password':'Save username and password'}</button>${has?'<button class="btn sec" data-sec="remove">Remove</button>':''}</div><p class="lg-st" id="sec-st" role="status"></p>`;
+  const sheetOn=!!LS.get('lgUrl');
+  const sheetChip=sheetOn?'<span class="m3-chip on">Connected</span>':'<span class="m3-chip off">Not connected</span>';
   return `<div class="lg-top"><div><h2>Security &amp; Settings</h2><p>Sign-in and sheet connection</p></div><div class="lg-r">${xbtn()}</div></div>
-  <div data-sec-root class="sec-row"><div><b>${who}</b><small>Google sign-in works on any device and is limited to ${E(A.allowedEmail||'')}</small></div><button class="btn sec" data-sec="signout">Sign out</button></div>
-  <h3 style="margin:20px 0 4px">Username and password</h3>${pw}
-  ${typeof window.__mmNotifSettingsHtml==='function'?window.__mmNotifSettingsHtml():''}
-  <h3 style="margin:20px 0 4px">Sheet connection</h3>
-  <div class="sec-row"><div><b>Google Sheet and waiting entries</b><small>Connection link, test and send queue</small></div><button class="btn sec" data-sec="sheet">Open</button></div>
-  <div style="height:24px"></div>`;
+<div class="m3-scope">
+<section class="m3-card">
+  <div class="m3-card-head"><span class="m3-icon" aria-hidden="true">account_circle</span><div><div class="m3-card-title">Google Account Connection</div><div class="m3-card-sub">Sign-in status and account</div></div></div>
+  <div data-sec-root class="m3-row"><div><b>${who}</b><small style="display:block">Google sign-in works on any device and is limited to ${E(A.allowedEmail||'')}</small></div><button class="btn sec" data-sec="signout">Sign out</button></div>
+</section>
+<section class="m3-card">
+  <div class="m3-card-head"><span class="m3-icon" aria-hidden="true">lock</span><div><div class="m3-card-title">Local Security</div><div class="m3-card-sub">Username and password</div></div></div>
+  ${pw}
+</section>
+${typeof window.__mmNotifSettingsHtml==='function'?window.__mmNotifSettingsHtml():''}
+<section class="m3-card">
+  <div class="m3-card-head"><span class="m3-icon" aria-hidden="true">sync</span><div><div class="m3-card-title">Sheet Sync Connection</div><div class="m3-card-sub">Google Sheet and waiting entries</div></div></div>
+  <div class="m3-row"><div>${sheetChip}<small style="display:block;margin-top:6px">Connection link, test and send queue</small></div><button class="btn sec" data-sec="sheet">Open</button></div>
+</section>
+<div style="height:24px"></div>
+</div>`;
 }
 function renderSecurity(){
   const html=secHtml(),d=$('#overlay .drawer.lg');
@@ -2443,12 +2526,13 @@ function notifDismissedWeek(){ try{ return localStorage.getItem('mm.notif.dismis
 function notifSettingsHtml(){ const c=notifLoad();
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   return `
-    <h3 style="margin:20px 0 4px">Reminders</h3>
-    <p class="hint" style="color:var(--muted);margin-bottom:10px">Shows a reminder inside the app, while it is open, to make your weekly investment contribution. Default is Thursday at 5:00 PM. It only uses this device and never touches your sheet.</p>
-    <div class="sec-row"><div><b>Weekly contribution reminder</b><small>Show a banner when it is time</small></div><label><input type="checkbox" id="notif-on" ${c.enabled?'checked':''}> On</label></div>
-    <div class="lg-f"><label class="lg-l" for="notif-day">Day</label><select class="lg-set" id="notif-day">${days.map((day, index) => `<option value="${index}" ${index===c.day?'selected':''}>${day}</option>`).join('')}</select></div>
-    <div class="lg-f"><label class="lg-l" for="notif-time">Time</label><input type="time" class="lg-set" id="notif-time" value="${c.time}"></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn sec" data-notif="test">Preview reminder</button></div>
+<section class="m3-card">
+  <div class="m3-card-head"><span class="m3-icon" aria-hidden="true">notifications</span><div><div class="m3-card-title">In-App Reminders</div><div class="m3-card-sub">Weekly contribution reminder. Shown inside the app while it is open. Default Thursday at 5:00 PM. Stays on this device.</div></div></div>
+  <div class="m3-row"><div><b>Weekly contribution reminder</b><small style="display:block">Show a banner when it is time</small></div><label><input type="checkbox" id="notif-on" ${c.enabled?'checked':''}> On</label></div>
+  <div class="lg-f"><label class="lg-l" for="notif-day">Day</label><select class="lg-set" id="notif-day">${days.map((day, index) => `<option value="${index}" ${index===c.day?'selected':''}>${day}</option>`).join('')}</select></div>
+  <div class="lg-f"><label class="lg-l" for="notif-time">Time</label><input type="time" class="lg-set" id="notif-time" value="${c.time}"></div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn sec" data-notif="test">Preview reminder</button></div>
+</section>
   `;
 }
 function notifShowBanner(preview){
