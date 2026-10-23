@@ -920,7 +920,6 @@ function resolveRange(S){
   switch(S.range){case'month':start=new Date(y,m,1);break;
     case'today':start=TODAY;break;
     case'wtd':start=addD(TODAY,-((TODAY.getDay()+6)%7));break;
-    case'wbw':start=addD(TODAY,-((TODAY.getDay()+6)%7)-77);break;
     case'30d':start=addD(end,-29);break;case'90d':start=addD(end,-89);break;
     case'ytd':start=new Date(y,0,1);break;case'12m':start=addD(end,-364);break;case'all':start=first;break;
     case'custom':{const a=pd(S.cs),b=pd(S.ce);start=a||addD(end,-29);if(b)return mk(start,b);break}default:start=addD(end,-89)}
@@ -1032,7 +1031,7 @@ const S={view:'home',range:'90d',cs:'',ce:'',kind:'All',gran:null,F:{},rstat:'Al
 const VIEW_NAMES=['home','spending','reselling','inventory','investing','data'];
 const VIEW_LABEL={home:'Home',spending:'Spending',reselling:'Reselling',inventory:'Stock',investing:'Investing',data:'Data'};
 const VIEW_ICON={home:'home',spending:'spend',reselling:'resell',inventory:'box',investing:'invest',data:'data'};
-const RANGES=[['month','This month'],['today','Today'],['wtd','WTD'],['wbw','Week by week'],['30d','30D'],['90d','90D'],['ytd','YTD'],['12m','12M'],['all','All'],['custom','Custom']];
+const RANGES=[['today','Today'],['wtd','WTD'],['month','This month'],['30d','30D'],['90d','90D'],['ytd','YTD'],['12m','12M'],['all','All'],['custom','Custom']];
 const RG=()=>resolveRange(S);
 const cv=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const PAL=()=>[1,2,3,4,5,6,7,8].map(i=>cv('--c'+i));
@@ -1771,7 +1770,7 @@ matchMedia('(prefers-color-scheme:dark)').addEventListener&&matchMedia('(prefers
 /* ================= BOOT ================= */
 (function boot(){
   try{
-    S.theme=LS.get('theme')||'auto';S.privacy=LS.get('privacy')==='1';S.range=LS.get('range')||'90d';
+    S.theme=LS.get('theme')||'auto';S.privacy=LS.get('privacy')==='1';S.range=LS.get('range')||'90d';if(!RANGES.some(r=>r[0]===S.range))S.range='90d';
     applyTheme();document.body.classList.toggle('privacy',S.privacy);
     const h=location.hash.slice(1);if(VIEW_NAMES.includes(h))S.view=h;
     store.set(MM_RAW,EmbeddedSource);
