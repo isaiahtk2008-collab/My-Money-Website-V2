@@ -1,4 +1,4 @@
-// My Money sheet connector v3: reads AND writes your sheet.
+// My Money sheet connector v3: reads AND writes your sheet (adds rows; edits or deletes ONE Expenses row only after re-checking it).
 // HOW TO INSTALL: open your Google Sheet > Extensions > Apps Script. Select ALL the old code, delete it, paste this,
 // press Save. Then Deploy > Manage deployments > pencil icon > Version: New version > Deploy.
 // Keep "Execute as: Me" and "Who has access: Anyone". The /exec link stays the same.
@@ -8,6 +8,10 @@ const SECRET = ''; // optional: a word here AND the same word in My Money > Log 
 // WRITE: these are the ONLY tabs entries can be added to (matched ignoring case and spaces).
 // Summary, Master Inventory, PCs, PnA and the other formula tabs are not listed, so they can never be touched.
 const ALLOWED_TABS = ['Form Responses - Bought', 'Form Responses - PCs', 'Bought Access - Form', 'Form Responses - Sold', 'Form Responses - Sold PCs', 'Sold Access - Form', 'Expenses', 'Investment Tracking Sheet'];
+
+// EDIT / DELETE: the ONLY tabs where an existing row can be changed or removed (matched ignoring case and spaces).
+// Formula tabs (Master Inventory, PCs, PnA, Summary...) are not listed, so a row there can never be edited or deleted.
+const EDITABLE_TABS = ['Expenses'];
 
 // READ: what the website loads. key = the site's name, tab = your tab, keys = columns that prove a row is real data.
 // Reading never changes anything in the sheet.
@@ -153,7 +157,7 @@ function checkAll() {
 
 function doGet(e) {
   const p = (e && e.parameter) || {};
-  if (p.action !== 'read' && p.action !== 'check') return json({ ok: true, service: 'my-money-entry', version: 3, read: true });
+  if (p.action !== 'read' && p.action !== 'check') return json({ ok: true, service: 'my-money-entry', version: 3, read: true, edit: true });
   if (SECRET && p.secret !== SECRET) return json({ ok: false, error: 'auth' });
   try {
     if (p.action === 'check') return json({ ok: true, version: 3, at: new Date().toISOString(), tabs: checkAll() });
@@ -193,6 +197,69 @@ function markId(id) {
   props.setProperty('SEEN_IDS', JSON.stringify(out));
 }
 
+/* ---------- editing and deleting ONE existing row (new requests use `target` and `changes`, never `tab` and `values`,
+   so an older copy of this script can only reject them, never mistake them for a new entry) ---------- */
+const normHeader = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// Is the cell the website saw still what the sheet holds right now?
+function sameCell(live, want) {
+  const blank = v => v === null || v === undefined || String(v).trim() === '';
+  if (blank(live) || blank(want)) return blank(live) && blank(want);
+  const iso = /^\d{4}-\d{2}-\d{2}/;
+  if (typeof live === 'string' && iso.test(live) && iso.test(String(want))) return live.slice(0, 10) === String(want).slice(0, 10);
+  if (typeof live === 'number') { const n = parseFloat(String(want).replace(/[$,]/g, '')); return !isNaN(n) && Math.abs(n - live) < 0.005; }
+  return String(live).trim().toLowerCase() === String(want).trim().toLowerCase();
+}
+
+// Finds the one row the website means and proves it is still the same row. Any doubt = refuse, change nothing.
+function lockRow(ss, body) {
+  const reqTab = String(body.target || '').trim().toLowerCase();
+  if (!EDITABLE_TABS.some(t => t.toLowerCase() === reqTab)) return { error: 'tab not allowed: ' + body.target };
+  const sheet = findSheet(ss, reqTab);
+  if (!sheet) return { error: 'no tab: ' + body.target };
+  const row = Number(body.row);
+  if (!Number.isInteger(row) || row < 2 || row > sheet.getLastRow()) return { error: 'bad row' };
+  const expect = body.expect && typeof body.expect === 'object' ? body.expect : {};
+  const keys = Object.keys(expect);
+  if (keys.length < 2) return { error: 'expect needs at least 2 columns' };
+  const lastCol = sheet.getLastColumn();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(normHeader);
+  const live = sheet.getRange(row, 1, 1, lastCol).getValues()[0];
+  const tz = ss.getSpreadsheetTimeZone();
+  const changed = keys.some(k => { const c = headers.indexOf(normHeader(k)); return c < 0 || !sameCell(cleanCell(live[c], tz), expect[k]); });
+  if (changed) return { error: 'row changed' };
+  return { sheet, row, headers, lastCol };
+}
+
+// Writes only the named cells of that one row. Formula cells and the Timestamp are never touched.
+function editRow(ss, body) {
+  const g = lockRow(ss, body);
+  if (g.error) return { ok: false, error: g.error };
+  const changes = body.changes && typeof body.changes === 'object' ? body.changes : {};
+  const updated = [], skipped = [];
+  Object.keys(changes).forEach(k => {
+    const c = g.headers.indexOf(normHeader(k));
+    if (c < 0 || normHeader(k) === 'timestamp') { skipped.push(k); return; }
+    const cell = g.sheet.getRange(g.row, c + 1);
+    if (cell.getFormula() !== '') { skipped.push(k); return; }
+    let v = changes[k];
+    if (v && typeof v === 'object' && v.$date) { const [y, m, d] = String(v.$date).split('-').map(Number); v = new Date(y, m - 1, d); }
+    if (v !== null && typeof v === 'object' && !(v instanceof Date)) { skipped.push(k); return; }
+    cell.setValue(v === null ? '' : v);
+    updated.push(k);
+  });
+  return { ok: true, row: g.row, updated, skipped };
+}
+
+// Removes exactly that one row, and only if it holds no formulas.
+function deleteRow(ss, body) {
+  const g = lockRow(ss, body);
+  if (g.error) return { ok: false, error: g.error };
+  for (let c = 1; c <= g.lastCol; c++) if (g.sheet.getRange(g.row, c).getFormula() !== '') return { ok: false, error: 'row has formulas' };
+  g.sheet.deleteRow(g.row);
+  return { ok: true, row: g.row, deleted: true };
+}
+
 function doPost(e) {
   const lock = LockService.getScriptLock();
   try {
@@ -201,6 +268,12 @@ function doPost(e) {
     try { body = JSON.parse((e && e.postData && e.postData.contents) || '{}'); } catch (parseErr) { return json({ ok: false, error: 'bad json' }); }
     if (!body || typeof body !== 'object') return json({ ok: false, error: 'bad json' });
     if (SECRET && body.secret !== SECRET) return json({ ok: false, error: 'auth' });
+
+    // Edit or delete one existing row (handled before anything that could add a row)
+    if (body.action === 'edit' || body.action === 'delete') {
+      const ss0 = SpreadsheetApp.getActiveSpreadsheet();
+      return json(body.action === 'edit' ? editRow(ss0, body) : deleteRow(ss0, body));
+    }
 
     // Ignore retries of an entry that already landed
     if (seenId(body.id)) return json({ ok: true, dup: true });
