@@ -591,6 +591,22 @@ tr.grp:hover td{background:var(--surface2)}
 .btn{height:36px;padding:0 16px;border-radius:12px;font-weight:700;background:var(--accent);color:var(--accent-ink)}
 .btn.sec{background:var(--surface2);color:var(--ink)}
 .btn:hover{filter:brightness(1.07)}
+.dfoot{display:flex;justify-content:space-between;gap:10px;margin-top:20px;padding-top:14px;border-top:1px solid var(--line)}
+.btn.danger{background:var(--bad-soft);color:var(--bad)}
+.btn.danger:hover{filter:brightness(.95)}
+.btn.danger:focus-visible{outline:2px solid var(--bad);outline-offset:1px}
+.btn:disabled,.btn:disabled:hover{opacity:.55;cursor:default;filter:none}
+.ed-f{margin-bottom:12px}
+.ed-f label{font-size:13px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px}
+.ed-f input[type=text],.ed-f input[type=date],.ed-f select{width:100%;height:42px;font-size:16px;border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:0 12px;color:var(--ink)}
+.ed-f input:focus,.ed-f select:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+.ed-f.bad input,.ed-f.bad select{border-color:var(--bad)}
+.ed-f .ed-err{font-size:12px;color:var(--bad);margin-top:4px}
+.ed-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+@media (max-width:420px){.ed-grid{grid-template-columns:1fr}}
+.ed-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
+.ed-msg{color:var(--bad);font-size:13px;margin:10px 0 0}
+.iss-rows{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px}
 .empty{padding:36px 16px;text-align:center;color:var(--muted)}
 .empty b{display:block;color:var(--ink);font-size:15px;margin-bottom:4px}
 .activef{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
@@ -1160,7 +1176,8 @@ function openDetail(id){
       <div class="big">${M(o.amount)}${o.isRefund?' <span class="pill good">Refund</span>':''}</div>
       ${kv([['Date',fdy(o.date)+' ('+rel(o.date)+')'],['Where',o.place],['Paid with',o.payment],['Type',o.tag||'Untagged'],['Notes',o.notes],['Sheet row','Expenses · row '+o.row]])}
       ${more.length?`<h3 style="margin-bottom:6px">More at ${esc(o.place)}</h3><div class="list">${more.map(s=>`<button class="li" data-act="open" data-id="${s.id}"><span class="tx"><b>${esc(s.item)}</b><span>${fdy(s.date)}</span></span><span class="rt">${M(s.amount)}</span></button>`).join('')}</div>`:''}
-      <button class="btn sec" style="margin-top:16px" data-act="copysum" data-v="${esc(summary)}">Copy summary</button>`;
+      <button class="btn sec" style="margin-top:16px" data-act="copysum" data-v="${esc(summary)}">Copy summary</button>
+      ${rowFootHtml(o)}`;
   }else{
     summary=`${o.portfolio} on ${fdy(o.date)}: ${o.value!=null?mny(o.value):'no value logged'}`;
     h=`<div class="dh"><div><span class="pill acc">${esc(o.portfolio)}</span><h2 style="margin-top:8px">${fdy(o.date)}</h2></div><button class="ibtn" data-act="close" aria-label="Close" data-focus>${ICON.x}</button></div>
@@ -1169,6 +1186,116 @@ function openDetail(id){
   }
   openOverlay(`<aside class="drawer" role="dialog" aria-modal="true" aria-label="Details">${h}</aside>`);
 }
+
+/* ================= EDIT / DELETE ONE SHEET ROW (Expenses) =================
+   Writes go only through your entry script, one row at a time. The script re-checks that the row still holds the same
+   item, amount and date before it changes anything, and it refuses protected tabs and rows that contain formulas. */
+const isoDay=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+let rowBusy=false;
+const rowFootHtml=o=>`<div class="dfoot"><button type="button" class="btn danger" data-act="rowdel" data-id="${esc(o.id)}">Delete</button><button type="button" class="btn" data-act="rowedit" data-id="${esc(o.id)}">Edit</button></div>`;
+/* What the sheet returned for this row when the page last loaded it. The script compares this with the live row first. */
+function rowExpect(o){
+  const base=store.base||store.raw,r=base&&base.Expenses&&base.Expenses.rows[o.row-2];
+  if(!r||!Number.isInteger(o.row)||o.row<2)return null;
+  return {'Item Purchased':r['Item Purchased']??null,'Amount':r['Amount']??null,'Date of Purchase':r['Date of Purchase']??null};
+}
+async function sheetCall(payload){
+  const url=LS.get('lgUrl');if(!url)throw new Error('nourl');
+  /* An older script would treat an edit as a new entry, so it must say it supports edits before anything is sent. */
+  const chk=await fetch(url,{cache:'no-store',redirect:'follow'}).then(r=>r.json());
+  if(!chk||chk.edit!==true)throw new Error('oldscript');
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({secret:LS.get('lgSecret')||''},payload)),redirect:'follow'});
+  const j=await r.json();if(!j.ok)throw new Error(j.error||'rejected');return j;
+}
+function rowErrText(e){
+  const m=(e&&e.message)||'';
+  if(m==='nourl')return 'Save your entry script link first (Log, then Sheet connection).';
+  if(m==='oldscript')return 'Your entry script needs the newest version before it can edit or delete rows. Paste the updated script into Apps Script and redeploy it. Nothing was changed.';
+  if(m==='row changed')return 'That row has changed in your sheet since this page loaded. Press Refresh, then try again. Nothing was changed.';
+  if(m==='row has formulas')return 'That row contains formulas, so it is protected. Delete it directly in Google Sheets. Nothing was changed.';
+  if(/tab not allowed/.test(m))return 'That tab is protected, so My Money will not change it. Nothing was changed.';
+  if(m==='bad row'||m==='norow')return 'This entry has not reached your sheet yet. Press Refresh and try again. Nothing was changed.';
+  if(m==='rejected'||/^expect|^no tab/.test(m))return 'Your sheet refused the change. Nothing was changed.';
+  return 'Could not confirm with your sheet. Press Refresh to see whether the change went through.';
+}
+function rowShowErr(e){const n=$('#ed-msg');const t=rowErrText(e);if(n){n.textContent=t;n.hidden=false}else toast(t)}
+function rowSetBusy(on){rowBusy=on;$$('#overlay button').forEach(b=>{b.disabled=on})}
+/* Keep every screen in step straight away: patch the copy of the sheet the page holds, then quietly re-read the live sheet. */
+function patchExpenses(mut){
+  const base=store.base||store.raw;
+  const raw=Object.assign({},base,{Expenses:Object.assign({},base.Expenses,{rows:base.Expenses.rows.map(r=>Object.assign({},r))})});
+  mut(raw.Expenses.rows);store.set(raw);
+}
+function syncSoon(){if(store.source&&store.source.kind==='google')setTimeout(()=>{store.load(store.source).catch(()=>{})},1500)}
+
+function openRowDelete(id){
+  const rec=store.D.byId.get(id);if(!rec||rec.type!=='expense')return;const o=rec.o;
+  openOverlay(`<div class="palbox" style="padding:20px" role="alertdialog" aria-modal="true" aria-label="Delete this row">
+    <div class="dh"><h2>Delete this row?</h2><button type="button" class="ibtn" data-act="close" aria-label="Close">${ICON.x}</button></div>
+    <p>Are you sure you want to delete this row from your Google Sheet?</p>
+    <p class="hint" style="color:var(--muted)">${esc(o.item)} · ${mny(o.amount)} · ${fdy(o.date)}<br>Expenses · row ${o.row}</p>
+    <p class="ed-msg" id="ed-msg" role="alert" hidden></p>
+    <div class="ed-actions"><button type="button" class="btn sec" data-act="close" data-focus>Cancel</button><button type="button" class="btn danger" data-act="rowdelgo" data-id="${esc(id)}">Delete row</button></div></div>`,'pal');
+}
+async function deleteRowGo(id){
+  if(rowBusy)return;const rec=store.D.byId.get(id);if(!rec||rec.type!=='expense')return;const o=rec.o,ex=rowExpect(o);
+  if(!ex){rowShowErr(new Error('norow'));return}
+  rowSetBusy(true);
+  try{
+    await sheetCall({action:'delete',target:'Expenses',row:o.row,expect:ex});
+    patchExpenses(rows=>{rows.splice(o.row-2,1)});
+    closeOverlay();toast('Row deleted from your sheet');syncSoon();
+  }catch(e){rowShowErr(e)}finally{rowSetBusy(false)}
+}
+function openRowEdit(id){
+  const rec=store.D.byId.get(id);if(!rec||rec.type!=='expense')return;const o=rec.o;
+  const same=(a,b)=>String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();
+  const opts=(list,cur)=>{const l=list.slice();if(cur&&!l.some(x=>same(x,cur)))l.unshift(cur);if(!cur)l.unshift('');return l.map(x=>`<option value="${esc(x)}"${same(x,cur)?' selected':''}>${esc(x||'(none)')}</option>`).join('')};
+  const cats=[...new Set(store.D.expenses.map(e=>e.category).filter(Boolean))].sort();
+  openOverlay(`<form class="palbox" style="padding:20px" role="dialog" aria-modal="true" aria-label="Edit expense" data-rowform="${esc(id)}" novalidate>
+    <div class="dh"><div><h2>Edit expense</h2><p class="hint" style="color:var(--muted)">${esc(o.item)} · Expenses · row ${o.row}</p></div><button type="button" class="ibtn" data-act="close" aria-label="Close">${ICON.x}</button></div>
+    <div class="ed-grid">
+      <div class="ed-f" data-ed="Amount"><label for="ed-amt">Amount</label><input type="text" id="ed-amt" inputmode="decimal" autocomplete="off" value="${esc(o.amount)}" data-focus><div class="ed-err" hidden></div></div>
+      <div class="ed-f" data-ed="Date"><label for="ed-date">Date</label><input type="date" id="ed-date" value="${isoDay(o.date)}"><div class="ed-err" hidden></div></div>
+    </div>
+    <div class="ed-f"><label for="ed-where">Where</label><input type="text" id="ed-where" autocomplete="off" value="${esc(o.place||'')}"></div>
+    <div class="ed-grid">
+      <div class="ed-f"><label for="ed-pay">Paid with</label><select id="ed-pay">${opts(['Cash','Debit','Credit','Interac','Points / Rewards'],o.payment)}</select></div>
+      <div class="ed-f"><label for="ed-cat">Category</label><select id="ed-cat">${opts(cats,o.category)}</select></div>
+    </div>
+    <div class="ed-f"><label for="ed-type">Type</label><select id="ed-type">${opts(['Personal','Business','For Others'],o.tag)}</select></div>
+    <p class="ed-msg" id="ed-msg" role="alert" hidden></p>
+    <div class="ed-actions"><button type="button" class="btn sec" data-act="close">Cancel</button><button type="submit" class="btn">Save changes</button></div></form>`,'pal');
+}
+async function saveRowEdit(id){
+  if(rowBusy)return;const rec=store.D.byId.get(id);if(!rec||rec.type!=='expense')return;const o=rec.o;
+  const g=k=>{const el=$('#'+k);return el?el.value:''};
+  const amt=num(g('ed-amt')),date=g('ed-date'),where=g('ed-where').trim(),pay=g('ed-pay'),cat=g('ed-cat'),type=g('ed-type');
+  let bad=false;
+  const err=(k,m)=>{const w=$('[data-ed="'+k+'"]');if(!w)return;w.classList.toggle('bad',!!m);const x=$('.ed-err',w);x.textContent=m||'';x.hidden=!m;if(m)bad=true};
+  err('Amount',amt==null?'Enter a number':'');
+  err('Date',/^\d{4}-\d{2}-\d{2}$/.test(date)&&pd(date)?'':'Pick a date');
+  if(bad)return;
+  const ch={};
+  if(amt!==o.amount)ch['Amount']=amt;
+  if(date!==isoDay(o.date))ch['Date of Purchase']={$date:date};
+  if(where!==(o.place||''))ch['Establishment']=where;
+  if(pay!==(o.payment||''))ch['Payment Method']=pay;
+  if(cat!==o.category)ch['Category']=cat;
+  if(type!==(o.tag||''))ch['Personal or Business Expense?']=type;
+  if(!Object.keys(ch).length){toast('No changes to save');return}
+  const ex=rowExpect(o);if(!ex){rowShowErr(new Error('norow'));return}
+  rowSetBusy(true);
+  try{
+    await sheetCall({action:'edit',target:'Expenses',row:o.row,expect:ex,changes:ch});
+    patchExpenses(rows=>{const r=rows[o.row-2];if(!r)return;
+      if('Amount' in ch)r['Amount']=ch['Amount'];
+      if('Date of Purchase' in ch)r['Date of Purchase']=ch['Date of Purchase'].$date;
+      ['Establishment','Payment Method','Category','Personal or Business Expense?'].forEach(k=>{if(k in ch)r[k]=ch[k]||null})});
+    closeOverlay();toast('Saved to your sheet');syncSoon();
+  }catch(e){rowShowErr(e)}finally{rowSetBusy(false)}
+}
+document.addEventListener('submit',e=>{const f=e.target&&e.target.closest&&e.target.closest('[data-rowform]');if(!f)return;e.preventDefault();saveRowEdit(f.dataset.rowform)});
 
 /* ================= COMMAND PALETTE + HELP ================= */
 function cmdList(){
@@ -1606,12 +1733,14 @@ function openIssueFix(idx){
   const x=store.D.issues[idx];if(!x)return;
   const pill=x.sev==='warn'?'<span class="pill warn">Fix</span>':x.sev==='fixed'?'<span class="pill good">Cleaned</span>':'<span class="pill">Note</span>';
   const sid=store.source&&store.source.sheetId;
+  const fixable=x.sheet==='Expenses'?x.rows.map(n=>store.D.expenses.find(e=>e.row===n)).filter(Boolean).slice(0,12):[];
   openOverlay(`<div class="palbox" style="padding:20px" role="dialog" aria-modal="true" aria-label="Fix this issue"><div class="dh"><h2>Fix this issue</h2><button class="ibtn" data-act="close" aria-label="Close" data-focus>${ICON.x}</button></div>
     <p style="display:flex;gap:10px;align-items:center;margin:0 0 10px">${pill}<span>${esc(x.msg)}</span></p>
     <p><b>Sheet:</b> ${esc(x.sheet)} · <b>Field:</b> ${esc(x.field)}</p>
     <p><b>Sheet rows (${x.rows.length}):</b> ${esc(x.rows.join(', '))}</p>
     <p><b>Suggested fix:</b> ${esc(x.fix)}</p>
-    <p class="hint" style="color:var(--muted)">Edit these rows in your Google Sheet, then press Refresh. My Money never changes your sheet from here.</p>
+    ${fixable.length?`<p><b>Fix here:</b> pick a row to open it, then press Edit.</p><div class="iss-rows">${fixable.map(e=>`<button type="button" class="btn sec" data-act="open" data-id="${esc(e.id)}">Row ${e.row} · ${esc(e.item.length>22?e.item.slice(0,21)+'…':e.item)}</button>`).join('')}</div>`:''}
+    <p class="hint" style="color:var(--muted)">${fixable.length?'Rows are changed one at a time, only after you confirm. Anything else, edit in your Google Sheet, then press Refresh.':'Edit these rows in your Google Sheet, then press Refresh. My Money never changes your sheet from here.'}</p>
     <div class="sheet-form" style="margin-top:14px"><button class="btn sec" data-act="issuecopy" data-i="${idx}">Copy row numbers</button>${sid?`<a class="btn" target="_blank" rel="noopener noreferrer" href="https://docs.google.com/spreadsheets/d/${encodeURIComponent(sid)}/edit">Open Google Sheet</a>`:''}</div></div>`,'pal')}
 function copyIssueRows(idx){
   const x=store.D.issues[idx];if(!x)return;const text=x.rows.join(', '),fail=()=>toast('Could not copy. Select the numbers manually.');
@@ -1735,6 +1864,9 @@ document.addEventListener('click',e=>{
     case 'useemb':{LS.set('sheetId','');store.load(EmbeddedSource).then(()=>toast('Using the embedded snapshot'));break}
     case 'refresh':doRefresh();break;
     case 'dhfilter':S.dhf=(d.f==='all'||S.dhf===d.f)?'all':d.f;render();break;
+    case 'rowdel':openRowDelete(d.id);break;
+    case 'rowdelgo':deleteRowGo(d.id);break;
+    case 'rowedit':openRowEdit(d.id);break;
     case 'issuefix':openIssueFix(+d.i);break;
     case 'issuecopy':copyIssueRows(+d.i);break;
     case 'copysnap':copyText(JSON.stringify(store.base||store.raw),'Snapshot copied');break;
