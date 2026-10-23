@@ -1402,12 +1402,12 @@ const ago=d=>{if(!d)return 'never';const s=Math.round((Date.now()-d)/1000);if(s<
 const kindWord=k=>({Phone:'Phones',PC:'PCs',Accessory:'Accessories'}[k]||k);
 function totalSeries(D){const last={};const out=[];D.investments.forEach(e=>{if(e.value==null)return;last[e.portfolio]=e.value;out.push({d:e.date,v:sum(Object.values(last))})});return out}
 
-/* INSIGHTS-LIB:START (60-insight library + deterministic daily rotation; read-only, never touches the Google Sheet) */
+/* INSIGHTS-LIB:START (70-insight library + deterministic daily rotation; read-only, never touches the Google Sheet) */
 const INSIGHT_VIEW={spending:'spending',reselling:'reselling',inventory:'inventory',investing:'investing',data:'data',habits:'spending',tips:'spending'};
 const INSIGHT_CAT={sp:'spending',rs:'reselling',in:'inventory',iv:'investing',hb:'habits',dh:'data',ev:'tips'};
 const INSIGHT_ICONS=['spend','clock','up','down','user','alert','bulb','tag','cart','invest'];
 const INSIGHT_LIB=[
-/* ---- spending (12) ---- */
+/* ---- spending (15) ---- */
 {id:'sp01',run:c=>{const h=c.h,ss=c.ss;if(!ss||!ss.prevCats||!ss.cats)return null;const pm=new Map(ss.prevCats.map(x=>[x.k,x.v]));
   const ch=ss.cats.map(x=>({k:x.k,cur:x.v,prev:pm.get(x.k)||0})).filter(x=>x.prev>=25&&x.cur>=25).map(x=>({...x,d:(x.cur-x.prev)/x.prev})).filter(x=>Math.abs(x.d)>=.1).sort((a,b)=>Math.abs(b.cur-b.prev)-Math.abs(a.cur-a.prev))[0];
   if(!ch)return null;return {i:'spend',t:'<b>'+h.esc(ch.k)+'</b> is '+(ch.d>0?'up':'down')+' '+Math.abs(ch.d*100).toFixed(0)+'% on the previous '+c.R.len+' days ('+h.SM(ch.cur-ch.prev)+').',act:'goto',v:'spending',k:'cat',x:ch.k}}},
@@ -1431,7 +1431,13 @@ const INSIGHT_LIB=[
   return {i:'bulb',t:'<b>'+c.h.pct(share)+'</b> of your spending happens on weekends, '+(diff>0?'above':'below')+' an even spread.',act:'goto',v:'spending'}}},
 {id:'sp12',run:c=>{const s=c.ss;if(!s||!(s.total>0)||!s.cats||!s.cats.length)return null;const share=s.cats[0].v/s.total;if(share<0.3)return null;
   return {i:'spend',t:'<b>'+c.h.esc(s.cats[0].k)+'</b> is '+c.h.pct(share)+' of everything you spent.',act:'goto',v:'spending'}}},
-/* ---- reselling (15) ---- */
+{id:'sp13',run:c=>{const s=c.ss;if(!s||!s.rows)return null;const a=s.rows.map(r=>r.amount).filter(x=>x>0);if(a.length<8)return null;const m=c.h.median(a),v=c.h.avg(a);if(!(m>0)||v==null)return null;
+  return {i:'bulb',t:'Half of your purchases are under <b>'+c.h.mny(m)+'</b> (median); the average is <b>'+c.h.mny(v)+'</b>.',act:'goto',v:'spending'}}},
+{id:'sp14',run:c=>{const s=c.ss;if(!s||!(s.total>0)||!s.cats||s.cats.length<4)return null;const share=c.h.sum(s.cats.slice(0,3),x=>x.v)/s.total;if(!(share>=0.5))return null;
+  return {i:'spend',t:'Your top 3 categories make up <b>'+c.h.pct(share)+'</b> of your spending.',act:'goto',v:'spending'}}},
+{id:'sp15',run:c=>{const s=c.ss;if(!s||s.count<5||!(s.total>0)||!s.biggest||!(s.biggest.amount>0))return null;const ratio=s.biggest.amount/(s.total/s.count);if(!(ratio>=3))return null;
+  return {i:'alert',t:'Your biggest purchase, <b>'+c.h.esc(s.biggest.item)+'</b>, is <b>'+ratio.toFixed(1)+' times</b> your average purchase.',act:'open',id:s.biggest.id}}},
+/* ---- reselling (18) ---- */
 {id:'rs01',run:c=>{const h=c.h,sold=c.D.items.filter(i=>i.sold&&i.days!=null);
   const byK=['Phone','PC','Accessory'].map(k=>({k,n:sold.filter(i=>i.kind===k).length,d:h.avg(sold.filter(i=>i.kind===k),i=>i.days)})).filter(x=>x.n>=3&&x.d!=null).sort((a,b)=>a.d-b.d);
   if(byK.length<2)return null;return {i:'clock',t:'<b>'+h.kindWord(byK[0].k)+'</b> sell in '+Math.round(byK[0].d)+' days on average. <b>'+h.kindWord(byK[byK.length-1].k)+'</b> take '+Math.round(byK[byK.length-1].d)+'.',act:'goto',v:'reselling'}}},
@@ -1461,7 +1467,13 @@ const INSIGHT_LIB=[
 {id:'rs14',run:c=>{const r=c.rs;if(!r||r.sold.length<3)return null;return {i:'spend',t:'The average sale earns you <b>'+c.h.mny(r.profit/r.sold.length)+'</b> profit.',act:'goto',v:'reselling'}}},
 {id:'rs15',run:c=>{const k=((c.rs&&c.rs.kinds)||[]).filter(x=>x.n>=2&&x.avg!=null);if(k.length<2)return null;const top=k.reduce((a,b)=>a.avg>=b.avg?a:b);
   return {i:'up',t:'<b>'+c.h.kindWord(top.k)+'</b> earn the most per sale: '+c.h.mny(top.avg)+' on average.',act:'goto',v:'reselling'}}},
-/* ---- inventory (9) ---- */
+{id:'rs16',run:c=>{const r=c.rs;if(!r||r.sold.length<3)return null;const rev=c.h.sum(r.sold,i=>i.sellPrice),cost=c.h.sum(r.sold,i=>i.buyPrice);if(!(cost>0)||!(rev>0))return null;
+  return {i:'invest',t:'You sold items for <b>'+c.h.mny(rev)+'</b> that cost <b>'+c.h.mny(cost)+'</b> to buy.',act:'goto',v:'reselling'}}},
+{id:'rs17',run:c=>{const r=c.rs;if(!r)return null;const w=r.sold.filter(i=>i.days!=null);if(!w.length)return null;const s=w.reduce((a,b)=>b.days>a.days?b:a);if(s.days<30)return null;
+  return {i:'clock',t:'Slowest sale: <b>'+c.h.esc(s.name)+'</b> took <b>'+c.h.plural(s.days,'day')+'</b> to sell.',act:'open',id:s.id}}},
+{id:'rs18',run:c=>{const r=c.rs;if(!r||r.sold.length<5)return null;const n=r.sold.filter(i=>i.roi!=null&&i.roi>=0.2).length;if(n<1)return null;
+  return {i:'up',t:'<b>'+n+' of '+r.sold.length+'</b> sales earned a return of 20% or more.',act:'goto',v:'reselling'}}},
+/* ---- inventory (10) ---- */
 {id:'in01',run:c=>{const h=c.h,old=c.D.items.filter(i=>!i.sold&&i.age!=null).sort((a,b)=>b.age-a.age)[0];if(!old||old.age<=30)return null;
   return {i:'alert',t:'<b>'+h.esc(old.name)+'</b> has been in stock '+old.age+' days. Consider lowering the price.',act:'open',id:old.id}}},
 {id:'in02',run:c=>{const s=c.st;if(!s||s.stock.length<3||!(s.cost>0))return null;return {i:'spend',t:'<b>'+c.h.mny(s.cost)+'</b> of your cash is sitting in unsold stock.',act:'goto',v:'inventory'}}},
@@ -1480,7 +1492,9 @@ const INSIGHT_LIB=[
   return {i:'up',t:'A typical <b>'+c.h.kindWord(best[0]).replace(/s$/,'')+'</b> flip earns <b>'+c.h.mny(best[1])+'</b> profit (median).',act:'goto',v:'inventory'}}},
 {id:'in09',run:c=>{const s=c.st;if(!s||s.avgAge==null||s.stock.length<3||s.avgAge<20)return null;
   return {i:'clock',t:'Your stock has been waiting <b>'+Math.round(s.avgAge)+'</b> days on average to sell.',act:'goto',v:'inventory'}}},
-/* ---- investing (8) ---- */
+{id:'in10',run:c=>{const s=c.st;if(!s||s.stock.length<3)return null;const by=new Map();s.stock.forEach(i=>{if(i.buyPrice>0)by.set(i.kind,(by.get(i.kind)||0)+i.buyPrice)});if(by.size<2)return null;
+  const top=[...by.entries()].reduce((a,b)=>b[1]>a[1]?b:a);return {i:'tag',t:'<b>'+c.h.kindWord(top[0])+'</b> hold the most cash in stock: <b>'+c.h.mny(top[1])+'</b>.',act:'goto',v:'inventory'}}},
+/* ---- investing (9) ---- */
 {id:'iv01',run:c=>{const v=c.inv;if(!v||!v.P.length||!(v.contrib>0)||!(v.total>0))return null;const g=v.gain,dir=g>=0?'up':'down';
   return {i:dir,t:'Your investments are <b>'+dir+' '+c.h.mny(Math.abs(g))+'</b> overall ('+c.h.pct(Math.abs(g/v.contrib))+').',act:'goto',v:'investing'}}},
 {id:'iv02',run:c=>{const v=c.inv;if(!v)return null;const l=v.P.filter(p=>p.ret!=null);if(l.length<2)return null;const b=l.reduce((a,x)=>a.ret>=x.ret?a:x);if(!(b.ret>0))return null;
@@ -1495,7 +1509,9 @@ const INSIGHT_LIB=[
 {id:'iv07',run:c=>{const v=c.inv;if(!v||v.P.length<2)return null;return {i:'bulb',t:'You are tracking <b>'+c.h.plural(v.P.length,'account')+'</b>, worth <b>'+c.h.mny(v.total)+'</b> in total.',act:'goto',v:'investing'}}},
 {id:'iv08',run:c=>{const v=c.inv;if(!v)return null;const l=v.P.filter(p=>p.gain!=null);if(l.length<2)return null;const t=l.reduce((a,x)=>a.gain>=x.gain?a:x);if(!(t.gain>0))return null;
   return {i:'up',t:'<b>'+c.h.esc(t.name)+'</b> has earned you the most: <b>'+c.h.mny(t.gain)+'</b>.',act:'goto',v:'investing'}}},
-/* ---- habits (8) ---- */
+{id:'iv09',run:c=>{const v=c.inv;if(!v||v.P.length<3)return null;const p=v.P[v.P.length-1];if(!p||!(p.value>0))return null;
+  return {i:'invest',t:'Your smallest account is <b>'+c.h.esc(p.name)+'</b> at <b>'+c.h.mny(p.value)+'</b>.',act:'goto',v:'investing'}}},
+/* ---- habits (9) ---- */
 {id:'hb01',run:c=>{const rows=(c.ss&&c.ss.rows)||[];if(rows.length<5)return null;const ago=r=>c.h.diffD(r.date,c.today);
   const a=c.h.sum(rows.filter(r=>ago(r)>=0&&ago(r)<=6),r=>r.amount),b=c.h.sum(rows.filter(r=>ago(r)>=7&&ago(r)<=13),r=>r.amount);if(!(b>0))return null;const ch=(a-b)/b;if(Math.abs(ch)<0.15)return null;
   return {i:ch>0?'up':'down',t:'The last 7 days came to <b>'+c.h.mny(a)+'</b>, '+(ch>0?'up ':'down ')+c.h.pct(Math.abs(ch))+' on the week before.',act:'goto',v:'spending'}}},
@@ -1514,7 +1530,10 @@ const INSIGHT_LIB=[
 {id:'hb08',run:c=>{const rows=(c.ss&&c.ss.rows)||[];const cnt={};rows.forEach(r=>{if(r.place&&c.h.diffD(r.date,c.today)>=0&&c.h.diffD(r.date,c.today)<=29)cnt[r.place]=(cnt[r.place]||0)+1});
   const e=Object.entries(cnt).sort((a,b)=>b[1]-a[1]);if(!e.length||e[0][1]<4)return null;
   return {i:'user',t:'You visited <b>'+c.h.esc(e[0][0])+'</b> '+e[0][1]+' times in the last 30 days.',act:'goto',v:'spending'}}},
-/* ---- data health (4) and tips (4) ---- */
+{id:'hb09',run:c=>{const rows=(c.ss&&c.ss.rows)||[];if(rows.length<8)return null;const by=new Map();
+  rows.forEach(r=>{const a=c.h.diffD(r.date,c.today);if(r.amount>0&&a>=0&&a<=29){const e=by.get(a)||{t:0,d:r.date};e.t+=r.amount;by.set(a,e)}});if(!by.size)return null;
+  const top=[...by.values()].reduce((a,b)=>b.t>a.t?b:a);return {i:'spend',t:'Your biggest spending day in the last 30 days was <b>'+c.h.fd(top.d)+'</b>: <b>'+c.h.mny(top.t)+'</b>.',act:'goto',v:'spending'}}},
+/* ---- data health (4) and tips (5) ---- */
 {id:'dh01',run:c=>{const n=c.h.sum(c.D.issues.filter(x=>x.sev==='warn'),x=>x.rows.length);if(n<1)return null;return {i:'alert',t:'<b>'+c.h.plural(n,'data problem')+'</b> in your sheet are worth a look.',act:'goto',v:'data'}}},
 {id:'dh02',run:c=>{const e=c.D.expenses.filter(x=>x.category==='Other'&&!x.isRefund);if(e.length<3)return null;return {i:'tag',t:'<b>'+c.h.plural(e.length,'expense')+'</b> sit under Other. A real category makes your charts sharper.',act:'goto',v:'spending'}}},
 {id:'dh03',run:c=>{const s=c.D.items.filter(x=>x.sold&&!x.buyer);if(s.length<3)return null;return {i:'user',t:'<b>'+c.h.plural(s.length,'sold item')+'</b> have no buyer recorded.',act:'goto',v:'reselling'}}},
@@ -1522,7 +1541,8 @@ const INSIGHT_LIB=[
 {id:'ev01',run:c=>{if(c.D.expenses.length<1)return null;return {i:'bulb',t:'Log a purchase the day you make it. It takes ten seconds and keeps your history honest.',act:'goto',v:'spending'}}},
 {id:'ev02',run:c=>{if(c.D.items.length<1)return null;return {i:'bulb',t:'Record the sale date and price as soon as an item sells so your profit and speed stats stay accurate.',act:'goto',v:'reselling'}}},
 {id:'ev03',run:c=>{if(c.D.items.length<1)return null;return {i:'clock',t:'Once a week, scan your oldest unsold items and decide whether to relist or lower the price.',act:'goto',v:'inventory'}}},
-{id:'ev04',run:c=>{if(c.D.investments.length<1)return null;return {i:'invest',t:'Update your investment values on a regular day each month so the trend line means something.',act:'goto',v:'investing'}}}
+{id:'ev04',run:c=>{if(c.D.investments.length<1)return null;return {i:'invest',t:'Update your investment values on a regular day each month so the trend line means something.',act:'goto',v:'investing'}}},
+{id:'ev05',run:c=>{if(c.D.items.length<1)return null;return {i:'bulb',t:'Before buying stock, check what the same item recently sold for and set a maximum price you will pay.',act:'goto',v:'reselling'}}}
 ].map(d=>({...d,cat:INSIGHT_CAT[d.id.slice(0,2)]}));
 /* Small deterministic string hash (FNV-1a). Same input always gives the same number. */
 function insightHash(s){let h=2166136261>>>0;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)>>>0}return h>>>0}

@@ -138,10 +138,10 @@ const variants = {
 /* ---------- tests ---------- */
 console.log('Insights library');
 
-test('library has exactly 60 insights with unique ids', () => {
-  assert.equal(T.INSIGHT_LIB.length, 60);
-  assert.equal(new Set(T.INSIGHT_LIB.map(d => d.id)).size, 60);
-  assert.equal(T.INSIGHT_ORDER.length, 60);
+test('library has exactly 70 insights with unique ids', () => {
+  assert.equal(T.INSIGHT_LIB.length, 70);
+  assert.equal(new Set(T.INSIGHT_LIB.map(d => d.id)).size, 70);
+  assert.equal(T.INSIGHT_ORDER.length, 70);
   T.INSIGHT_LIB.forEach(d => { assert.equal(typeof d.run, 'function', d.id); assert.ok(d.cat, d.id + ' has no category'); });
 });
 
@@ -175,7 +175,7 @@ test('user-supplied text is escaped (no raw HTML from the sheet)', () => {
   assert.ok(sawEscaped, 'expected at least one insight to show the escaped hostile name');
 });
 
-test('across data scenarios all 60 insights can fire', () => {
+test('across data scenarios all 70 insights can fire', () => {
   const fired = new Set();
   for (const v of Object.values(variants)) for (const k of T.insightPool(v.c).keys()) fired.add(k);
   const missing = T.INSIGHT_LIB.map(d => d.id).filter(id => !fired.has(id));
@@ -203,7 +203,7 @@ const poolRich = T.insightPool(variants.rich90.c);
 
 test('rich data gives a pool big enough for the rotation (at least 30 eligible)', () => {
   assert.ok(poolRich.size >= 30, 'pool size ' + poolRich.size);
-  console.log('       eligible insights with the rich test data: ' + poolRich.size + ' of 60');
+  console.log('       eligible insights with the rich test data: ' + poolRich.size + ' of 70');
 });
 
 test('every day shows between 4 and 8 insights (400 consecutive days)', () => {
