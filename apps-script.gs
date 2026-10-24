@@ -116,6 +116,7 @@ function readTab(ss, spec, tz) {
   for (let r = 1; r < values.length; r++) {
     const o = {};
     headers.forEach((h, i) => { if (h) o[h] = cleanCell(values[r][i], tz); });
+    if (o._row === undefined) o._row = r + 1; // the row's number in the sheet (every header, "Row ID" included, is already a key above)
     rows.push(o);
   }
   // Formula tabs can stretch far below the real data. Drop rows at the very bottom that have none of the key columns.
