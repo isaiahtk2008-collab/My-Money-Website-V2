@@ -260,6 +260,9 @@ function deleteRow(ss, body) {
   return { ok: true, row: g.row, deleted: true };
 }
 
+// Short unique ID for the optional "Row ID" column. Starts with a letter so Sheets never turns it into a number or date.
+function makeRowId() { return 'r' + Date.now().toString(36) + (Math.random().toString(36) + '0000').slice(2, 6); }
+
 function doPost(e) {
   const lock = LockService.getScriptLock();
   try {
@@ -323,6 +326,21 @@ function doPost(e) {
       }
     }
 
+    // Optional Row ID: only on tabs that already have a "Row ID" header, only when the request did not set it, and only when a row is really being written.
+    // It joins `cols`, so the safety check below counts it and it lands in the same locked write. The next-free-row search above is unchanged.
+    const ridCol = headers.indexOf('rowid') + 1;
+    let rowId;
+    if (ridCol > 0 && cols.length > 0) {
+      const given = matchedCols[ridCol];
+      if (given === undefined || given === null || String(given).trim() === '') {
+        rowId = makeRowId();
+        matchedCols[ridCol] = rowId;
+        if (cols.indexOf(ridCol) < 0) cols.push(ridCol);
+      } else {
+        rowId = String(given);
+      }
+    }
+
     // Safety: never overwrite anything. Refuse if any target cell already holds a value or a formula.
     if (targetRow <= maxRows) {
       const clash = cols.some(c => { const cell = sheet.getRange(targetRow, c); return cell.getFormula() !== '' || cell.getValue() !== ''; });
@@ -334,7 +352,9 @@ function doPost(e) {
     cols.forEach(c => sheet.getRange(targetRow, c).setValue(matchedCols[c]));
 
     markId(body.id);
-    return json({ ok: true, row: targetRow, unmatched });
+    const reply = { ok: true, row: targetRow, unmatched };
+    if (rowId !== undefined) reply.rowId = rowId;
+    return json(reply);
   } catch (err) {
     return json({ ok: false, error: String(err) });
   } finally {
