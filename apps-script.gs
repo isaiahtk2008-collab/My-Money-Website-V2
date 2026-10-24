@@ -123,7 +123,9 @@ function readTab(ss, spec, tz) {
   if (!keys.length) keys = headers.filter(Boolean);
   const real = row => keys.some(k => row[k] !== null && row[k] !== undefined);
   while (rows.length && !real(rows[rows.length - 1])) rows.pop();
-  return { sheet: spec.tab, headers, rows };
+  // rowIdCol = the header text of the tab's Row ID column (each row carries its ID under that name), or null when there is no usable one.
+  const idc = findRowIdCol(headers);
+  return { sheet: spec.tab, headers, rows, rowIdCol: idc >= 0 ? headers[idc] : null };
 }
 
 function readAll() {
@@ -150,14 +152,28 @@ function checkAll() {
       });
       if (bad) problems.push({ column: h, notUsable: bad, examples: samples });
     });
-    out[key] = { tab: t.sheet, found: !t.missing, rows: t.rows.length, columns: t.headers.filter(Boolean).length, problems };
+    // Row ID health: how many data rows have an ID, how many still need one (run backfillRowIds), and any ID used twice.
+    const idc = findRowIdCol(t.headers);
+    let rowIds = { column: null };
+    if (idc === -2) rowIds = { column: null, problem: 'more than one Row ID column' };
+    else if (idc >= 0) {
+      const idh = t.headers[idc], seen = {}; let filled = 0, missing = 0, duplicated = 0;
+      t.rows.forEach(r => {
+        const hasData = Object.keys(r).some(h => h !== idh && r[h] !== null && r[h] !== undefined);
+        const v = r[idh] === null || r[idh] === undefined ? '' : String(r[idh]).trim();
+        if (v === '') { if (hasData) missing++; return; }
+        filled++; seen[v] = (seen[v] || 0) + 1; if (seen[v] === 2) duplicated++;
+      });
+      rowIds = { column: idh, filled, missing, duplicated };
+    }
+    out[key] = { tab: t.sheet, found: !t.missing, rows: t.rows.length, columns: t.headers.filter(Boolean).length, problems, rowIds };
   });
   return out;
 }
 
 function doGet(e) {
   const p = (e && e.parameter) || {};
-  if (p.action !== 'read' && p.action !== 'check') return json({ ok: true, service: 'my-money-entry', version: 3, read: true, edit: true });
+  if (p.action !== 'read' && p.action !== 'check') return json({ ok: true, service: 'my-money-entry', version: 3, read: true, edit: true, rowIds: true });
   if (SECRET && p.secret !== SECRET) return json({ ok: false, error: 'auth' });
   try {
     if (p.action === 'check') return json({ ok: true, version: 3, at: new Date().toISOString(), tabs: checkAll() });
@@ -200,6 +216,45 @@ function markId(id) {
 /* ---------- editing and deleting ONE existing row (new requests use `target` and `changes`, never `tab` and `values`,
    so an older copy of this script can only reject them, never mistake them for a new entry) ---------- */
 const normHeader = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/* ---------- ROW IDs ----------
+   An optional column headed "Row ID" at the FAR RIGHT of a tab gives every row a short permanent name, so an edit or delete
+   finds its row by that name instead of by row number (sorting or deleting rows above it can no longer point it at the wrong row).
+   THIS SCRIPT NEVER CREATES THE HEADER. You type "Row ID" into the first empty header cell on the right by hand (see docs/ROW-IDS.md).
+   Until a tab has that header, it behaves exactly as before. */
+
+// Where is the Row ID column? Returns its 0-based position, -1 when the tab has none, -2 when there is more than one (ambiguous = never used).
+function findRowIdCol(headers) {
+  let found = -1;
+  for (let i = 0; i < headers.length; i++) {
+    if (normHeader(headers[i]) === 'rowid') { if (found !== -1) return -2; found = i; }
+  }
+  return found;
+}
+
+// Generates a unique 8-character ID starting with 'R' and followed by 7 characters from a specific alphabet (no 0/O/1/I look-alikes).
+function newRowId(taken) {
+  const alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const maxAttempts = 50;
+  let id;
+
+  for (let i = 0; i < maxAttempts; i++) {
+    id = 'R' + Array.from({ length: 7 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+    if (!taken.has(id)) {
+      return id;
+    }
+  }
+
+  throw new Error('could not make a unique Row ID');
+}
+
+// Every Row ID already in use on a tab (a Set of trimmed strings). Read-only.
+function takenRowIds(sheet, idCol) {
+  const taken = new Set(), last = sheet.getLastRow();
+  if (last < 2) return taken;
+  sheet.getRange(2, idCol + 1, last - 1, 1).getValues().forEach(r => { const v = String(r[0]).trim(); if (v !== '') taken.add(v); });
+  return taken;
+}
 
 // Is the cell the website saw still what the sheet holds right now?
 function sameCell(live, want) {
@@ -294,7 +349,7 @@ function doPost(e) {
     headers.forEach((h, idx) => {
       if (h === 'timestamp') {
         matchedCols[idx + 1] = new Date();
-      } else if (h) {
+      } else if (h && h !== 'rowid') { // the Row ID column is written only by this script, never from a request
         const k = Object.keys(inVals).find(key => norm(key) === h);
         if (k !== undefined) {
           matchedKeys.add(k);
@@ -329,12 +384,29 @@ function doPost(e) {
       if (clash) return json({ ok: false, error: 'target row not empty' });
     }
 
+    // Row ID: only when the tab already has exactly one "Row ID" column (this script never creates it). Same refusal rule: never overwrite.
+    const idCol = findRowIdCol(headers);
+    let rid = null;
+    if (idCol >= 0) {
+      if (targetRow <= maxRows) {
+        const idCell = sheet.getRange(targetRow, idCol + 1);
+        if (idCell.getFormula() !== '' || String(idCell.getValue()).trim() !== '') return json({ ok: false, error: 'target row not empty' });
+      }
+      try { rid = newRowId(takenRowIds(sheet, idCol)); } catch (idErr) { rid = null; } // no ID is safe: the row is added and backfillRowIds() names it later
+    }
+
     // Write only the cells we have values for
     if (targetRow > maxRows) sheet.insertRowsAfter(maxRows, targetRow - maxRows);
     cols.forEach(c => sheet.getRange(targetRow, c).setValue(matchedCols[c]));
 
+    // The ID goes in during the same locked write. If it somehow fails the entry is still saved (and still marked as seen, so a retry cannot double it).
+    let idWritten = false;
+    if (rid) { try { sheet.getRange(targetRow, idCol + 1).setValue(rid); idWritten = true; } catch (idErr) {} }
+
     markId(body.id);
-    return json({ ok: true, row: targetRow, unmatched });
+    const reply = { ok: true, row: targetRow, unmatched };
+    if (idWritten) reply.rowId = rid;
+    return json(reply);
   } catch (err) {
     return json({ ok: false, error: String(err) });
   } finally {
