@@ -263,6 +263,68 @@ function deleteRow(ss, body) {
 // Short unique ID for the optional "Row ID" column. Starts with a letter so Sheets never turns it into a number or date.
 function makeRowId() { return 'r' + Date.now().toString(36) + (Math.random().toString(36) + '0000').slice(2, 6); }
 
+// ROW ID BACKFILL. Google Forms writes rows straight into the sheet, so they never get a Row ID from this script.
+// These two functions fill ONLY a truly empty "Row ID" cell on a row that has real data. They never change an existing ID,
+// never touch a formula, never write any other cell, and never add or delete rows. Running them again changes nothing.
+// ONE-TIME BACKFILL: in the Apps Script editor pick `backfillRowIds` in the function list at the top, then click Run. Check View > Executions for the count.
+// AUTO-FILL NEW FORM ROWS (4 clicks): 1) click the clock icon (Triggers) on the left; 2) click Add Trigger;
+// 3) choose function `fillMissingIdsOnSubmit`, event source "From spreadsheet", event type "On form submit"; 4) click Save.
+// (This is NOT created by the script. Add it by hand, once.)
+function fillEmptyRowIds(ss, used) {
+  const counts = {};
+  const norm = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+  ALLOWED_TABS.forEach(name => {
+    const sheet = findSheet(ss, name);
+    if (!sheet) return;
+    const lastRow = sheet.getLastRow(), lastCol = sheet.getLastColumn();
+    if (lastRow < 2 || lastCol < 1) return;
+    const range = sheet.getRange(1, 1, lastRow, lastCol);
+    const values = range.getValues(), formulas = range.getFormulas();
+    const ridIdx = values[0].map(norm).indexOf('rowid');
+    if (ridIdx < 0) return; // no Row ID header: this tab is left completely alone
+    counts[name] = 0;
+    for (let r = 1; r < lastRow; r++) {
+      const v = values[r][ridIdx];
+      if (v !== '' && v !== null && v !== undefined) used.add(String(v));
+    }
+    for (let r = 1; r < lastRow; r++) {
+      const cellEmpty = values[r][ridIdx] === '' && formulas[r][ridIdx] === '';
+      if (!cellEmpty) continue;
+      const hasData = values[r].some((val, c) => c !== ridIdx && formulas[r][c] === '' && String(val).trim() !== '');
+      if (!hasData) continue;
+      let id = makeRowId();
+      while (used.has(id)) id = makeRowId();
+      used.add(id);
+      sheet.getRange(r + 1, ridIdx + 1).setValue(id); // one empty Row ID cell, nothing else
+      counts[name]++;
+    }
+  });
+  return counts;
+}
+
+function runRowIdFill(label) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+  } catch (err) {
+    console.log(label + ': could not get the lock, nothing changed');
+    return { ok: false, error: 'lock' };
+  }
+  try {
+    const counts = fillEmptyRowIds(SpreadsheetApp.getActiveSpreadsheet(), new Set());
+    const total = Object.keys(counts).reduce((sum, k) => sum + counts[k], 0);
+    console.log(label + ' filled ' + total + ' Row IDs: ' + JSON.stringify(counts));
+    return { ok: true, total: total, counts: counts };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Run by hand once to fill every empty Row ID that already exists.
+function backfillRowIds() { return runRowIdFill('backfillRowIds'); }
+// Attach as an installable "On form submit" trigger (see the 4 clicks above).
+function fillMissingIdsOnSubmit(e) { return runRowIdFill('fillMissingIdsOnSubmit'); }
+
 function doPost(e) {
   const lock = LockService.getScriptLock();
   try {
