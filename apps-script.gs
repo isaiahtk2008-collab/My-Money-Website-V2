@@ -152,6 +152,13 @@ function checkAll() {
       if (bad) problems.push({ column: h, notUsable: bad, examples: samples });
     });
     out[key] = { tab: t.sheet, found: !t.missing, rows: t.rows.length, columns: t.headers.filter(Boolean).length, problems };
+    // Report only (nothing is written): real data rows whose "Row ID" cell is empty. null when the tab has no "Row ID" column.
+    const ridHeader = t.headers.find(h => normHeader(h) === 'rowid');
+    let dataKeys = READ_TABS[key].keys.filter(k => t.headers.indexOf(k) >= 0);
+    if (!dataKeys.length) dataKeys = t.headers.filter(h => h && h !== ridHeader);
+    const filled = v => v !== null && v !== undefined;
+    out[key].hasRowId = ridHeader !== undefined;
+    out[key].missingRowId = ridHeader === undefined ? null : t.rows.filter(r => dataKeys.some(k => filled(r[k])) && !filled(r[ridHeader])).length;
   });
   return out;
 }
