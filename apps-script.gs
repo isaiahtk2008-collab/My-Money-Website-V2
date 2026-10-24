@@ -116,6 +116,7 @@ function readTab(ss, spec, tz) {
   for (let r = 1; r < values.length; r++) {
     const o = {};
     headers.forEach((h, i) => { if (h) o[h] = cleanCell(values[r][i], tz); });
+    if (o._row === undefined) o._row = r + 1; // the row's number in the sheet (every header, "Row ID" included, is already a key above)
     rows.push(o);
   }
   // Formula tabs can stretch far below the real data. Drop rows at the very bottom that have none of the key columns.
@@ -151,6 +152,13 @@ function checkAll() {
       if (bad) problems.push({ column: h, notUsable: bad, examples: samples });
     });
     out[key] = { tab: t.sheet, found: !t.missing, rows: t.rows.length, columns: t.headers.filter(Boolean).length, problems };
+    // Report only (nothing is written): real data rows whose "Row ID" cell is empty. null when the tab has no "Row ID" column.
+    const ridHeader = t.headers.find(h => normHeader(h) === 'rowid');
+    let dataKeys = READ_TABS[key].keys.filter(k => t.headers.indexOf(k) >= 0);
+    if (!dataKeys.length) dataKeys = t.headers.filter(h => h && h !== ridHeader);
+    const filled = v => v !== null && v !== undefined;
+    out[key].hasRowId = ridHeader !== undefined;
+    out[key].missingRowId = ridHeader === undefined ? null : t.rows.filter(r => dataKeys.some(k => filled(r[k])) && !filled(r[ridHeader])).length;
   });
   return out;
 }
@@ -212,18 +220,37 @@ function sameCell(live, want) {
 }
 
 // Finds the one row the website means and proves it is still the same row. Any doubt = refuse, change nothing.
+// A request may carry `rowId`. Then the row is found by its "Row ID" cell (exactly one match, otherwise refuse) and the `row` number is ignored,
+// so rows deleted above it cannot shift the target. The `expect` check below STILL runs on that row, as a second lock.
+// Without `rowId` nothing is different: the `row` number plus `expect`, exactly as before.
 function lockRow(ss, body) {
   const reqTab = String(body.target || '').trim().toLowerCase();
   if (!EDITABLE_TABS.some(t => t.toLowerCase() === reqTab)) return { error: 'tab not allowed: ' + body.target };
   const sheet = findSheet(ss, reqTab);
   if (!sheet) return { error: 'no tab: ' + body.target };
-  const row = Number(body.row);
-  if (!Number.isInteger(row) || row < 2 || row > sheet.getLastRow()) return { error: 'bad row' };
+  const byId = body.rowId !== undefined && body.rowId !== null;
+  let row;
+  if (!byId) {
+    row = Number(body.row);
+    if (!Number.isInteger(row) || row < 2 || row > sheet.getLastRow()) return { error: 'bad row' };
+  }
   const expect = body.expect && typeof body.expect === 'object' ? body.expect : {};
   const keys = Object.keys(expect);
   if (keys.length < 2) return { error: 'expect needs at least 2 columns' };
   const lastCol = sheet.getLastColumn();
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(normHeader);
+  if (byId) {
+    const id = typeof body.rowId === 'string' || typeof body.rowId === 'number' ? String(body.rowId).trim() : '';
+    if (id === '') return { error: 'bad row id' };
+    if (headers.filter(h => h === 'rowid').length !== 1) return { error: 'tab needs exactly one Row ID column' };
+    const ridIdx = headers.indexOf('rowid'), lastRow = sheet.getLastRow();
+    const ids = lastRow >= 2 ? sheet.getRange(2, ridIdx + 1, lastRow - 1, 1).getValues() : [];
+    const hits = [];
+    ids.forEach((cell, i) => { if (String(cell[0]).trim() === id) hits.push(i + 2); });
+    if (hits.length === 0) return { error: 'row id not found' };
+    if (hits.length > 1) return { error: 'row id not unique' };
+    row = hits[0];
+  }
   const live = sheet.getRange(row, 1, 1, lastCol).getValues()[0];
   const tz = ss.getSpreadsheetTimeZone();
   const changed = keys.some(k => { const c = headers.indexOf(normHeader(k)); return c < 0 || !sameCell(cleanCell(live[c], tz), expect[k]); });
