@@ -1280,7 +1280,8 @@ function openDetail(id){
       <div class="steps"><div class="s"><b>Bought</b>${fdy(o.buyDate)}</div><div class="ln"><span>${o.sold&&o.days!=null?plural(o.days,'day'):(o.age!=null?plural(o.age,'day')+' and counting':'')}</span></div><div class="s"><b>${o.sold?'Sold':'Not sold yet'}</b>${o.sold?fdy(o.sellDate):'—'}</div></div>
       ${kv([['Paid',mny(o.buyPrice)],['Bought from',o.seller],['Bought on',fdy(o.buyDate)],['Sale price',o.sold?mny(o.sellPrice):null],['Sold to',o.buyer],['Sold on',o.sold?fdy(o.sellDate):null],['Listing clicks',o.clicks],...Object.entries(o.specs).map(([k,v])=>[k,v]),['Notes',o.notes],['Sheet row',o.sheet+' · row '+o.row]])}
       ${same.length?`<h3 style="margin-bottom:6px">Other ${esc(o.name)} sales</h3><div class="list">${same.map(s=>`<button class="li" data-act="open" data-id="${s.id}"><span class="tx"><b>${fdy(s.sellDate)}</b><span>${plural(s.days??0,'day')} to sell${s.buyer?' · '+esc(s.buyer):''}</span></span><span class="rt ${s.profit>=0?'pos':'neg'}">${SM(s.profit)}</span></button>`).join('')}</div>`:''}
-      <button class="btn sec" style="margin-top:16px" data-act="copysum" data-v="${esc(summary)}">Copy summary</button>`;
+      <button class="btn sec" style="margin-top:16px" data-act="copysum" data-v="${esc(summary)}">Copy summary</button>
+      ${deviceFootHtml(o)}`;
   }else if(rec.type==='expense'){
     const more=store.D.expenses.filter(e=>e.id!==o.id&&o.place&&e.place===o.place).sort((a,b)=>b.date-a.date).slice(0,5);
     summary=`${o.item}, ${mny(o.amount)} at ${o.place||'unknown'} on ${fdy(o.date)} (${o.category})`;
@@ -1376,6 +1377,95 @@ async function deleteRowGo(id){
     closeOverlay();toast('Row deleted from your sheet');syncSoon();
   }catch(e){rowShowErr(e)}finally{rowSetBusy(false)}
 }
+/* ================= EDIT ONE DEVICE PURCHASE ROW (Bought tabs only) =================
+   Phones and PCs only. The target tab is hard-limited to the two Bought tabs; the formula tabs (PnA, Master Inventory, PCs, Summary) are never written. */
+const dvNorm=s=>String(s==null?'':s).toLowerCase().replace(/[^a-z0-9]/g,'');
+const dvCell=(row,label)=>{const t=dvNorm(label);if(row)for(const k of Object.keys(row))if(dvNorm(k)===t)return {key:k,value:row[k]};return {key:label,value:undefined}};
+const dvDay=v=>v==null||v===''?'':(typeof v==='string'?v:(v instanceof Date?isoDay(v):String(v))).slice(0,10);
+function deviceEditInfo(o){
+  try{
+    const base=store.base||store.raw,m=matchDeviceRows(o,base);
+    if(!m||!m.ok||!m.purchase||!m.purchase.tab)return {state:'nomatch'};
+    const ph=o.kind==='Phone',tabKey=ph?'BoughtPhones':'BoughtPCs',tabName=ph?'Form Responses - Bought':'Form Responses - PCs';
+    if(m.purchase.tab!==tabName)return {state:'nomatch'};
+    const tab=base&&base[tabKey],hs=tab&&Array.isArray(tab.headers)&&tab.headers.length?tab.headers:Object.keys(m.purchase.row||{});
+    if(!hs.some(h=>dvNorm(h)==='rowid'))return {state:'nomatch'};
+    if(!m.purchase.rowId)return {state:'blocked'};
+    return {state:'ok',m,tabKey,formId:ph?'bphone':'bpc',tabName,rowId:m.purchase.rowId,tab,rowRef:'ID '+m.purchase.rowId};
+  }catch(e){return {state:'nomatch'}}
+}
+function deviceFootHtml(o){
+  const i=deviceEditInfo(o);
+  if(i.state==='nomatch')return `<div class="dfoot"><p class="hint" style="color:var(--muted)">Can't safely match this item to its sheet row</p></div>`;
+  if(i.state==='blocked')return `<div class="dfoot"><p class="hint" style="color:var(--muted)">Run the ID backfill first</p></div>`;
+  return `<div class="dfoot"><button type="button" class="btn danger" disabled aria-disabled="true" title="Delete purchases and sales directly in Google Sheets for now">Delete</button><button type="button" class="btn" data-act="devedit" data-id="${esc(o.id)}">Edit</button></div><p class="hint" style="color:var(--muted);margin-top:8px">Delete purchases and sales directly in Google Sheets for now</p>`;
+}
+function openDeviceEdit(id){
+  const rec=store.D.byId.get(id);if(!rec||rec.type!=='item')return;
+  const info=deviceEditInfo(rec.o);if(info.state!=='ok')return;
+  const L=window.__mmLog;if(!L)return;const YN=L.YN;
+  const form=L.FORMS.find(f=>f.id===info.formId);if(!form)return;
+  const same=(a,b)=>String(a==null?'':a).trim().toLowerCase()===String(b==null?'':b).trim().toLowerCase();
+  const opts=(list,cur)=>{const l=list.slice();if(cur!=null&&cur!==''&&!l.some(x=>same(x,cur)))l.unshift(cur);if(cur==null||cur==='')l.unshift('');return l.map(x=>`<option value="${esc(x)}"${same(x,cur)?' selected':''}>${esc(x||'(none)')}</option>`).join('')};
+  const row=info.m.purchase.row||{};
+  const fieldsHtml=form.f.map((f,i)=>{
+    const cur=dvCell(row,f.k).value,fid='dv-'+i,fc=i===0?' data-focus':'',val=cur==null?'':cur;let inp,wide=false;
+    if(f.t==='radio'){inp=`<select id="${fid}"${fc}>${opts(f.o||[],cur)}</select>`;wide=true}
+    else if(f.t==='yn')inp=`<select id="${fid}"${fc}>${opts(YN,cur)}</select>`;
+    else if(f.t==='date')inp=`<input type="date" id="${fid}" value="${esc(dvDay(cur))}"${fc}>`;
+    else if(f.t==='money')inp=`<input type="text" id="${fid}" inputmode="decimal" autocomplete="off" value="${esc(val)}"${fc}>`;
+    else if(f.t==='int')inp=`<input type="text" id="${fid}" inputmode="numeric" autocomplete="off" value="${esc(val)}"${fc}>`;
+    else{inp=`<input type="${f.t==='tel'?'tel':'text'}" id="${fid}" autocomplete="off" value="${esc(val)}"${fc}>`;wide=true}
+    return `<div class="ed-f" data-ed="${esc(f.k)}"${wide?' style="grid-column:1/-1"':''}><label for="${fid}">${esc(f.k)}${f.r?' *':''}</label>${inp}<div class="ed-err" hidden></div></div>`}).join('');
+  openOverlay(`<form class="palbox" style="padding:20px" role="dialog" aria-modal="true" aria-label="Edit purchase" data-devform="${esc(id)}" novalidate>
+    <div class="dh"><div><h2>Edit purchase</h2><p class="hint" style="color:var(--muted)">${esc(rec.o.name)} · ${esc(info.tabName)} · ${esc(info.rowRef)}</p></div><button type="button" class="ibtn" data-act="close" aria-label="Close">${ICON.x}</button></div>
+    <div class="seg" role="tablist" style="margin-bottom:12px"><button type="button" role="tab" aria-selected="true" aria-pressed="true">Edit purchase</button></div>
+    <div class="ed-grid">${fieldsHtml}</div>
+    <p class="ed-msg" id="ed-msg" role="alert" hidden></p>
+    <div class="ed-actions"><button type="button" class="btn sec" data-act="close">Cancel</button><button type="submit" class="btn">Save changes</button></div></form>`,'pal');
+}
+function patchDeviceTab(tabKey,mut){
+  const base=store.base||store.raw;if(!base||!base[tabKey])return;
+  const raw=Object.assign({},base,{[tabKey]:Object.assign({},base[tabKey],{rows:base[tabKey].rows.map(r=>Object.assign({},r))})});
+  mut(raw[tabKey].rows);store.set(raw);
+}
+async function saveDeviceEdit(id){
+  if(rowBusy)return;const rec=store.D.byId.get(id);if(!rec||rec.type!=='item'){rowShowErr(new Error('norow'));return}
+  const info=deviceEditInfo(rec.o);if(info.state!=='ok'){rowShowErr(new Error('norow'));return}
+  const L=window.__mmLog;if(!L){rowShowErr(new Error('norow'));return}
+  const form=L.FORMS.find(f=>f.id===info.formId);if(!form){rowShowErr(new Error('norow'));return}
+  const numOf=L.numOf;let bad=false;
+  const err=(k,m)=>{const w=$$('#overlay [data-ed]').find(e=>e.dataset.ed===k);if(!w)return;w.classList.toggle('bad',!!m);const x=$('.ed-err',w);x.textContent=m||'';x.hidden=!m;if(m)bad=true};
+  const read=(f,i)=>{const el=$('#dv-'+i);return el?el.value.trim():''};
+  form.f.forEach((f,i)=>{const s=read(f,i);let m='';
+    if(!s){if(f.r)m='Required'}
+    else if(f.t==='money'||f.t==='int'){const n=numOf(s);
+      if(n==null)m='Enter a number';else if(n<0&&!f.neg)m="Can't be negative";else if(f.t==='int'&&!Number.isInteger(n))m='Whole number please'}
+    else if(f.t==='date'&&!/^\d{4}-\d{2}-\d{2}$/.test(s))m='Pick a date';
+    err(f.k,m)});
+  if(bad)return;
+  const row=info.m.purchase.row||{},ch={};
+  form.f.forEach((f,i)=>{const s=read(f,i),c=dvCell(row,f.k),old=c.value;let changed,nv;
+    if(f.t==='money'||f.t==='int'){const on=old==null||old===''?null:numOf(String(old)),nn=s===''?null:numOf(s);changed=on!==nn;nv=nn}
+    else if(f.t==='date'){changed=dvDay(old)!==s;nv=s===''?null:{$date:s}}
+    else{changed=(old==null?'':String(old).trim())!==s;nv=s===''?null:s}
+    if(changed)ch[c.key]=nv});
+  if(!Object.keys(ch).length){toast('No changes to save');return}
+  const req=new Set(form.f.filter(f=>f.r).map(f=>dvNorm(f.k))),cand=[];
+  Object.keys(row).forEach(k=>{if(k in ch)return;const v=row[k];if(v==null||String(v).trim()==='')return;const n=dvNorm(k);cand.push({k,v,p:n==='serialnumber'?1:req.has(n)?2:3})});
+  cand.sort((a,b)=>a.p-b.p);
+  if(cand.length<2){rowShowErr(new Error('expect'));return}
+  const expect={};cand.slice(0,3).forEach(c=>{expect[c.k]=c.v});
+  rowSetBusy(true);
+  try{
+    await sheetCall({action:'edit',target:info.tabName,rowId:info.rowId,expect,changes:ch});
+    patchDeviceTab(info.tabKey,rows=>{const r=rows.find(x=>String(dvCell(x,'Row ID').value==null?'':dvCell(x,'Row ID').value).trim()===String(info.rowId).trim());if(!r)return;
+      Object.keys(ch).forEach(k=>{const v=ch[k];r[k]=v&&typeof v==='object'&&v.$date?v.$date:v})});
+    closeOverlay();toast('Saved to your sheet');syncSoon();
+  }catch(e){rowShowErr(e)}finally{rowSetBusy(false)}
+}
+document.addEventListener('submit',e=>{const f=e.target&&e.target.closest&&e.target.closest('[data-devform]');if(!f)return;e.preventDefault();saveDeviceEdit(f.dataset.devform)});
+
 function openRowEdit(id){
   const rec=store.D.byId.get(id);if(!rec||rec.type!=='expense')return;const o=rec.o;if(rowIdInfo(o).blocked)return;
   const same=(a,b)=>String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();
@@ -2017,6 +2107,7 @@ document.addEventListener('click',e=>{
     case 'rowdel':openRowDelete(d.id);break;
     case 'rowdelgo':deleteRowGo(d.id);break;
     case 'rowedit':openRowEdit(d.id);break;
+    case 'devedit':openDeviceEdit(d.id);break;
     case 'issuefix':openIssueFix(+d.i);break;
     case 'issuecopy':copyIssueRows(+d.i);break;
     case 'copysnap':copyText(JSON.stringify(store.base||store.raw),'Snapshot copied');break;
@@ -2496,6 +2587,7 @@ fab.innerHTML=ICO.plus+'<span class="lg-bd" hidden></span>';document.body.append
 window.addEventListener('online',()=>{updatePill();flush(true).then(updatePill)});window.addEventListener('offline',updatePill);
 setTimeout(showBackupBanner,2500);
 window.__mmShowSettings=()=>show(settingsScreen());
+window.__mmLog={FORMS,YN,numOf};   /* read-only handles to the logging form's own field list and number parser, used by the device Edit popup */
 
 /* ================= SECURITY & SETTINGS (opened from the "$" logo; additive, namespaced data-sec) =================
    Sign-in status, optional on-device username/password, sheet connection, sign out. */
