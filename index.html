@@ -1245,7 +1245,7 @@ function openDetail(id){
     summary=`${o.item}, ${mny(o.amount)} at ${o.place||'unknown'} on ${fdy(o.date)} (${o.category})`;
     h=`<div class="dh"><div><span class="pill"><i class="dot" style="background:${catColor(o.category)}"></i>${esc(o.category)}</span><h2 style="margin-top:8px">${esc(o.item)}</h2></div><button class="ibtn" data-act="close" aria-label="Close" data-focus>${ICON.x}</button></div>
       <div class="big">${M(o.amount)}${o.isRefund?' <span class="pill good">Refund</span>':''}</div>
-      ${kv([['Date',fdy(o.date)+' ('+rel(o.date)+')'],['Where',o.place],['Paid with',o.payment],['Type',o.tag||'Untagged'],['Notes',o.notes],['Sheet row','Expenses · row '+o.row]])}
+      ${kv([['Date',fdy(o.date)+' ('+rel(o.date)+')'],['Where',o.place],['Paid with',o.payment],['Type',o.tag||'Untagged'],['Notes',o.notes],['Sheet row','Expenses · '+rowRef(o)]])}
       ${more.length?`<h3 style="margin-bottom:6px">More at ${esc(o.place)}</h3><div class="list">${more.map(s=>`<button class="li" data-act="open" data-id="${s.id}"><span class="tx"><b>${esc(s.item)}</b><span>${fdy(s.date)}</span></span><span class="rt">${M(s.amount)}</span></button>`).join('')}</div>`:''}
       <button class="btn sec" style="margin-top:16px" data-act="copysum" data-v="${esc(summary)}">Copy summary</button>
       ${rowFootHtml(o)}`;
@@ -1263,7 +1263,22 @@ function openDetail(id){
    item, amount and date before it changes anything, and it refuses protected tabs and rows that contain formulas. */
 const isoDay=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 let rowBusy=false;
-const rowFootHtml=o=>`<div class="dfoot"><button type="button" class="btn danger" data-act="rowdel" data-id="${esc(o.id)}">Delete</button><button type="button" class="btn" data-act="rowedit" data-id="${esc(o.id)}">Edit</button></div>`;
+const rowFootHtml=o=>rowIdInfo(o).blocked?`<div class="dfoot"><p class="hint" style="color:var(--muted)">Run the ID backfill first</p></div>`:`<div class="dfoot"><button type="button" class="btn danger" data-act="rowdel" data-id="${esc(o.id)}">Delete</button><button type="button" class="btn" data-act="rowedit" data-id="${esc(o.id)}">Edit</button></div>`;
+/* The optional "Row ID" column of the Expenses tab, found the way the script finds it (letters and digits only, any case).
+   hasCol: the loaded tab has that column. id: this row's ID ('' when its cell is empty). blocked: the column exists, the row is in the sheet, and its ID is empty.
+   No such column = {hasCol:false}: nothing changes from today (row number plus expect). */
+function rowIdInfo(o){
+  const base=store.base||store.raw,tab=base&&base.Expenses;if(!tab||!Array.isArray(tab.rows))return {hasCol:false,id:'',blocked:false};
+  const hs=Array.isArray(tab.headers)&&tab.headers.length?tab.headers:Object.keys(tab.rows[0]||{});
+  const h=hs.find(x=>String(x).toLowerCase().replace(/[^a-z0-9]/g,'')==='rowid');
+  if(h===undefined)return {hasCol:false,id:'',blocked:false};
+  const r=Number.isInteger(o.row)?tab.rows[o.row-2]:null;
+  if(!r)return {hasCol:true,id:'',blocked:false};   /* not in the sheet yet: the old "not reached your sheet" message still applies */
+  const v=r[h],id=v==null?'':String(v).trim();
+  return {hasCol:true,id,blocked:id===''};
+}
+/* How a row is named on screen: its ID comes first whenever it has one, never the bare row number. */
+const rowRef=o=>{const i=rowIdInfo(o);return i.id?'ID '+i.id+' (row '+o.row+')':'row '+o.row};
 /* What the sheet returned for this row when the page last loaded it. The script compares this with the live row first. */
 function rowExpect(o){
   const base=store.base||store.raw,r=base&&base.Expenses&&base.Expenses.rows[o.row-2];
@@ -1285,6 +1300,7 @@ function rowErrText(e){
   if(m==='row changed')return 'That row has changed in your sheet since this page loaded. Press Refresh, then try again. Nothing was changed.';
   if(m==='row has formulas')return 'That row contains formulas, so it is protected. Delete it directly in Google Sheets. Nothing was changed.';
   if(/tab not allowed/.test(m))return 'That tab is protected, so My Money will not change it. Nothing was changed.';
+  if(m==='noid')return 'Run the ID backfill first. Nothing was changed.';
   if(m==='bad row'||m==='norow')return 'This entry has not reached your sheet yet. Press Refresh and try again. Nothing was changed.';
   if(m==='rejected'||/^expect|^no tab/.test(m))return 'Your sheet refused the change. Nothing was changed.';
   return 'Could not confirm with your sheet. Press Refresh to see whether the change went through.';
@@ -1300,31 +1316,32 @@ function patchExpenses(mut){
 function syncSoon(){if(store.source&&store.source.kind==='google')setTimeout(()=>{store.load(store.source).catch(()=>{})},1500)}
 
 function openRowDelete(id){
-  const rec=store.D.byId.get(id);if(!rec||rec.type!=='expense')return;const o=rec.o;
+  const rec=store.D.byId.get(id);if(!rec||rec.type!=='expense')return;const o=rec.o;if(rowIdInfo(o).blocked)return;
   openOverlay(`<div class="palbox" style="padding:20px" role="alertdialog" aria-modal="true" aria-label="Delete this row">
     <div class="dh"><h2>Delete this row?</h2><button type="button" class="ibtn" data-act="close" aria-label="Close">${ICON.x}</button></div>
     <p>Are you sure you want to delete this row from your Google Sheet?</p>
-    <p class="hint" style="color:var(--muted)">${esc(o.item)} · ${mny(o.amount)} · ${fdy(o.date)}<br>Expenses · row ${o.row}</p>
+    <p class="hint" style="color:var(--muted)">${esc(o.item)} · ${mny(o.amount)} · ${fdy(o.date)}<br>Expenses · ${esc(rowRef(o))}</p>
     <p class="ed-msg" id="ed-msg" role="alert" hidden></p>
     <div class="ed-actions"><button type="button" class="btn sec" data-act="close" data-focus>Cancel</button><button type="button" class="btn danger" data-act="rowdelgo" data-id="${esc(id)}">Delete row</button></div></div>`,'pal');
 }
 async function deleteRowGo(id){
   if(rowBusy)return;const rec=store.D.byId.get(id);if(!rec||rec.type!=='expense')return;const o=rec.o,ex=rowExpect(o);
   if(!ex){rowShowErr(new Error('norow'));return}
+  const ri=rowIdInfo(o);if(ri.blocked){rowShowErr(new Error('noid'));return}
   rowSetBusy(true);
   try{
-    await sheetCall({action:'delete',target:'Expenses',row:o.row,expect:ex});
+    await sheetCall(Object.assign({action:'delete',target:'Expenses',row:o.row,expect:ex},ri.id?{rowId:ri.id}:{}));
     patchExpenses(rows=>{rows.splice(o.row-2,1)});
     closeOverlay();toast('Row deleted from your sheet');syncSoon();
   }catch(e){rowShowErr(e)}finally{rowSetBusy(false)}
 }
 function openRowEdit(id){
-  const rec=store.D.byId.get(id);if(!rec||rec.type!=='expense')return;const o=rec.o;
+  const rec=store.D.byId.get(id);if(!rec||rec.type!=='expense')return;const o=rec.o;if(rowIdInfo(o).blocked)return;
   const same=(a,b)=>String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();
   const opts=(list,cur)=>{const l=list.slice();if(cur&&!l.some(x=>same(x,cur)))l.unshift(cur);if(!cur)l.unshift('');return l.map(x=>`<option value="${esc(x)}"${same(x,cur)?' selected':''}>${esc(x||'(none)')}</option>`).join('')};
   const cats=[...new Set(store.D.expenses.map(e=>e.category).filter(Boolean))].sort();
   openOverlay(`<form class="palbox" style="padding:20px" role="dialog" aria-modal="true" aria-label="Edit expense" data-rowform="${esc(id)}" novalidate>
-    <div class="dh"><div><h2>Edit expense</h2><p class="hint" style="color:var(--muted)">${esc(o.item)} · Expenses · row ${o.row}</p></div><button type="button" class="ibtn" data-act="close" aria-label="Close">${ICON.x}</button></div>
+    <div class="dh"><div><h2>Edit expense</h2><p class="hint" style="color:var(--muted)">${esc(o.item)} · Expenses · ${esc(rowRef(o))}</p></div><button type="button" class="ibtn" data-act="close" aria-label="Close">${ICON.x}</button></div>
     <div class="ed-grid">
       <div class="ed-f" data-ed="Amount"><label for="ed-amt">Amount</label><input type="text" id="ed-amt" inputmode="decimal" autocomplete="off" value="${esc(o.amount)}" data-focus><div class="ed-err" hidden></div></div>
       <div class="ed-f" data-ed="Date"><label for="ed-date">Date</label><input type="date" id="ed-date" value="${isoDay(o.date)}"><div class="ed-err" hidden></div></div>
@@ -1356,9 +1373,10 @@ async function saveRowEdit(id){
   if(type!==(o.tag||''))ch['Personal or Business Expense?']=type;
   if(!Object.keys(ch).length){toast('No changes to save');return}
   const ex=rowExpect(o);if(!ex){rowShowErr(new Error('norow'));return}
+  const ri=rowIdInfo(o);if(ri.blocked){rowShowErr(new Error('noid'));return}
   rowSetBusy(true);
   try{
-    await sheetCall({action:'edit',target:'Expenses',row:o.row,expect:ex,changes:ch});
+    await sheetCall(Object.assign({action:'edit',target:'Expenses',row:o.row,expect:ex,changes:ch},ri.id?{rowId:ri.id}:{}));
     patchExpenses(rows=>{const r=rows[o.row-2];if(!r)return;
       if('Amount' in ch)r['Amount']=ch['Amount'];
       if('Date of Purchase' in ch)r['Date of Purchase']=ch['Date of Purchase'].$date;

@@ -71,6 +71,7 @@ with sync_playwright() as p:
     check('delete request targets only Expenses and that one row', req['action'] == 'delete' and req['target'] == 'Expenses' and req['row'] == e['row'], str(req))
     check('delete request carries an expect guard of 3 columns', set(req['expect']) == {'Item Purchased', 'Amount', 'Date of Purchase'})
     check('delete request never uses the add-row fields', 'tab' not in req and 'values' not in req)
+    check('no Row ID column in the loaded data: the old delete body, no rowId key', 'rowId' not in req, str(req))
     check('state syncs immediately: the row is gone and dialog closed', page.locator('#overlay *').count() == 0 and page.evaluate(f"!store.D.byId.has('{e['id']}')||store.D.byId.get('{e['id']}').o.item!=={json.dumps(e['item'])}"))
 
     # ---- edit: only changed fields are sent ----
@@ -82,6 +83,7 @@ with sync_playwright() as p:
     page.wait_for_function("document.querySelectorAll('#overlay *').length===0")
     req = posts[-1]
     check('edit request changes only Amount', req['action'] == 'edit' and req['changes'] == {'Amount': 123.45} and req['row'] == e2['row'], str(req))
+    check('no Row ID column in the loaded data: the old edit body, no rowId key', 'rowId' not in req, str(req))
     check('screens show the new amount immediately', page.evaluate(f"store.D.expenses.find(x=>x.row=={e2['row']}-1||x.id==='{e2['id']}')!==undefined") and
           page.evaluate("store.D.expenses.some(x=>x.amount===123.45)"))
 
@@ -109,6 +111,30 @@ with sync_playwright() as p:
     page.wait_for_selector('#ed-msg:not([hidden])')
     check('an old script is detected and nothing is sent', len(posts) == n_posts and 'newest version' in page.locator('#ed-msg').inner_text())
     page.keyboard.press('Escape')
+
+    # ---- Row ID column present: sent with row + expect; an empty ID gets no buttons and a note ----
+    mode['edit'] = True; mode['reply'] = {'ok': True, 'row': 0}
+    r_empty, r_edit, r_del = [page.evaluate(f"store.D.expenses[{i}].row") for i in (3, 4, 5)]
+    page.evaluate(f"""(()=>{{const raw=JSON.parse(JSON.stringify(store.base||store.raw));const t=raw.Expenses;t.headers.push('Row ID');
+      t.rows.forEach((r,i)=>{{r['Row ID']='rui'+i}});t.rows[{r_empty}-2]['Row ID']=null;store.set(raw)}})()""")
+    by_row = lambda n: page.evaluate(f"store.D.expenses.find(x=>x.row=={n}).id")
+    page.evaluate(f"openDetail('{by_row(r_empty)}')")
+    check('empty Row ID: no Edit or Delete, and the note is shown',
+          page.locator('[data-act=rowdel]').count() == 0 and page.locator('[data-act=rowedit]').count() == 0 and 'Run the ID backfill first' in page.locator('#overlay').inner_text())
+    page.keyboard.press('Escape')
+    n_posts = len(posts)
+    page.evaluate(f"openDetail('{by_row(r_edit)}')")
+    check('with a Row ID the popout names the row by its ID, not the bare number', f'ID rui{r_edit-2} (row {r_edit})' in page.locator('#overlay').inner_text())
+    page.locator('[data-act=rowedit]').click(); page.fill('#ed-amt', '77.7'); page.locator('#overlay button[type=submit]').click()
+    page.wait_for_function("document.querySelectorAll('#overlay *').length===0")
+    req = posts[-1]
+    check('edit request carries rowId plus row and expect', len(posts) == n_posts + 1 and req['rowId'] == f'rui{r_edit-2}' and req['row'] == r_edit and set(req['expect']) == {'Item Purchased', 'Amount', 'Date of Purchase'} and req['changes'] == {'Amount': 77.7}, str(req))
+    page.evaluate(f"openDetail('{by_row(r_del)}')"); page.locator('[data-act=rowdel]').click()
+    check('delete confirmation names the row by its ID', f'ID rui{r_del-2} (row {r_del})' in page.locator('#overlay').inner_text())
+    page.locator('[data-act=rowdelgo]').click()
+    page.wait_for_function("document.querySelectorAll('#overlay *').length===0")
+    req = posts[-1]
+    check('delete request carries rowId plus row and expect', req['action'] == 'delete' and req['rowId'] == f'rui{r_del-2}' and req['row'] == r_del and set(req['expect']) == {'Item Purchased', 'Amount', 'Date of Purchase'}, str(req))
 
     # ---- items / investments have no write buttons yet ----
     it = page.evaluate("store.D.items[0].id")
