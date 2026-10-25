@@ -13,6 +13,14 @@ const ALLOWED_TABS = ['Form Responses - Bought', 'Form Responses - PCs', 'Bought
 // Formula tabs (Master Inventory, PCs, PnA, Summary...) are not listed, so a row there can never be edited or deleted.
 const EDITABLE_TABS = ['Expenses'];
 
+// EDIT ONLY: the six entry tabs. An existing row can be EDITED here (every change is written to the "Edit Log" tab first), but a row can NEVER be deleted.
+// Formula tabs (Master Inventory, PCs, PnA, Summary...) must never be added to this list or to EDITABLE_TABS.
+const EDIT_ONLY_TABS = ['Form Responses - Bought', 'Form Responses - PCs', 'Bought Access - Form', 'Form Responses - Sold', 'Form Responses - Sold PCs', 'Sold Access - Form'];
+
+// The "Edit Log" tab is the ONLY tab this script may create. Each edited cell adds one row here (old value and new value).
+const EDIT_LOG_TAB = 'Edit Log';
+const EDIT_LOG_HEADERS = ['Timestamp', 'Tab', 'Row ID', 'Column', 'Old value', 'New value', 'Action'];
+
 // READ: what the website loads. key = the site's name, tab = your tab, keys = columns that prove a row is real data.
 // Reading never changes anything in the sheet.
 const READ_TABS = {
@@ -20,7 +28,14 @@ const READ_TABS = {
   Phones:      { tab: 'Master Inventory',          keys: ['Model', 'IMEI', 'Device Label'] },
   PCs:         { tab: 'PCs',                       keys: ['PC model', 'Device Label'] },
   Accessories: { tab: 'PnA',                       keys: ['Item ID', 'Model', 'Brand'] },
-  Investments: { tab: 'Investment Tracking Sheet', keys: ['Investment Type', 'Date', 'Total Portfolio Value'] }
+  Investments: { tab: 'Investment Tracking Sheet', keys: ['Investment Type', 'Date', 'Total Portfolio Value'] },
+  // READ-ONLY entry tabs under new keys. The website does not use these yet. keys: [] means "every column counts as data".
+  BoughtPhones: { tab: 'Form Responses - Bought',   keys: [] },
+  BoughtPCs:    { tab: 'Form Responses - PCs',      keys: [] },
+  BoughtAccess: { tab: 'Bought Access - Form',      keys: [] },
+  SoldPhones:   { tab: 'Form Responses - Sold',     keys: [] },
+  SoldPCs:      { tab: 'Form Responses - Sold PCs', keys: [] },
+  SoldAccess:   { tab: 'Sold Access - Form',        keys: [] }
 };
 
 // Every reply is JSON. `status` is added alongside the existing `ok` flag so older and newer callers both work.
@@ -223,9 +238,11 @@ function sameCell(live, want) {
 // A request may carry `rowId`. Then the row is found by its "Row ID" cell (exactly one match, otherwise refuse) and the `row` number is ignored,
 // so rows deleted above it cannot shift the target. The `expect` check below STILL runs on that row, as a second lock.
 // Without `rowId` nothing is different: the `row` number plus `expect`, exactly as before.
-function lockRow(ss, body) {
+function lockRow(ss, body, allowEditOnly) {
   const reqTab = String(body.target || '').trim().toLowerCase();
-  if (!EDITABLE_TABS.some(t => t.toLowerCase() === reqTab)) return { error: 'tab not allowed: ' + body.target };
+  // allowEditOnly adds EDIT_ONLY_TABS. Only editRow passes it; deleteRow never does, so those tabs can never be deleted from.
+  const allowed = allowEditOnly === true ? EDITABLE_TABS.concat(EDIT_ONLY_TABS) : EDITABLE_TABS;
+  if (!allowed.some(t => t.toLowerCase() === reqTab)) return { error: 'tab not allowed: ' + body.target };
   const sheet = findSheet(ss, reqTab);
   if (!sheet) return { error: 'no tab: ' + body.target };
   const byId = body.rowId !== undefined && body.rowId !== null;
@@ -258,27 +275,51 @@ function lockRow(ss, body) {
   return { sheet, row, headers, lastCol };
 }
 
+// Finds the "Edit Log" tab, or creates it (with its header row) if it does not exist. This is the ONLY tab the script may create.
+// An existing Edit Log is never changed here; headers are written only into a brand-new or completely empty one.
+function ensureEditLog(ss) {
+  let sheet = findSheet(ss, EDIT_LOG_TAB);
+  if (!sheet) sheet = ss.insertSheet(EDIT_LOG_TAB);
+  if (sheet.getLastRow() === 0) sheet.getRange(1, 1, 1, EDIT_LOG_HEADERS.length).setValues([EDIT_LOG_HEADERS]);
+  return sheet;
+}
+
 // Writes only the named cells of that one row. Formula cells and the Timestamp are never touched.
+// Before each cell is written, one row (old value, new value) is added to the Edit Log. If that cannot be done, the cell is NOT written.
 function editRow(ss, body) {
-  const g = lockRow(ss, body);
+  const g = lockRow(ss, body, true);
   if (g.error) return { ok: false, error: g.error };
+  let logSheet;
+  try { logSheet = ensureEditLog(ss); } catch (logErr) { return { ok: false, error: 'edit log unavailable' }; }
+  const rawHeaders = g.sheet.getRange(1, 1, 1, g.lastCol).getValues()[0];
+  const ridCols = g.headers.map((h, i) => (h === 'rowid' ? i + 1 : 0)).filter(Boolean);
+  const rowIdValue = ridCols.length === 1 ? g.sheet.getRange(g.row, ridCols[0]).getValue() : g.row;
   const changes = body.changes && typeof body.changes === 'object' ? body.changes : {};
   const updated = [], skipped = [];
-  Object.keys(changes).forEach(k => {
+  const names = Object.keys(changes);
+  for (let n = 0; n < names.length; n++) {
+    const k = names[n];
     const c = g.headers.indexOf(normHeader(k));
-    if (c < 0 || normHeader(k) === 'timestamp') { skipped.push(k); return; }
+    if (c < 0 || normHeader(k) === 'timestamp') { skipped.push(k); continue; }
     const cell = g.sheet.getRange(g.row, c + 1);
-    if (cell.getFormula() !== '') { skipped.push(k); return; }
+    if (cell.getFormula() !== '') { skipped.push(k); continue; }
     let v = changes[k];
     if (v && typeof v === 'object' && v.$date) { const [y, m, d] = String(v.$date).split('-').map(Number); v = new Date(y, m - 1, d); }
-    if (v !== null && typeof v === 'object' && !(v instanceof Date)) { skipped.push(k); return; }
-    cell.setValue(v === null ? '' : v);
+    if (v !== null && typeof v === 'object' && !(v instanceof Date)) { skipped.push(k); continue; }
+    const newValue = v === null ? '' : v;
+    try {
+      logSheet.appendRow([new Date(), g.sheet.getName(), rowIdValue, rawHeaders[c] || k, cell.getValue(), newValue, 'edit']);
+    } catch (logErr) {
+      return { ok: false, error: 'edit log write failed', row: g.row, updated, skipped };
+    }
+    cell.setValue(newValue);
     updated.push(k);
-  });
+  }
   return { ok: true, row: g.row, updated, skipped };
 }
 
 // Removes exactly that one row, and only if it holds no formulas.
+// Never passes allowEditOnly to lockRow, so the six EDIT_ONLY_TABS can never have a row deleted.
 function deleteRow(ss, body) {
   const g = lockRow(ss, body);
   if (g.error) return { ok: false, error: g.error };
