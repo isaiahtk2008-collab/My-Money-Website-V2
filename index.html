@@ -1280,7 +1280,8 @@ function openDetail(id){
       <div class="steps"><div class="s"><b>Bought</b>${fdy(o.buyDate)}</div><div class="ln"><span>${o.sold&&o.days!=null?plural(o.days,'day'):(o.age!=null?plural(o.age,'day')+' and counting':'')}</span></div><div class="s"><b>${o.sold?'Sold':'Not sold yet'}</b>${o.sold?fdy(o.sellDate):'—'}</div></div>
       ${kv([['Paid',mny(o.buyPrice)],['Bought from',o.seller],['Bought on',fdy(o.buyDate)],['Sale price',o.sold?mny(o.sellPrice):null],['Sold to',o.buyer],['Sold on',o.sold?fdy(o.sellDate):null],['Listing clicks',o.clicks],...Object.entries(o.specs).map(([k,v])=>[k,v]),['Notes',o.notes],['Sheet row',o.sheet+' · row '+o.row]])}
       ${same.length?`<h3 style="margin-bottom:6px">Other ${esc(o.name)} sales</h3><div class="list">${same.map(s=>`<button class="li" data-act="open" data-id="${s.id}"><span class="tx"><b>${fdy(s.sellDate)}</b><span>${plural(s.days??0,'day')} to sell${s.buyer?' · '+esc(s.buyer):''}</span></span><span class="rt ${s.profit>=0?'pos':'neg'}">${SM(s.profit)}</span></button>`).join('')}</div>`:''}
-      <button class="btn sec" style="margin-top:16px" data-act="copysum" data-v="${esc(summary)}">Copy summary</button>`;
+      <button class="btn sec" style="margin-top:16px" data-act="copysum" data-v="${esc(summary)}">Copy summary</button>
+      ${deviceFootHtml(o)}`;
   }else if(rec.type==='expense'){
     const more=store.D.expenses.filter(e=>e.id!==o.id&&o.place&&e.place===o.place).sort((a,b)=>b.date-a.date).slice(0,5);
     summary=`${o.item}, ${mny(o.amount)} at ${o.place||'unknown'} on ${fdy(o.date)} (${o.category})`;
@@ -1342,6 +1343,7 @@ function rowErrText(e){
   if(m==='row has formulas')return 'That row contains formulas, so it is protected. Delete it directly in Google Sheets. Nothing was changed.';
   if(/tab not allowed/.test(m))return 'That tab is protected, so My Money will not change it. Nothing was changed.';
   if(m==='noid')return 'Run the ID backfill first. Nothing was changed.';
+  if(m==='noexpect')return 'Not enough unchanged details on this row to verify it safely. Nothing was changed.';
   if(m==='bad row'||m==='norow')return 'This entry has not reached your sheet yet. Press Refresh and try again. Nothing was changed.';
   if(m==='rejected'||/^expect|^no tab/.test(m))return 'Your sheet refused the change. Nothing was changed.';
   return 'Could not confirm with your sheet. Press Refresh to see whether the change went through.';
@@ -1426,6 +1428,284 @@ async function saveRowEdit(id){
   }catch(e){rowShowErr(e)}finally{rowSetBusy(false)}
 }
 document.addEventListener('submit',e=>{const f=e.target&&e.target.closest&&e.target.closest('[data-rowform]');if(!f)return;e.preventDefault();saveRowEdit(f.dataset.rowform)});
+
+/* ================= EDIT ONE PURCHASE ROW FROM A DEVICE (Phones and PCs) =================
+   Writes go only to the device's own purchase row in "Form Responses - Bought" / "Form Responses - PCs", found by its Row ID.
+   Never PnA, Master Inventory, PCs or Summary (formula tabs). Only fields the person touched AND changed are sent.
+   Helpers below are pure (no DOM, no writes) so tests/device-edit.test.mjs can load them straight from this file. */
+const DE_FORM={Phone:'bphone',PC:'bpc'};
+const DE_TYPES=['text','tel','int','money','date','radio','yn'];
+const DE_TABS=['Form Responses - Bought','Form Responses - PCs'];   /* the ONLY tabs this editor may ever target */
+const deKey=s=>String(s==null?'':s).toLowerCase().replace(/[^a-z0-9]/g,'');
+
+function deRowKey(row,label){
+  if(!row) return undefined;
+  const target=deKey(label);
+  return Object.keys(row).find(k=>deKey(k)===target);
+}
+
+/* ok = one safe purchase row with a Row ID; noid = matched but the row has no ID yet; nomatch = anything else. */
+function dePlan(item,raw){
+  const m=matchDeviceRows(item,raw);
+  if(!m||!m.ok||!m.purchase) return {state:'nomatch'};
+  if(!DE_TABS.includes(m.purchase.tab)) return {state:'nomatch'};
+  const form=BY[DE_FORM[item&&item.kind]];
+  if(!form||!form.f.every(x=>DE_TYPES.includes(x.t))) return {state:'nomatch'};
+  if(!m.purchase.rowId) return {state:'noid'};
+  return {state:'ok',form,tab:m.purchase.tab,rowId:String(m.purchase.rowId),row:m.purchase.row,tabKey:item.kind==='Phone'?'BoughtPhones':'BoughtPCs'};
+}
+
+function deStr(x,v){
+  if(v==null) return '';
+  if(x.t==='date'){
+    const s=String(v);
+    return /^\d{4}-\d{2}-\d{2}/.test(s)?s.slice(0,10):'';
+  }
+  if(x.t==='money'||x.t==='int'){
+    if(typeof v==='number'&&isFinite(v)) return String(v);
+    const n=numOf(v);
+    return n==null?String(v).trim():String(n);
+  }
+  return String(v).trim();
+}
+
+function deInit(form,row){
+  const vals={},orig={};
+  for(const x of form.f){
+    const k=x.k;
+    const o=deStr(x,row?row[deRowKey(row,k)]:undefined);
+    orig[k]=o;
+    if(x.t==='radio'||x.t==='yn'){
+      const opts=x.t==='yn'?YN:(x.o||[]);
+      const match=opts.find(opt=>opt.trim().toLowerCase()===o.toLowerCase());
+      vals[k]=match!==undefined?match:'';
+    }else if(x.t==='money'){
+      const n=numOf(o);
+      vals[k]=n!=null?Number(n).toFixed(2):o;
+    }else{
+      vals[k]=o;
+    }
+  }
+  return {vals,orig};
+}
+
+/* The same rules as validate() in the logging form, as a pure function. */
+function deFieldError(x,s){
+  if(!s){ return x.r ? 'Required' : ''; }
+  if(x.t==='money'||x.t==='int'){ const n=numOf(s); if(n==null) return 'Enter a number'; if(n<0 && !x.neg) return "Can't be negative"; if(x.t==='int' && !Number.isInteger(n)) return 'Whole number please'; return ''; }
+  if(x.t==='date' && !/^\d{4}-\d{2}-\d{2}$/.test(s)) return 'Pick a date';
+  return '';
+}
+
+function deSame(x,a,b){
+  const sa=String(a==null?'':a).trim(),sb=String(b==null?'':b).trim();
+  if(x.t==='money'||x.t==='int'){
+    const na=numOf(sa),nb=numOf(sb);
+    if(na==null&&nb==null) return sa===sb;
+    return na===nb;
+  }
+  if(x.t==='radio'||x.t==='yn'){
+    return sa.toLowerCase()===sb.toLowerCase();
+  }
+  return sa===sb;
+}
+
+/* Only fields the person touched are checked, and only the ones that really differ are sent. */
+function deCheck(form,vals,orig,touched){
+  const changes={},errors={};
+  for(const x of form.f){
+    if(!touched.has(x.k)) continue;
+    const s=String(vals[x.k]==null?'':vals[x.k]).trim();
+    const e=deFieldError(x,s);
+    if(e){errors[x.k]=e;continue;}
+    if(deSame(x,s,orig[x.k]||'')) continue;
+    if(s===''){
+      changes[x.k]=null;
+    }else if(x.t==='money'||x.t==='int'){
+      changes[x.k]=numOf(s);
+    }else if(x.t==='date'){
+      changes[x.k]={$date:s};
+    }else{
+      changes[x.k]=s;
+    }
+  }
+  return {changes,errors,count:Object.keys(changes).length};
+}
+
+/* 2 to 3 columns that are NOT being changed and are not empty, as the sheet returned them. The script re-checks them against the live row. */
+function deExpect(form,row,changedKeys){
+  if(!row) return null;
+  const skip=new Set(changedKeys||[]);
+  const expect={};
+  let count=0;
+  for(const x of form.f){
+    if(skip.has(x.k)) continue;
+    const v=row[deRowKey(row,x.k)];
+    if(v==null||String(v).trim()==='') continue;
+    expect[x.k]=v;
+    if(++count===3) break;
+  }
+  return count>=2?expect:null;
+}
+
+/* A copy of the loaded sheet data with only that one row (found by Row ID) changed. Anything unclear returns the input untouched. */
+function dePatch(raw,tabKey,rowId,changes){
+  if(!raw||!raw[tabKey]||!Array.isArray(raw[tabKey].rows)) return raw;
+  const targetId=String(rowId).trim();
+  const rows=raw[tabKey].rows;
+  let matchIdx=-1,matches=0;
+  for(let i=0;i<rows.length;i++){
+    const r=rows[i];
+    const k=deRowKey(r,'Row ID');
+    if(k!==undefined&&String(r[k]).trim()===targetId){
+      matchIdx=i;
+      matches++;
+    }
+  }
+  if(matches!==1) return raw;
+  const rowCopy={...rows[matchIdx]};
+  for(const k of Object.keys(changes)){
+    const targetKey=deRowKey(rowCopy,k)||k;
+    const val=changes[k];
+    rowCopy[targetKey]=(val&&typeof val==='object'&&val.$date!==undefined)?val.$date:val;
+  }
+  const nextRows=[...rows];
+  nextRows[matchIdx]=rowCopy;
+  return {...raw,[tabKey]:{...raw[tabKey],rows:nextRows}};
+}
+
+/* The device drawer footer and the "Edit purchase" popup. Delete stays disabled on purpose. Uses its own data-de / data-dk
+   hooks so it can never touch the logging form's drafts (that form listens to .lg-in, data-ty and data-lg). */
+let devEd=null;
+
+function deviceFootHtml(o){
+  const p=dePlan(o,store.base||store.raw);
+  if(p.state==='nomatch') return `<div class="dfoot"><p class="hint" style="color:var(--muted)">Can't safely match this item to its sheet row</p></div>`;
+  if(p.state==='noid') return `<div class="dfoot"><p class="hint" style="color:var(--muted)">Run the ID backfill first</p></div>`;
+  return `<div class="dfoot"><button type="button" class="btn danger" disabled aria-describedby="de-delnote">Delete</button><button type="button" class="btn" data-act="devedit" data-id="${esc(o.id)}">Edit</button></div><p class="hint" id="de-delnote" style="color:var(--muted);margin-top:8px">Delete purchases and sales directly in Google Sheets for now</p>`;
+}
+
+function deFieldHtml(x,i,val){
+  const isChip=x.t==='radio'||x.t==='yn';
+  const lbl=isChip?`<span class="lg-l${x.r?' req':''}">${esc(x.l)}</span>`:`<label class="lg-l${x.r?' req':''}" for="de-${i}">${esc(x.l)}</label>`;
+  let ctrl='';
+  if(isChip){
+    const opts=x.t==='yn'?YN:(x.o||[]);
+    ctrl=`<div class="lg-chips" role="group" aria-label="${esc(x.k)}">`+opts.map(opt=>`<button type="button" class="chip-b" data-de="pick" data-dkey="${esc(x.k)}" data-dval="${esc(opt)}" aria-pressed="${val===opt}">${esc(opt)}</button>`).join('')+`</div>`;
+  }else if(x.t==='money'){
+    ctrl=`<div class="lg-aff money"><span>$</span><input type="text" id="de-${i}" data-dk="${esc(x.k)}" inputmode="decimal" autocomplete="off" value="${esc(val)}"></div>`;
+  }else if(x.t==='date'){
+    ctrl=`<input type="date" id="de-${i}" data-dk="${esc(x.k)}" value="${esc(val)}">`;
+  }else{
+    const im=x.t==='int'?'numeric':(x.t==='tel'?'tel':'text');
+    ctrl=`<input type="text" id="de-${i}" data-dk="${esc(x.k)}" inputmode="${im}" autocomplete="off"${x.sug?` list="lg-dl-${x.sug}"`:''} value="${esc(val)}">`;
+  }
+  return `<div class="lg-f" data-df="${esc(x.k)}">${lbl}${ctrl}<p class="lg-em" data-derr hidden></p></div>`;
+}
+
+function openDeviceEdit(id){
+  const rec=store.D.byId.get(id); if(!rec||rec.type!=='item') return; const o=rec.o;
+  const plan=dePlan(o,store.base||store.raw); if(plan.state!=='ok') return;
+  const {vals,orig}=deInit(plan.form,plan.row);
+  devEd={id,plan,vals,orig,touched:new Set()};
+  const sugs=[...new Set(plan.form.f.map(x=>x.sug).filter(Boolean))];
+  openOverlay(`<form class="palbox" style="padding:20px;max-height:90vh;overflow-y:auto" role="dialog" aria-modal="true" aria-label="Edit purchase" data-deform="${esc(id)}" novalidate>
+  <div class="dh"><div><h2>Edit device</h2><p class="hint" style="color:var(--muted)">${esc(o.name)} · ${esc(plan.tab)} · ID ${esc(plan.rowId)}</p></div><button type="button" class="ibtn" data-act="close" aria-label="Close">${ICON.x}</button></div>
+  <div class="seg" role="tablist" style="margin-bottom:14px"><button type="button" role="tab" aria-selected="true" aria-pressed="true">Edit purchase</button></div>
+  ${plan.form.f.map((x,i)=>deFieldHtml(x,i,vals[x.k])).join('')}
+  ${sugs.map(s=>`<datalist id="lg-dl-${esc(s)}">${sugList(s).map(v=>`<option value="${esc(v)}">`).join('')}</datalist>`).join('')}
+  <p class="ed-msg" id="ed-msg" role="alert" hidden></p>
+  <div class="ed-actions"><button type="button" class="btn sec" data-act="close">Cancel</button><button type="submit" class="btn">Save changes</button></div></form>`,'pal');
+}
+
+function deShowErrors(errors){
+  $$('#overlay [data-df]').forEach(el=>{
+    const msg=errors[el.dataset.df]||'';
+    const em=el.querySelector('[data-derr]');
+    if(em){em.textContent=msg;em.hidden=!msg;}
+    el.classList.toggle('bad',!!msg);
+  });
+  const m=$('#ed-msg');
+  if(m) m.hidden=true;
+}
+
+document.addEventListener('click',e=>{
+  if(!devEd) return;
+  const t=e.target.closest&&e.target.closest('[data-de="pick"]');
+  if(!t) return;
+  const k=t.dataset.dkey, v=t.dataset.dval;
+  devEd.vals[k]=devEd.vals[k]===v?'':v;
+  devEd.touched.add(k);
+  t.parentNode.querySelectorAll('[data-de="pick"]').forEach(btn=>{
+    btn.setAttribute('aria-pressed',btn.dataset.dval===devEd.vals[k]);
+  });
+  const w=t.closest('[data-df]');
+  if(w){
+    const m=w.querySelector('[data-derr]');
+    if(m){m.textContent='';m.hidden=true;}
+    w.classList.remove('bad');
+  }
+});
+
+function onDevEdInput(e){
+  if(!devEd) return;
+  const t=e.target;
+  if(!t||!t.dataset||t.dataset.dk===undefined) return;
+  const k=t.dataset.dk;
+  devEd.vals[k]=t.value;
+  devEd.touched.add(k);
+  const w=t.closest('[data-df]');
+  if(w){
+    const m=w.querySelector('[data-derr]');
+    if(m){m.textContent='';m.hidden=true;}
+    w.classList.remove('bad');
+  }
+}
+document.addEventListener('input',onDevEdInput);
+document.addEventListener('change',onDevEdInput);
+
+document.addEventListener('submit',e=>{
+  if(!devEd) return;
+  const f=e.target&&e.target.closest&&e.target.closest('[data-deform]');
+  if(!f) return;
+  e.preventDefault();
+  saveDeviceEdit(f.dataset.deform);
+});
+
+async function saveDeviceEdit(id){
+  if(rowBusy||!devEd||devEd.id!==id)return;
+  const rec=store.D.byId.get(id);
+  if(!rec||rec.type!=='item')return;
+  const plan=dePlan(rec.o,store.base||store.raw);   /* match again right now: the sheet may have been re-read since the popup opened */
+  if(plan.state==='noid'){rowShowErr(new Error('noid'));return;}
+  if(plan.state!=='ok'||plan.tab!==devEd.plan.tab||plan.rowId!==devEd.plan.rowId){rowShowErr(new Error('norow'));return;}
+  const r=deCheck(plan.form,devEd.vals,devEd.orig,devEd.touched);
+  deShowErrors(r.errors);
+  if(Object.keys(r.errors).length){toast('Check the highlighted fields');return;}
+  if(!r.count){toast('No changes to save');return;}
+  const keys=Object.keys(r.changes);
+  const ex=deExpect(plan.form,plan.row,keys);
+  if(!ex){rowShowErr(new Error('noexpect'));return;}
+  rowSetBusy(true);
+  try{
+    const j=await sheetCall({action:'edit',target:plan.tab,rowId:plan.rowId,expect:ex,changes:r.changes});
+    /* The script can answer ok yet skip a column (a formula or a missing header). Only what it says it wrote counts as saved. */
+    const done=Array.isArray(j.updated)?j.updated:keys;
+    const skipped=Array.isArray(j.skipped)?j.skipped:[];
+    const doneKeys=new Set(done.map(deKey));
+    const applied={};
+    for(const k of keys)if(doneKeys.has(deKey(k)))applied[k]=r.changes[k];
+    if(Object.keys(applied).length)store.set(dePatch(store.base||store.raw,plan.tabKey,plan.rowId,applied));
+    devEd=null;
+    closeOverlay();
+    toast(skipped.length?'Saved, but your sheet skipped: '+skipped.join(', ')+'. Check Google Sheets.':'Saved to your sheet');
+    syncSoon();
+  }catch(e){
+    rowShowErr(e);
+  }finally{
+    rowSetBusy(false);
+  }
+}
 
 /* ================= COMMAND PALETTE + HELP ================= */
 function cmdList(){
@@ -2017,6 +2297,7 @@ document.addEventListener('click',e=>{
     case 'rowdel':openRowDelete(d.id);break;
     case 'rowdelgo':deleteRowGo(d.id);break;
     case 'rowedit':openRowEdit(d.id);break;
+    case 'devedit':openDeviceEdit(d.id);break;
     case 'issuefix':openIssueFix(+d.i);break;
     case 'issuecopy':copyIssueRows(+d.i);break;
     case 'copysnap':copyText(JSON.stringify(store.base||store.raw),'Snapshot copied');break;
