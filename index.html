@@ -961,6 +961,7 @@ function normalize(raw){
 
 /* ----- Data sources: anything that returns the raw shape plugs in here ----- */
 const TABS={Expenses:'Expenses',Phones:'Master Inventory',PCs:'PCs',Accessories:'PnA',Investments:'Investment Tracking Sheet'};
+const EXTRA_TABS={BoughtPhones:'Form Responses - Bought',BoughtPCs:'Form Responses - PCs',BoughtAccess:'Bought Access - Form',SoldPhones:'Form Responses - Sold',SoldPCs:'Form Responses - Sold PCs',SoldAccess:'Sold Access - Form'};
 const EmbeddedSource={name:'Embedded snapshot',kind:'embedded',async load(){return MM_RAW}};
 /* Reads through your Apps Script link first (works even if the sheet is private), then falls back to the public sheet feed. */
 async function loadViaScript(url,tabs){
@@ -972,6 +973,8 @@ async function loadViaScript(url,tabs){
   if(!j.tabs)throw new Error('old script');
   const out={};
   for(const key of Object.keys(tabs)){const t=j.tabs[key];if(!t||t.missing||!Array.isArray(t.rows))throw new Error('tab '+tabs[key]);out[key]={sheet:t.sheet||tabs[key],headers:t.headers||[],rows:t.rows}}
+  /* Optional entry tabs (newer script only). Kept when present and usable, silently skipped otherwise; no existing screen reads them. */
+  for(const key of Object.keys(EXTRA_TABS)){const t=j.tabs&&j.tabs[key];if(t&&!t.missing&&Array.isArray(t.rows))out[key]={sheet:t.sheet||EXTRA_TABS[key],headers:t.headers||[],rows:t.rows}}
   return out}
 function GoogleSheetSource(sheetId,tabs=TABS){
   return {name:'Google Sheet',kind:'google',sheetId,async load(){
@@ -993,6 +996,44 @@ function GoogleSheetSource(sheetId,tabs=TABS){
     return out}};
 }
 function parseSheetId(s){const m=String(s).match(/\/d\/([a-zA-Z0-9_-]+)/);return m?m[1]:String(s).trim()}
+
+/* Pure (no browser, no writes): finds the ONE purchase row, and for a sold device the ONE sale row, in the six entry tabs kept by loadViaScript.
+   Any doubt (no match, several matches, no usable key, tab missing) gives {purchase:null,sale:null,ok:false}. It never guesses.
+   Phones: IMEI = the purchase form's "Serial Number". Sales: the sold form's "Device Label" (phones) or "Device" (PCs) text.
+   PCs need item.serial (the PCs tab has no serial column today). Accessories have no reliable shared key, so they never match. */
+function matchDeviceRows(item, raw) {
+  const fail = {purchase: null, sale: null, ok: false};
+  if (!item || typeof item !== 'object' || !raw || typeof raw !== 'object') return fail;
+  if (item.kind !== 'Phone' && item.kind !== 'PC') return fail;
+  const clean = s => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const get = (r, h) => { if (!r || typeof r !== 'object') return undefined; const t = clean(h); for (const k of Object.keys(r)) if (clean(k) === t) return r[k]; };
+  const rowId = r => { const v = get(r, 'Row ID'); if (v == null) return null; const s = String(v).trim(); return s || null; };
+  const normSer = s => String(s == null ? '' : s).replace(/\s+/g, '').toUpperCase();
+  const normLab = s => String(s == null ? '' : s).replace(/\s+/g, ' ').trim().toLowerCase();
+  const rawSer = item.serial != null ? item.serial : (item.specs && (item.specs.IMEI != null ? item.specs.IMEI : item.specs['Serial Number']));
+  const ser = normSer(rawSer);
+  if (!ser) return fail;
+  const isPhone = item.kind === 'Phone';
+  const bTab = raw[isPhone ? 'BoughtPhones' : 'BoughtPCs'];
+  if (!bTab || !Array.isArray(bTab.rows)) return fail;
+  const bMatches = bTab.rows.filter(r => { const s = normSer(get(r, 'Serial Number')); return s && s === ser; });
+  if (bMatches.length !== 1) return fail;
+  const pRow = bMatches[0];
+  const purchase = {tab: bTab.sheet || (isPhone ? 'Form Responses - Bought' : 'Form Responses - PCs'), rowId: rowId(pRow), row: pRow};
+  let sale = null;
+  if (item.sold === true) {
+    const lab = normLab(item.label);
+    if (!lab) return fail;
+    const sTab = raw[isPhone ? 'SoldPhones' : 'SoldPCs'];
+    if (!sTab || !Array.isArray(sTab.rows)) return fail;
+    const col = isPhone ? 'Device Label' : 'Device';
+    const sMatches = sTab.rows.filter(r => normLab(get(r, col)) === lab);
+    if (sMatches.length !== 1) return fail;
+    const sRow = sMatches[0];
+    sale = {tab: sTab.sheet || (isPhone ? 'Form Responses - Sold' : 'Form Responses - Sold PCs'), rowId: rowId(sRow), row: sRow};
+  }
+  return {purchase, sale, ok: true};
+}
 
 /* ================= STORE ================= */
 const store={raw:null,D:null,source:EmbeddedSource,syncedAt:null,
