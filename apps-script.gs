@@ -328,6 +328,91 @@ function deleteRow(ss, body) {
   return { ok: true, row: g.row, deleted: true };
 }
 
+// UNDO. Restores the most recent Edit Log change that has not been undone yet. Nothing in the Edit Log is ever changed or removed: an undo is
+// recorded by appending a row with Action 'undo', and each 'undo' row cancels the nearest earlier 'edit' row (so an edit can never be undone twice).
+// The cell is restored only if it STILL holds the logged new value. Only EDITABLE_TABS / EDIT_ONLY_TABS; never formula cells, Timestamp or Row ID.
+// Optional `logRow` (the Edit Log row the caller means) makes a retry safe: if that row is no longer the latest undoable one, nothing is changed.
+function undoRow(ss, body) {
+  const logSheet = findSheet(ss, EDIT_LOG_TAB);
+  if (!logSheet || logSheet.getLastRow() < 2) return { ok: false, error: 'nothing to undo' };
+
+  const lastRow = logSheet.getLastRow();
+  const rows = logSheet.getRange(2, 1, lastRow - 1, 7).getValues();
+
+  let target = null;
+  let logRow = -1;
+  let pending = 0;
+
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const action = String(rows[i][6] || '').trim();
+    if (action === 'undo') {
+      pending++;
+    } else if (action === 'edit') {
+      if (pending > 0) {
+        pending--;
+      } else {
+        target = rows[i];
+        logRow = i + 2;
+        break;
+      }
+    }
+  }
+
+  if (!target) return { ok: false, error: 'nothing to undo' };
+  if (body && body.logRow !== undefined && Number(body.logRow) !== logRow) {
+    return { ok: false, error: 'log row changed' };
+  }
+
+  const loggedTab = String(target[1] || '').trim();
+  const loggedRowId = String(target[2] === null || target[2] === undefined ? '' : target[2]).trim();
+  const loggedColumn = target[3];
+  const loggedOld = target[4];
+  const loggedNew = target[5];
+
+  const allowedTabs = EDITABLE_TABS.concat(EDIT_ONLY_TABS);
+  const isAllowed = allowedTabs.some(t => t.trim().toLowerCase() === loggedTab.toLowerCase());
+  if (!isAllowed) return { ok: false, error: 'tab not allowed: ' + loggedTab };
+
+  const sheet = findSheet(ss, loggedTab);
+  if (!sheet) return { ok: false, error: 'no tab: ' + loggedTab };
+
+  const sheetLastRow = sheet.getLastRow();
+  const sheetLastCol = sheet.getLastColumn();
+  if (sheetLastRow < 1 || sheetLastCol < 1) return { ok: false, error: 'tab needs exactly one Row ID column' };
+
+  const headers = sheet.getRange(1, 1, 1, sheetLastCol).getValues()[0].map(normHeader);
+  const rowIdCols = [];
+  headers.forEach((h, idx) => { if (h === 'rowid') rowIdCols.push(idx); });
+  if (rowIdCols.length !== 1) return { ok: false, error: 'tab needs exactly one Row ID column' };
+  if (sheetLastRow < 2) return { ok: false, error: 'row id not found' };
+
+  const ids = sheet.getRange(2, rowIdCols[0] + 1, sheetLastRow - 1, 1).getValues();
+  const hits = [];
+  ids.forEach((cellId, idx) => { if (String(cellId[0] === null || cellId[0] === undefined ? '' : cellId[0]).trim() === loggedRowId) hits.push(idx + 2); });
+  if (hits.length === 0) return { ok: false, error: 'row id not found' };
+  if (hits.length > 1) return { ok: false, error: 'row id not unique' };
+  const targetRow = hits[0];
+
+  const colIdx = headers.indexOf(normHeader(loggedColumn));
+  if (colIdx < 0) return { ok: false, error: 'column not found' };
+  if (headers[colIdx] === 'timestamp' || headers[colIdx] === 'rowid') return { ok: false, error: 'column not allowed' };
+
+  const cell = sheet.getRange(targetRow, colIdx + 1);
+  if (cell.getFormula() !== '') return { ok: false, error: 'cell has a formula' };
+
+  const tz = ss.getSpreadsheetTimeZone();
+  if (!sameCell(cleanCell(cell.getValue(), tz), cleanCell(loggedNew, tz))) return { ok: false, error: 'cell changed since the edit' };
+
+  // Log first, like editRow: if the log row cannot be written, the cell is NOT written.
+  try {
+    logSheet.appendRow([new Date(), sheet.getName(), loggedRowId, loggedColumn, cell.getValue(), loggedOld, 'undo']);
+  } catch (logErr) {
+    return { ok: false, error: 'edit log write failed' };
+  }
+  cell.setValue(loggedOld);
+  return { ok: true, row: targetRow, undone: loggedColumn, logRow };
+}
+
 // Short unique ID for the optional "Row ID" column. Starts with a letter so Sheets never turns it into a number or date.
 function makeRowId() { return 'r' + Date.now().toString(36) + (Math.random().toString(36) + '0000').slice(2, 6); }
 
@@ -407,6 +492,9 @@ function doPost(e) {
       const ss0 = SpreadsheetApp.getActiveSpreadsheet();
       return json(body.action === 'edit' ? editRow(ss0, body) : deleteRow(ss0, body));
     }
+
+    // Undo the latest Edit Log change (also handled before anything that could add a row)
+    if (body.action === 'undo') return json(undoRow(SpreadsheetApp.getActiveSpreadsheet(), body));
 
     // Ignore retries of an entry that already landed
     if (seenId(body.id)) return json({ ok: true, dup: true });
