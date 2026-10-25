@@ -1433,6 +1433,9 @@ document.addEventListener('submit',e=>{const f=e.target&&e.target.closest&&e.tar
    Writes go only to the device's own purchase row in "Form Responses - Bought" / "Form Responses - PCs", found by its Row ID.
    Never PnA, Master Inventory, PCs or Summary (formula tabs). Only fields the person touched AND changed are sent.
    Helpers below are pure (no DOM, no writes) so tests/device-edit.test.mjs can load them straight from this file. */
+/* The logging form's definitions (BY, YN, numOf, sugList) are private to its module; it hands them over on window.MMLog. Missing = the editor stays off. */
+const deL=()=>window.MMLog||{};
+const deNum=s=>{const f=deL().numOf;return f?f(s):null};
 const DE_FORM={Phone:'bphone',PC:'bpc'};
 const DE_TYPES=['text','tel','int','money','date','radio','yn'];
 const DE_TABS=['Form Responses - Bought','Form Responses - PCs'];   /* the ONLY tabs this editor may ever target */
@@ -1449,7 +1452,7 @@ function dePlan(item,raw){
   const m=matchDeviceRows(item,raw);
   if(!m||!m.ok||!m.purchase) return {state:'nomatch'};
   if(!DE_TABS.includes(m.purchase.tab)) return {state:'nomatch'};
-  const form=BY[DE_FORM[item&&item.kind]];
+  const form=(deL().BY||{})[DE_FORM[item&&item.kind]];
   if(!form||!form.f.every(x=>DE_TYPES.includes(x.t))) return {state:'nomatch'};
   if(!m.purchase.rowId) return {state:'noid'};
   return {state:'ok',form,tab:m.purchase.tab,rowId:String(m.purchase.rowId),row:m.purchase.row,tabKey:item.kind==='Phone'?'BoughtPhones':'BoughtPCs'};
@@ -1463,7 +1466,7 @@ function deStr(x,v){
   }
   if(x.t==='money'||x.t==='int'){
     if(typeof v==='number'&&isFinite(v)) return String(v);
-    const n=numOf(v);
+    const n=deNum(v);
     return n==null?String(v).trim():String(n);
   }
   return String(v).trim();
@@ -1476,11 +1479,11 @@ function deInit(form,row){
     const o=deStr(x,row?row[deRowKey(row,k)]:undefined);
     orig[k]=o;
     if(x.t==='radio'||x.t==='yn'){
-      const opts=x.t==='yn'?YN:(x.o||[]);
+      const opts=x.t==='yn'?(deL().YN||[]):(x.o||[]);
       const match=opts.find(opt=>opt.trim().toLowerCase()===o.toLowerCase());
       vals[k]=match!==undefined?match:'';
     }else if(x.t==='money'){
-      const n=numOf(o);
+      const n=deNum(o);
       vals[k]=n!=null?Number(n).toFixed(2):o;
     }else{
       vals[k]=o;
@@ -1492,7 +1495,7 @@ function deInit(form,row){
 /* The same rules as validate() in the logging form, as a pure function. */
 function deFieldError(x,s){
   if(!s){ return x.r ? 'Required' : ''; }
-  if(x.t==='money'||x.t==='int'){ const n=numOf(s); if(n==null) return 'Enter a number'; if(n<0 && !x.neg) return "Can't be negative"; if(x.t==='int' && !Number.isInteger(n)) return 'Whole number please'; return ''; }
+  if(x.t==='money'||x.t==='int'){ const n=deNum(s); if(n==null) return 'Enter a number'; if(n<0 && !x.neg) return "Can't be negative"; if(x.t==='int' && !Number.isInteger(n)) return 'Whole number please'; return ''; }
   if(x.t==='date' && !/^\d{4}-\d{2}-\d{2}$/.test(s)) return 'Pick a date';
   return '';
 }
@@ -1500,7 +1503,7 @@ function deFieldError(x,s){
 function deSame(x,a,b){
   const sa=String(a==null?'':a).trim(),sb=String(b==null?'':b).trim();
   if(x.t==='money'||x.t==='int'){
-    const na=numOf(sa),nb=numOf(sb);
+    const na=deNum(sa),nb=deNum(sb);
     if(na==null&&nb==null) return sa===sb;
     return na===nb;
   }
@@ -1522,7 +1525,7 @@ function deCheck(form,vals,orig,touched){
     if(s===''){
       changes[x.k]=null;
     }else if(x.t==='money'||x.t==='int'){
-      changes[x.k]=numOf(s);
+      changes[x.k]=deNum(s);
     }else if(x.t==='date'){
       changes[x.k]={$date:s};
     }else{
@@ -1590,7 +1593,7 @@ function deFieldHtml(x,i,val){
   const lbl=isChip?`<span class="lg-l${x.r?' req':''}">${esc(x.l)}</span>`:`<label class="lg-l${x.r?' req':''}" for="de-${i}">${esc(x.l)}</label>`;
   let ctrl='';
   if(isChip){
-    const opts=x.t==='yn'?YN:(x.o||[]);
+    const opts=x.t==='yn'?(deL().YN||[]):(x.o||[]);
     ctrl=`<div class="lg-chips" role="group" aria-label="${esc(x.k)}">`+opts.map(opt=>`<button type="button" class="chip-b" data-de="pick" data-dkey="${esc(x.k)}" data-dval="${esc(opt)}" aria-pressed="${val===opt}">${esc(opt)}</button>`).join('')+`</div>`;
   }else if(x.t==='money'){
     ctrl=`<div class="lg-aff money"><span>$</span><input type="text" id="de-${i}" data-dk="${esc(x.k)}" inputmode="decimal" autocomplete="off" value="${esc(val)}"></div>`;
@@ -1613,7 +1616,7 @@ function openDeviceEdit(id){
   <div class="dh"><div><h2>Edit device</h2><p class="hint" style="color:var(--muted)">${esc(o.name)} · ${esc(plan.tab)} · ID ${esc(plan.rowId)}</p></div><button type="button" class="ibtn" data-act="close" aria-label="Close">${ICON.x}</button></div>
   <div class="seg" role="tablist" style="margin-bottom:14px"><button type="button" role="tab" aria-selected="true" aria-pressed="true">Edit purchase</button></div>
   ${plan.form.f.map((x,i)=>deFieldHtml(x,i,vals[x.k])).join('')}
-  ${sugs.map(s=>`<datalist id="lg-dl-${esc(s)}">${sugList(s).map(v=>`<option value="${esc(v)}">`).join('')}</datalist>`).join('')}
+  ${sugs.map(s=>`<datalist id="lg-dl-${esc(s)}">${(deL().sugList?deL().sugList(s):[]).map(v=>`<option value="${esc(v)}">`).join('')}</datalist>`).join('')}
   <p class="ed-msg" id="ed-msg" role="alert" hidden></p>
   <div class="ed-actions"><button type="button" class="btn sec" data-act="close">Cancel</button><button type="submit" class="btn">Save changes</button></div></form>`,'pal');
 }
@@ -2425,6 +2428,8 @@ const sugList=kind=>{let ex=[];try{if(kind==='seller')ex=store.D.items.map(i=>i.
 /* ---------- Value helpers ---------- */
 const clean=s=>String(s==null?'':s).replace(/[$,\s]/g,'').replace(/%$/,'');
 const numOf=s=>{const c=clean(s);if(c===''||!/^-?(\d+\.?\d*|\.\d+)$/.test(c))return null;return Number(c)};
+/* Read-only bridge for the device editor, which lives in the main script and reuses the logging form's own definitions. */
+window.MMLog={BY,YN,numOf,sugList};
 function getVal(x){const k=x.k,v=V[k],o=(V[k+'#']||'').trim();
   if(x.t==='multi')return (Array.isArray(v)?v:[]).map(a=>a==='Other'?o:a).filter(Boolean).join(', ');
   if(x.t==='radio'||x.t==='yn')return v==='Other'&&x.x?o:(v||'');

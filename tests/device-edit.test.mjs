@@ -30,6 +30,8 @@ run([
   constLine('clean'), constLine('numOf'), constLine('F'), constLine('C6'), constLine('YN'),
   between('const FORMS=[', '\nconst BY='), constLine('BY'),
   fnBlock('matchDeviceRows'),
+  constLine('deL'), constLine('deNum'),
+  'globalThis.window=globalThis; window.MMLog={BY,YN,numOf,sugList:()=>[]};',
   constLine('DE_FORM'), constLine('DE_TYPES'), constLine('DE_TABS'), constLine('deKey'),
   ...['deRowKey', 'dePlan', 'deStr', 'deInit', 'deFieldError', 'deSame', 'deCheck', 'deExpect', 'dePatch', 'getVal', 'validate'].map(fnBlock),
   'let V={};'
