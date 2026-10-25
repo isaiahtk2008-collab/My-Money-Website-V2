@@ -677,6 +677,8 @@ tr.grp:hover td{background:var(--surface2)}
 @media (max-width:420px){.ed-grid{grid-template-columns:1fr}}
 .ed-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
 .ed-msg{color:var(--bad);font-size:13px;margin:10px 0 0}
+.palbox.dvform{max-height:calc(88vh - 16px);max-height:calc(88dvh - 16px);overflow-y:auto;overscroll-behavior:contain}
+.dvform .ed-actions{position:sticky;bottom:-20px;margin:16px -20px -20px;padding:12px 20px;background:var(--surface);border-top:1px solid var(--line)}
 .iss-rows{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px}
 .empty{padding:36px 16px;text-align:center;color:var(--muted)}
 .empty b{display:block;color:var(--ink);font-size:15px;margin-bottom:4px}
@@ -1417,7 +1419,7 @@ function openDeviceEdit(id){
     else if(f.t==='int')inp=`<input type="text" id="${fid}" inputmode="numeric" autocomplete="off" value="${esc(val)}"${fc}>`;
     else{inp=`<input type="${f.t==='tel'?'tel':'text'}" id="${fid}" autocomplete="off" value="${esc(val)}"${fc}>`;wide=true}
     return `<div class="ed-f" data-ed="${esc(f.k)}"${wide?' style="grid-column:1/-1"':''}><label for="${fid}">${esc(f.k)}${f.r?' *':''}</label>${inp}<div class="ed-err" hidden></div></div>`}).join('');
-  openOverlay(`<form class="palbox" style="padding:20px" role="dialog" aria-modal="true" aria-label="Edit purchase" data-devform="${esc(id)}" novalidate>
+  openOverlay(`<form class="palbox dvform" style="padding:20px" role="dialog" aria-modal="true" aria-label="Edit purchase" data-devform="${esc(id)}" novalidate>
     <div class="dh"><div><h2>Edit purchase</h2><p class="hint" style="color:var(--muted)">${esc(rec.o.name)} · ${esc(info.tabName)} · ${esc(info.rowRef)}</p></div><button type="button" class="ibtn" data-act="close" aria-label="Close">${ICON.x}</button></div>
     <div class="seg" role="tablist" style="margin-bottom:12px"><button type="button" role="tab" aria-selected="true" aria-pressed="true">Edit purchase</button></div>
     <div class="ed-grid">${fieldsHtml}</div>
