@@ -286,10 +286,15 @@ test('SAFETY SCAN: the edit code can only target the two purchase tabs and never
 
   assert.deepEqual(plain(run('DE_TABS')), ['Form Responses - Bought', 'Form Responses - PCs']);
 
+  // Chunk 3e: exactly two calls leave this section, the one edit (which targets plan.tab) and the one undo (which targets nothing).
+  assert.strictEqual(constLine('DE_SALE_TABS'), "const DE_SALE_TABS=['Form Responses - Sold','Form Responses - Sold PCs'];");
   const occurrences = region.split('sheetCall(');
-  assert.strictEqual(occurrences.length - 1, 1, 'Expected exactly 1 occurrence of sheetCall(');
-  const snippet = region.slice(region.indexOf('sheetCall('), region.indexOf('sheetCall(') + 120);
-  assert.ok(snippet.includes('target:plan.tab'), "Snippet must include 'target:plan.tab'");
+  assert.strictEqual(occurrences.length - 1, 2, 'Expected exactly 2 occurrences of sheetCall(');
+  const editAt = region.indexOf("sheetCall({action:'edit'");
+  assert.ok(editAt >= 0, 'Missing the edit call');
+  assert.ok(region.slice(editAt, editAt + 120).includes('target:plan.tab'), "Edit call must include 'target:plan.tab'");
+  assert.strictEqual(region.split("sheetCall({action:'undo'})").length - 1, 1, 'Expected exactly 1 undo call');
+  assert.ok(!/action:'delete'/.test(region), 'No delete call');
 
   for (const hook of ['lg-in', 'data-ty', 'data-lg', 'data-k=', 'data-e=']) {
     assert.ok(!region.includes(hook), `Region must not include logging-form hook: ${hook}`);

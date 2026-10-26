@@ -726,6 +726,8 @@ tr.grp:hover td{background:var(--surface2)}
 .pr .a{font-weight:700}
 #toasts{position:fixed;left:0;right:0;bottom:calc(16px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;align-items:center;gap:8px;z-index:90;pointer-events:none}
 .toast{background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.3);animation:rise .2s ease}
+.toast{display:flex;align-items:center;gap:12px;pointer-events:auto}
+.toast-undo{background:transparent;color:var(--bg);border:1px solid currentColor;border-radius:8px;padding:4px 10px;font-weight:700;cursor:pointer}.toast-undo:disabled{opacity:.5;cursor:default}
 .health{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
 .ring{width:84px;height:84px;border-radius:50%;display:grid;place-items:center;font-size:22px;font-weight:800}
 details.iss{border-top:1px solid var(--line);padding:10px 2px}
@@ -1577,6 +1579,76 @@ function dePatch(raw,tabKey,rowId,changes){
   return {...raw,[tabKey]:{...raw[tabKey],rows:nextRows}};
 }
 
+/* The SALE row of a sold device (Sold tabs only, never a formula tab). Same shapes as dePlan. The Device Label field is never editable: it links the sale to the device. */
+const DE_SALE_TABS=['Form Responses - Sold','Form Responses - Sold PCs'];
+const DE_SALE_FORM={Phone:'sphone',PC:'spc'};
+
+function deSalePlan(item,raw){
+  if(!item||item.sold!==true) return {state:'nomatch'};
+  const m=matchDeviceRows(item,raw);
+  if(!m||!m.ok||!m.sale) return {state:'nomatch'};
+  if(!DE_SALE_TABS.includes(m.sale.tab)) return {state:'nomatch'};
+  const base=(deL().BY||{})[DE_SALE_FORM[item.kind]];
+  if(!base||!base.f) return {state:'nomatch'};
+  const fields=base.f.filter(x=>x.t!=='item');
+  if(!fields.length||!fields.every(x=>DE_TYPES.includes(x.t))) return {state:'nomatch'};
+  if(!m.sale.rowId) return {state:'noid'};
+  const form=Object.assign({},base,{f:fields});
+  return {state:'ok',form,tab:m.sale.tab,rowId:String(m.sale.rowId),row:m.sale.row,tabKey:item.kind==='Phone'?'SoldPhones':'SoldPCs'};
+}
+
+/* Old value to new value for each changed field, for the confirmation screen. Pure. */
+function deDiff(form,orig,changes){
+  const res=[];
+  if(!form||!form.f||!changes) return res;
+  const fmt=(v,isMoney)=>{
+    let s='';
+    if(v!=null){
+      if(typeof v==='object'&&v.$date!=null) s=String(v.$date);
+      else s=String(v);
+    }
+    if(isMoney&&s.trim()!==''&&!isNaN(Number(s))) s=Number(s).toFixed(2);
+    return s===''?'(empty)':s;
+  };
+  for(let i=0;i<form.f.length;i++){
+    const f=form.f[i];
+    if(f.k in changes){
+      res.push({k:f.k,label:f.l,from:fmt(orig?orig[f.k]:undefined,f.t==='money'),to:fmt(changes[f.k],f.t==='money')});
+    }
+  }
+  return res;
+}
+
+/* The original values of the given fields, in the same shape deCheck uses for changes. Used to roll back the local copy after an Undo. */
+function deRevertChanges(form,orig,keys){
+  const res={};
+  if(!form||!form.f||!keys) return res;
+  const map={};
+  for(let i=0;i<form.f.length;i++) map[form.f[i].k]=form.f[i];
+  for(let i=0;i<keys.length;i++){
+    const k=keys[i];
+    const f=map[k];
+    if(!f) continue;
+    let v=orig?orig[k]:undefined;
+    if(typeof v==='object'&&v&&v.$date!=null) v=v.$date;
+    if(v==null||v==='') res[k]=null;
+    else if(f.t==='money'||f.t==='int') res[k]=deNum(v);
+    else if(f.t==='date') res[k]={$date:String(v)};
+    else res[k]=String(v);
+  }
+  return res;
+}
+
+function deUndoErrText(e){
+  const m=(e&&e.message)||'';
+  if(m.includes('cell changed since the edit')) return 'That cell changed since; nothing was changed.';
+  if(m.includes('nothing to undo')) return 'Nothing left to undo.';
+  if(m.includes('cell has a formula')) return 'That cell now holds a formula, so it was left alone. Nothing was changed.';
+  if(m.startsWith('tab not allowed: undefined')||m.includes('oldscript')) return 'Your entry script needs the newest version before it can undo. Nothing was changed.';
+  if(m.includes('log row changed')) return 'Another change was made after this one, so nothing was undone.';
+  return rowErrText(e);
+}
+
 /* The device drawer footer and the "Edit purchase" popup. Delete stays disabled on purpose. Uses its own data-de / data-dk
    hooks so it can never touch the logging form's drafts (that form listens to .lg-in, data-ty and data-lg). */
 let devEd=null;
@@ -1606,20 +1678,68 @@ function deFieldHtml(x,i,val){
   return `<div class="lg-f" data-df="${esc(x.k)}">${lbl}${ctrl}<p class="lg-em" data-derr hidden></p></div>`;
 }
 
-function openDeviceEdit(id){
-  const rec=store.D.byId.get(id); if(!rec||rec.type!=='item') return; const o=rec.o;
-  const plan=dePlan(o,store.base||store.raw); if(plan.state!=='ok') return;
-  const {vals,orig}=deInit(plan.form,plan.row);
-  devEd={id,plan,vals,orig,touched:new Set()};
+/* Match again against the CURRENT sheet copy, for the tab that is showing. */
+function dePlanFor(o,tab){return tab==='sale'?deSalePlan(o,store.base||store.raw):dePlan(o,store.base||store.raw);}
+
+/* Re-opening the overlay for another screen of the same popup must not lose the element that had focus before the popup opened. */
+function deOverlay(html){
+  const keep=devEd&&devEd.lf;
+  openOverlay(html,'pal');
+  if(devEd){ if(keep!==undefined) lastFocus=keep; else devEd.lf=lastFocus; }
+}
+
+/* devEd.plan / vals / orig / touched are always the ACTIVE tab's own objects (aliases, never copies): the input handlers below write straight into them. */
+function deSwitchTab(tab){
+  if(!devEd||!devEd.st[tab])return;
+  devEd.active=tab;
+  devEd.plan=devEd.st[tab].plan;
+  devEd.vals=devEd.st[tab].vals;
+  devEd.orig=devEd.st[tab].orig;
+  devEd.touched=devEd.st[tab].touched;
+  devEd.pending=null;
+}
+
+function renderDeviceEdit(){
+  if(!devEd)return;
+  const rec=store.D.byId.get(devEd.id);if(!rec)return;
+  const o=rec.o,plan=devEd.plan,vals=devEd.vals;
   const sugs=[...new Set(plan.form.f.map(x=>x.sug).filter(Boolean))];
-  openOverlay(`<form class="palbox" style="padding:20px;max-height:90vh;overflow-y:auto" role="dialog" aria-modal="true" aria-label="Edit purchase" data-deform="${esc(id)}" novalidate>
+  const isSale=devEd.active==='sale';
+  deOverlay(`<form class="palbox" style="padding:20px;max-height:90vh;overflow-y:auto" role="dialog" aria-modal="true" aria-label="${isSale?'Edit sale':'Edit purchase'}" data-deform="${esc(devEd.id)}" novalidate>
   <div class="dh"><div><h2>Edit device</h2><p class="hint" style="color:var(--muted)">${esc(o.name)} · ${esc(plan.tab)} · ID ${esc(plan.rowId)}</p></div><button type="button" class="ibtn" data-act="close" aria-label="Close">${ICON.x}</button></div>
-  <div class="seg" role="tablist" style="margin-bottom:14px"><button type="button" role="tab" aria-selected="true" aria-pressed="true">Edit purchase</button></div>
+  <div class="seg" role="tablist" style="margin-bottom:14px"><button type="button" role="tab" data-de="tab" data-tab="purchase" aria-selected="${!isSale}" aria-pressed="${!isSale}">Edit purchase</button>${devEd.st.sale?`<button type="button" role="tab" data-de="tab" data-tab="sale" aria-selected="${isSale}" aria-pressed="${isSale}">Edit sale</button>`:''}</div>
   ${plan.form.f.map((x,i)=>deFieldHtml(x,i,vals[x.k])).join('')}
   ${sugs.map(s=>`<datalist id="lg-dl-${esc(s)}">${(deL().sugList?deL().sugList(s):[]).map(v=>`<option value="${esc(v)}">`).join('')}</datalist>`).join('')}
   <p class="ed-msg" id="ed-msg" role="alert" hidden></p>
-  <div class="ed-actions"><button type="button" class="btn sec" data-act="close">Cancel</button><button type="submit" class="btn">Save changes</button></div></form>`,'pal');
+  <div class="ed-actions"><button type="button" class="btn sec" data-act="close">Cancel</button><button type="submit" class="btn">Save changes</button></div></form>`);
 }
+
+function openDeviceEdit(id){
+  const rec=store.D.byId.get(id);if(!rec||rec.type!=='item')return;
+  const o=rec.o;
+  const pPlan=dePlan(o,store.base||store.raw);if(pPlan.state!=='ok')return;
+  const {vals:pVals,orig:pOrig}=deInit(pPlan.form,pPlan.row);
+  const st={purchase:{plan:pPlan,vals:pVals,orig:pOrig,touched:new Set()},sale:null};
+  /* The Edit sale tab exists ONLY for a sold device whose sale row was matched safely and has a Row ID. */
+  const sPlan=deSalePlan(o,store.base||store.raw);
+  if(sPlan.state==='ok'){
+    const {vals:sVals,orig:sOrig}=deInit(sPlan.form,sPlan.row);
+    st.sale={plan:sPlan,vals:sVals,orig:sOrig,touched:new Set()};
+  }
+  devEd={id,active:'purchase',st,plan:st.purchase.plan,vals:st.purchase.vals,orig:st.purchase.orig,touched:st.purchase.touched,pending:null};
+  renderDeviceEdit();
+}
+
+/* Tab switch, and the two buttons on the confirmation screen. */
+document.addEventListener('click',e=>{
+  if(!devEd||rowBusy)return;
+  const t=e.target.closest&&e.target.closest('[data-de]');
+  if(!t)return;
+  const act=t.dataset.de;
+  if(act==='tab'){deSwitchTab(t.dataset.tab);renderDeviceEdit();}
+  else if(act==='cancel'){devEd.pending=null;renderDeviceEdit();}
+  else if(act==='confirm'){confirmDeviceEdit(devEd.id);}
+});
 
 function deShowErrors(errors){
   $$('#overlay [data-df]').forEach(el=>{
@@ -1679,7 +1799,7 @@ async function saveDeviceEdit(id){
   if(rowBusy||!devEd||devEd.id!==id)return;
   const rec=store.D.byId.get(id);
   if(!rec||rec.type!=='item')return;
-  const plan=dePlan(rec.o,store.base||store.raw);   /* match again right now: the sheet may have been re-read since the popup opened */
+  const plan=dePlanFor(rec.o,devEd.active);   /* match again right now: the sheet may have been re-read since the popup opened */
   if(plan.state==='noid'){rowShowErr(new Error('noid'));return;}
   if(plan.state!=='ok'||plan.tab!==devEd.plan.tab||plan.rowId!==devEd.plan.rowId){rowShowErr(new Error('norow'));return;}
   const r=deCheck(plan.form,devEd.vals,devEd.orig,devEd.touched);
@@ -1689,24 +1809,93 @@ async function saveDeviceEdit(id){
   const keys=Object.keys(r.changes);
   const ex=deExpect(plan.form,plan.row,keys);
   if(!ex){rowShowErr(new Error('noexpect'));return;}
+  /* Nothing is sent yet: show old value to new value and wait for Confirm. */
+  devEd.pending={changes:r.changes,keys,ex};
+  const diffs=deDiff(plan.form,devEd.orig,r.changes);
+  const otherSt=devEd.st[devEd.active==='purchase'?'sale':'purchase'];
+  const hasOther=!!(otherSt&&otherSt.touched&&otherSt.touched.size>0);
+  deOverlay(`<div class="palbox" style="padding:20px;max-height:90vh;overflow-y:auto" role="dialog" aria-modal="true" aria-label="Confirm changes" data-deconfirm="${esc(id)}">
+  <div class="dh"><div><h2>Confirm changes</h2><p class="hint" style="color:var(--muted)">${esc(rec.o.name)} · ${esc(plan.tab)} · ID ${esc(plan.rowId)}</p></div><button type="button" class="ibtn" data-de="cancel" aria-label="Back to editing">${ICON.x}</button></div>
+  ${diffs.map(d=>`<div class="lg-f"><span class="lg-l">${esc(d.label)}</span><p><s>${esc(d.from)}</s> → <b>${esc(d.to)}</b></p></div>`).join('')}
+  ${hasOther?'<p class="hint" style="color:var(--muted)">You also have edits on the other tab. They are not part of this save.</p>':''}
+  <p class="ed-msg" id="ed-msg" role="alert" hidden></p>
+  <div class="ed-actions"><button type="button" class="btn sec" data-de="cancel">Cancel</button><button type="button" class="btn" data-de="confirm">Confirm</button></div></div>`);
+}
+
+async function confirmDeviceEdit(id){
+  if(rowBusy||!devEd||devEd.id!==id||!devEd.pending)return;
+  const rec=store.D.byId.get(id);
+  if(!rec||rec.type!=='item')return;
+  const plan=dePlanFor(rec.o,devEd.active);   /* and once more, right before anything is sent */
+  if(plan.state==='noid'){rowShowErr(new Error('noid'));return;}
+  if(plan.state!=='ok'||plan.tab!==devEd.plan.tab||plan.rowId!==devEd.plan.rowId){rowShowErr(new Error('norow'));return;}
+  const expect=deExpect(plan.form,plan.row,devEd.pending.keys);
+  if(!expect){rowShowErr(new Error('noexpect'));return;}
   rowSetBusy(true);
   try{
-    const j=await sheetCall({action:'edit',target:plan.tab,rowId:plan.rowId,expect:ex,changes:r.changes});
+    const j=await sheetCall({action:'edit',target:plan.tab,rowId:plan.rowId,expect,changes:devEd.pending.changes});
     /* The script can answer ok yet skip a column (a formula or a missing header). Only what it says it wrote counts as saved. */
-    const done=Array.isArray(j.updated)?j.updated:keys;
+    const done=Array.isArray(j.updated)?j.updated:devEd.pending.keys;
     const skipped=Array.isArray(j.skipped)?j.skipped:[];
     const doneKeys=new Set(done.map(deKey));
     const applied={};
-    for(const k of keys)if(doneKeys.has(deKey(k)))applied[k]=r.changes[k];
-    if(Object.keys(applied).length)store.set(dePatch(store.base||store.raw,plan.tabKey,plan.rowId,applied));
+    for(const k of devEd.pending.keys)if(doneKeys.has(deKey(k)))applied[k]=devEd.pending.changes[k];
+    const appliedKeys=Object.keys(applied);
+    if(appliedKeys.length)store.set(dePatch(store.base||store.raw,plan.tabKey,plan.rowId,applied));
+    /* What Undo needs: how many cells were written (one undo call each), in order, and their original values. */
+    const info={n:appliedKeys.length,keys:appliedKeys,tabKey:plan.tabKey,rowId:plan.rowId,revert:deRevertChanges(plan.form,devEd.orig,appliedKeys)};
     devEd=null;
     closeOverlay();
-    toast(skipped.length?'Saved, but your sheet skipped: '+skipped.join(', ')+'. Check Google Sheets.':'Saved to your sheet');
+    const msg=skipped.length?'Saved, but your sheet skipped: '+skipped.join(', ')+'. Check Google Sheets.':'Saved to your sheet';
+    if(appliedKeys.length)toastUndo(msg,info);else toast(msg);
     syncSoon();
   }catch(e){
     rowShowErr(e);
   }finally{
     rowSetBusy(false);
+  }
+}
+
+/* A toast with an Undo button. The script undoes ONE cell per {action:'undo'} call, so an edit of N cells takes N calls. */
+function toastUndo(msg,info){
+  const p=$('#toasts');if(!p)return;
+  const el=document.createElement('div');el.className='toast';
+  const span=document.createElement('span');span.textContent=msg;
+  const btn=document.createElement('button');btn.type='button';btn.className='toast-undo';btn.textContent='Undo';
+  el.appendChild(span);el.appendChild(btn);
+  const timer=setTimeout(()=>{el.remove()},12000);
+  btn.addEventListener('click',()=>{
+    btn.disabled=true;
+    clearTimeout(timer);
+    undoEdit(info,el);
+  });
+  p.appendChild(el);
+}
+
+let deUndoing=false;
+async function undoEdit(info,el){
+  if(deUndoing)return;
+  deUndoing=true;
+  try{
+    let k=0,err=null;
+    for(let i=0;i<info.n;i++){
+      try{await sheetCall({action:'undo'});k++;}catch(e){err=e;break;}
+    }
+    if(k>0){
+      /* Undo reverses the newest cell first, so the cells put back are the LAST k written. */
+      const rev={};
+      info.keys.slice(-k).forEach(x=>{rev[x]=info.revert[x];});
+      store.set(dePatch(store.base||store.raw,info.tabKey,info.rowId,rev));
+    }
+    if(el)el.remove();
+    if(k===info.n)toast('Undone. Your sheet is back to how it was.');
+    else if(k===0)toast(deUndoErrText(err));
+    else toast('Undid '+k+' of '+info.n+' changes. The rest changed since, so they were left as they are.');
+    syncSoon();
+  }catch(e){
+    toast(deUndoErrText(e));
+  }finally{
+    deUndoing=false;
   }
 }
 
