@@ -2597,12 +2597,73 @@ const FORMS=[
 ];
 const BY=Object.fromEntries(FORMS.map(f=>[f.id,f]));
 let cur=null,V={},busy=false,saveT=null,flushing=false;
-const fOf=k=>cur&&cur.f.find(x=>x.k===k);
+const fOf=k=>k==='Received device type'?RECVF:k.startsWith(TR)?recvFields(recvForm()).find(x=>x.k===k):cur&&cur.f.find(x=>x.k===k);
 
 /* ---------- Payment Type block (Sold forms only). Kept in its own list (cur.pay), NOT in cur.f, so payload(), validate()
    and the Edit sale editor behave exactly as before. These fields are never sent to the sheet yet (trades come later). ---------- */
 const PAYF=[F('Payment Type',{t:'radio',o:['Cash','Trade','Mixed']}),F('Cash Received',{t:'money'}),F('Trade-In Value',{t:'money'})];
 ['sphone','spc','sacc'].forEach(id=>{BY[id].pay=PAYF});
+/* ---------- Device received in a Trade/Mixed sale. Its fields are copies of the matching Bought form, keys prefixed with TR so they never
+   collide with the Sold form's own keys. A trade is sent as ONE request (see buildTradeRequest); Cash sales never touch this. ---------- */
+const TR='tr:';
+const RECVF=F('Received device type',{t:'radio',o:['Phone','PC','Accessory']});
+const RECV_IDS={Phone:'bphone',PC:'bpc',Accessory:'bacc'};
+const recvForm=()=>BY[RECV_IDS[V['Received device type']]]||null;
+const recvPriceKey=bf=>{const x=bf&&bf.f.find(y=>y.t==='money'&&/^purchase/i.test(y.k));return x?x.k:null};
+const recvFields=bf=>bf?bf.f.map(x=>Object.assign({},x,{k:TR+x.k})):[];
+function recvValues(bf){
+  const raw=payload({f:recvFields(bf)}),res={};
+  Object.keys(raw).forEach(k=>{res[k.slice(TR.length)]=raw[k]});
+  const pk=recvPriceKey(bf);if(pk)res[pk]=numOf(V['Trade-In Value']);
+  return res;
+}
+function recvSyncPrice(){
+  const bf=recvForm(),pk=recvPriceKey(bf);if(!pk)return;
+  const k=TR+pk,n=numOf(V['Trade-In Value']),val=n!=null?n.toFixed(2):'';
+  V[k]=val;const el=$$('input').find(i=>i.dataset.k===k);if(el)el.value=val;
+}
+function recvHtml(){
+  const bf=recvForm();if(!bf)return '';
+  const pk=recvPriceKey(bf),rfs=recvFields(bf);
+  rfs.forEach(x=>{if(x.t==='date'&&!V[x.k])V[x.k]=dayISO(0)});
+  const h=rfs.map((x,i)=>{
+    let html=fieldHtml(x,100+i);
+    if(pk&&x.k===TR+pk)html=html.replace('<input type="text"','<input type="text" readonly aria-readonly="true"')+'<p class="hint">Locked to Trade-In Value</p>';
+    return html;
+  }).join('');
+  const dl=cur&&cur.f.some(x=>x.sug==='seller')?'':`<datalist id="lg-dl-seller">${sugList('seller').map(s=>`<option value="${E(s)}">`).join('')}</datalist>`;
+  return h+dl;
+}
+function recvPick(t,d){
+  if(V['Received device type']!==d.v){
+    Object.keys(V).forEach(k=>{if(k.startsWith(TR))delete V[k]});
+    V['Received device type']=d.v;
+  }
+  $$('[data-lg="pick"]',t.parentNode).forEach(b=>b.setAttribute('aria-pressed',b===t?'true':'false'));
+  setErr('Received device type','');
+  recvSyncPrice();
+  const box=$('[data-trade-mini]');if(box)box.innerHTML=recvHtml();
+  imeiWarn();
+  saveDraft();
+}
+function recvValidate(f){
+  if(!f||!f.pay)return true;
+  const pt=V['Payment Type'];
+  if(pt!=='Trade'&&pt!=='Mixed')return true;
+  const bf=recvForm();
+  if(!bf){setErr('Received device type','Choose the device type');return false}
+  recvSyncPrice();
+  return validate({f:recvFields(bf)});
+}
+/* Pure: the single request for a trade. Same id on every retry. */
+function buildTradeRequest(id,soldForm,soldValues,boughtForm,boughtValues){
+  return {action:'trade',id,soldTab:soldForm.tab,soldValues,boughtTab:boughtForm.tab,boughtValues};
+}
+function tradeItem(f){
+  const id=uid(),bf=recvForm(),sv=payload(f),bv=recvValues(bf);
+  return {id,form:f.id,trade:1,req:buildTradeRequest(id,f,sv,bf,bv),ts:Date.now(),sum:'Trade · '+summ(f,sv)+' · received '+summ(bf,bv)};
+}
+const tradeOn=f=>!!(f&&f.pay&&(V['Payment Type']==='Trade'||V['Payment Type']==='Mixed'));
 function payHtml(){
   const pt=V['Payment Type'];
   const show=pt==='Trade'||pt==='Mixed';
@@ -2611,6 +2672,9 @@ function payHtml(){
     fieldHtml(PAYF[1],91)+
     fieldHtml(PAYF[2],92)+
     `<p class="lg-em" data-e="Trade Total" hidden></p>`+
+    `<h4 class="lg-gh">Device received</h4>`+
+    fieldHtml(RECVF,93)+
+    `<div data-trade-mini>${recvHtml()}</div>`+
     `</div>`;
 }
 function payPick(t,d){
@@ -2627,6 +2691,7 @@ function payUpdate(){
   if(box)box.hidden=!(type==='Trade'||type==='Mixed');
   const r=checkTradeTotals(type,numOf(V['Sale Price']),numOf(V['Cash Received']),numOf(V['Trade-In Value']));
   setErr('Trade Total',(type==='Trade'||type==='Mixed')&&!r.ok?r.msg:'');
+  recvSyncPrice();
 }
 function payValidate(f){
   if(!f.pay)return true;
@@ -2739,7 +2804,7 @@ function fieldHtml(f,i){
     b=`<div class="lg-aff ${f.t}"><span>${f.t==='money'?'$':'%'}</span><input type="text" class="lg-in" id="${id}" data-k="${k}" data-ty="${f.t}" inputmode="decimal" autocomplete="off" placeholder="0.00" value="${E(v)}"></div>${f.k==='Sale Price'?`<p class="lg-ctx" data-c="${k}"></p>`:''}`;
   }else{
     const im=f.t==='int'?'numeric':f.t==='tel'?'tel':'text';
-    b=`<input type="text" class="lg-in" id="${id}" data-k="${k}" data-ty="${f.t}" inputmode="${im}" autocomplete="off" ${f.sug?`list="lg-dl-${f.sug}"`:''} value="${E(v)}">${f.k==='Serial Number'?`<p class="lg-ctx" data-c="${k}" role="status"></p>`:''}`;
+    b=`<input type="text" class="lg-in" id="${id}" data-k="${k}" data-ty="${f.t}" inputmode="${im}" autocomplete="off" ${f.sug?`list="lg-dl-${f.sug}"`:''} value="${E(v)}">${/^(tr:)?Serial Number$/.test(f.k)?`<p class="lg-ctx" data-c="${k}" role="status"></p>`:''}`;
   }
   return `<div class="lg-f" data-f="${k}">${lab}${b}${err}</div>`;
 }
@@ -2787,13 +2852,19 @@ function ctx(){
 /* ---------- Duplicate IMEI / serial warning (non-blocking) ---------- */
 const normId=s=>String(s==null?'':s).replace(/[^0-9A-Za-z]/g,'').toUpperCase();
 function imeiWarn(){
-  if(!cur)return;const f=cur.f.find(x=>x.k==='Serial Number');if(!f)return;
-  const el=$$('[data-c]').find(e=>e.dataset.c==='Serial Number');if(!el)return;
-  const n=normId(getVal(f));if(n.length<6){el.innerHTML='';return}
-  const hits=[];
-  try{store.D.items.forEach(i=>{if(i.specs&&normId(i.specs.IMEI)===n)hits.push((i.label||i.name||'item')+(i.sold?' (sold)':' (in stock)'))})}catch(e){}
-  J('lg.q',[]).forEach(it=>{if(it.values&&normId(it.values['Serial Number'])===n)hits.push('a waiting entry in your queue')});
-  el.innerHTML=hits.length?`<b class="neg">Possible duplicate:</b> already logged as ${hits.map(E).join(', ')}. You can still submit.`:'';
+  if(!cur)return;
+  ['Serial Number',TR+'Serial Number'].forEach(key=>{
+    const f=fOf(key);if(!f)return;
+    const el=$$('[data-c]').find(e=>e.dataset.c===key);if(!el)return;
+    const n=normId(getVal(f));if(n.length<6){el.innerHTML='';return}
+    const hits=[];
+    try{store.D.items.forEach(i=>{if(i.specs&&normId(i.specs.IMEI)===n)hits.push((i.label||i.name||'item')+(i.sold?' (sold)':' (in stock)'))})}catch(e){}
+    J('lg.q',[]).forEach(it=>{
+      const s=it.values?it.values['Serial Number']:(it.req&&it.req.boughtValues&&it.req.boughtValues['Serial Number']);
+      if(s&&normId(s)===n)hits.push('a waiting entry in your queue');
+    });
+    el.innerHTML=hits.length?`<b class="neg">Possible duplicate:</b> already logged as ${hits.map(E).join(', ')}. You can still submit.`:'';
+  });
 }
 
 /* ---------- Margin / markup calculator ---------- */
@@ -2832,7 +2903,7 @@ function validate(f){let first=null;
 
 async function send(item){
   const url=LS.get('lgUrl');if(!url)throw new Error('nourl');
-  const body=JSON.stringify({secret:LS.get('lgSecret')||'',id:item.id,tab:item.tab,values:item.values});
+  const body=JSON.stringify(item.req?Object.assign({secret:LS.get('lgSecret')||''},item.req):{secret:LS.get('lgSecret')||'',id:item.id,tab:item.tab,values:item.values});
   const h={'Content-Type':'text/plain;charset=utf-8'};
   try{const r=await fetch(url,{method:'POST',headers:h,body,redirect:'follow'});const j=await r.json();
     if(!j.ok)throw Object.assign(new Error(j.error||'Rejected by the script'),{fatal:true});return j}
@@ -2902,7 +2973,8 @@ async function flush(silent){
 async function submit(){
   if(busy||!cur)return;const f=cur;const okF=validate(f),okP=payValidate(f);if(!okF)return;
   if(!okP){const w=$$('.lg-f').find(e=>e.dataset.f==='Cash Received');w&&w.scrollIntoView({block:'center',behavior:'smooth'});if(!$('#toasts .toast'))toast('Check the highlighted fields');return}
-  const item={id:uid(),form:f.id,tab:f.tab,values:payload(f),ts:Date.now()};item.sum=summ(f,item.values);
+  if(!recvValidate(f))return;
+  const trade=tradeOn(f);const item=trade?tradeItem(f):{id:uid(),form:f.id,tab:f.tab,values:payload(f),ts:Date.now()};if(!trade)item.sum=summ(f,item.values);
   busy=true;const btn=$('[data-lg="submit"]');if(btn){btn.disabled=true;btn.textContent='Sending…'}
   let st='queued',err='';
   if(LS.get('lgUrl')&&navigator.onLine!==false){try{const r=await send(item);st=r.unverified?'unsure':'sent'}catch(e){if(e&&e.fatal){err=e.message;item.err=err}}}
@@ -2910,7 +2982,13 @@ async function submit(){
   clearTimeout(saveT);remember(f);LS.set(dKey(f.id),'');busy=false;bumpChanges();badge();setTimeout(showBackupBanner,600);
   if(st!=='queued'){addOverlay(item);afterSend()}
   const ok=st==='sent',w=st!=='sent';
-  const msg=st==='sent'?`Added to the “${E(f.tab)}” tab.`
+  const msg=trade
+   ?st==='sent'?`Trade ID ${item.id}: the sale was logged on the “${E(f.tab)}” tab and the received device on the “${E(item.req.boughtTab)}” tab, as one trade.`
+   :st==='unsure'?`Trade ID ${item.id} was sent to Google, but the reply could not be read. Glance at the sheet to confirm it landed.`
+   :err?`The sheet script said: ${E(err)}. Trade ID ${item.id} is saved in your queue so nothing is lost.${/tab not allowed|unknown action/i.test(err)?' Your sheet script may need the Trade update first.':''}`
+   :!LS.get('lgUrl')?`Trade ID ${item.id} saved on this device. Connect your sheet in settings and it will send itself.`
+   :`Trade ID ${item.id} saved on this device. It will send as one trade when this page can reach Google.`
+   :st==='sent'?`Added to the “${E(f.tab)}” tab.`
    :st==='unsure'?'Sent to Google, but the reply could not be read. Glance at the sheet to confirm it landed.'
    :err?`The sheet script said: ${E(err)}. The entry is saved in your queue so nothing is lost.`
    :!LS.get('lgUrl')?'Saved on this device. Connect your sheet in settings and it will send itself.'
@@ -2962,7 +3040,7 @@ document.addEventListener('click',e=>{
     case 'calc':cur=null;show(calcScreen());calcUpdate();break;
     case 'submit':submit();break;
     case 'dq':{V[d.k]=dayISO(+d.n);const el=$$('input[type=date]').find(i=>i.dataset.k===d.k);if(el)el.value=V[d.k];setErr(d.k,'');saveDraft();break}
-    case 'pick':{if(d.k==='Payment Type'&&cur&&cur.pay){payPick(t,d);break}const f=fOf(d.k),v=d.v;
+    case 'pick':{if(d.k==='Received device type'&&cur&&cur.pay){recvPick(t,d);break}if(d.k==='Payment Type'&&cur&&cur.pay){payPick(t,d);break}const f=fOf(d.k),v=d.v;
       if(f.t==='multi'){let arr=V[d.k]=Array.isArray(V[d.k])?V[d.k]:[];const i=arr.indexOf(v);
         if(i>=0)arr.splice(i,1);else{arr=V[d.k]=(f.ex||[]).includes(v)?[v]:arr.filter(z=>!(f.ex||[]).includes(z));arr.push(v)}
         $$('[data-lg="pick"]',t.parentNode).forEach(b=>b.setAttribute('aria-pressed',arr.includes(b.dataset.v)))}
