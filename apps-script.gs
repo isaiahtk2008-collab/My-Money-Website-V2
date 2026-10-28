@@ -180,7 +180,7 @@ function checkAll() {
 
 function doGet(e) {
   const p = (e && e.parameter) || {};
-  if (p.action !== 'read' && p.action !== 'check') return json({ ok: true, service: 'my-money-entry', version: 3, read: true, edit: true });
+  if (p.action !== 'read' && p.action !== 'check') return json({ ok: true, service: 'my-money-entry', version: 3, read: true, edit: true, backfill: true });
   if (SECRET && p.secret !== SECRET) return json({ ok: false, error: 'auth' });
   try {
     if (p.action === 'check') return json({ ok: true, version: 3, at: new Date().toISOString(), tabs: checkAll() });
@@ -495,6 +495,14 @@ function doPost(e) {
 
     // Undo the latest Edit Log change (also handled before anything that could add a row)
     if (body.action === 'undo') return json(undoRow(SpreadsheetApp.getActiveSpreadsheet(), body));
+
+    // Fill missing Row IDs (also handled before anything that could add a row). The script lock is already held here.
+    // Same rule as the hand-run backfillRowIds: only truly empty Row ID cells on rows with real data, nothing else is written.
+    if (body.action === 'backfill') {
+      const counts = fillEmptyRowIds(SpreadsheetApp.getActiveSpreadsheet(), new Set());
+      const total = Object.keys(counts).reduce((sum, k) => sum + counts[k], 0);
+      return json({ ok: true, total: total, counts: counts });
+    }
 
     // Ignore retries of an entry that already landed
     if (seenId(body.id)) return json({ ok: true, dup: true });
