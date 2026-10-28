@@ -29,6 +29,7 @@
 .lg-dq .chip-b{height:28px;font-size:12px;padding:0 10px}
 .lg-em{color:var(--bad);font-size:12.5px;font-weight:600;margin-top:5px}
 .lg-em[hidden]{display:none}
+.lg-pay[hidden]{display:none}
 .lg-ctx{color:var(--muted);font-size:12.5px;margin-top:6px}
 .lg-ctx:empty{display:none}
 .lg-ctx b.pos{color:var(--good)}.lg-ctx b.neg{color:var(--bad)}
@@ -2598,6 +2599,57 @@ const BY=Object.fromEntries(FORMS.map(f=>[f.id,f]));
 let cur=null,V={},busy=false,saveT=null,flushing=false;
 const fOf=k=>cur&&cur.f.find(x=>x.k===k);
 
+/* ---------- Payment Type block (Sold forms only). Kept in its own list (cur.pay), NOT in cur.f, so payload(), validate()
+   and the Edit sale editor behave exactly as before. These fields are never sent to the sheet yet (trades come later). ---------- */
+const PAYF=[F('Payment Type',{t:'radio',o:['Cash','Trade','Mixed']}),F('Cash Received',{t:'money'}),F('Trade-In Value',{t:'money'})];
+['sphone','spc','sacc'].forEach(id=>{BY[id].pay=PAYF});
+function payHtml(){
+  const pt=V['Payment Type'];
+  const show=pt==='Trade'||pt==='Mixed';
+  return fieldHtml(PAYF[0],90)+
+    `<div class="lg-pay" data-pay="1" ${show?'':'hidden'}>`+
+    fieldHtml(PAYF[1],91)+
+    fieldHtml(PAYF[2],92)+
+    `<p class="lg-em" data-e="Trade Total" hidden></p>`+
+    `</div>`;
+}
+function payPick(t,d){
+  V['Payment Type']=d.v;
+  $$('[data-lg="pick"]',t.parentNode).forEach(btn=>{btn.setAttribute('aria-pressed',btn===t?'true':'false')});
+  setErr('Payment Type','');
+  payUpdate();
+  saveDraft();
+}
+function payUpdate(){
+  if(!cur||!cur.pay)return;
+  const type=V['Payment Type']||'Cash';
+  const box=$('[data-pay]');
+  if(box)box.hidden=!(type==='Trade'||type==='Mixed');
+  const r=checkTradeTotals(type,numOf(V['Sale Price']),numOf(V['Cash Received']),numOf(V['Trade-In Value']));
+  setErr('Trade Total',(type==='Trade'||type==='Mixed')&&!r.ok?r.msg:'');
+}
+function payValidate(f){
+  if(!f.pay)return true;
+  const type=V['Payment Type']||'Cash';
+  if(type!=='Trade'&&type!=='Mixed'){
+    setErr('Cash Received','');setErr('Trade-In Value','');setErr('Trade Total','');
+    return true;
+  }
+  let hasKeyErr=false;
+  ['Cash Received','Trade-In Value'].forEach(key=>{
+    const s=String(V[key]==null?'':V[key]).trim();
+    let msg='';
+    if(s==='')msg='Required';
+    else{const n=numOf(s);if(n==null)msg='Enter a number';else if(n<0)msg="Can't be negative"}
+    setErr(key,msg);
+    if(msg)hasKeyErr=true;
+  });
+  if(hasKeyErr){setErr('Trade Total','');return false}
+  const r=checkTradeTotals(type,numOf(V['Sale Price']),numOf(V['Cash Received']),numOf(V['Trade-In Value']));
+  setErr('Trade Total',r.ok?'':r.msg);
+  return r.ok;
+}
+
 /* ---------- Data helpers (read from the site's own data, never modify it) ---------- */
 const unsold=kind=>{try{return store.D.items.filter(i=>i.kind===kind&&!i.sold).map(i=>({l:String(i.label||i.name),it:i}))}catch(e){return[]}};
 /* Expense categories offered in the form. Names are written to the sheet's "Category" column exactly as shown here.
@@ -2617,6 +2669,17 @@ const sugList=kind=>{let ex=[];try{if(kind==='seller')ex=store.D.items.map(i=>i.
 /* ---------- Value helpers ---------- */
 const clean=s=>String(s==null?'':s).replace(/[$,\s]/g,'').replace(/%$/,'');
 const numOf=s=>{const c=clean(s);if(c===''||!/^-?(\d+\.?\d*|\.\d+)$/.test(c))return null;return Number(c)};
+/* Pure check for the Sold forms' Payment Type: for Trade or Mixed, Cash Received + Trade-In Value must equal Sale Price (tolerance 0.005).
+   Cash (or anything else) ignores the trade fields. Blank/invalid numbers give ok:false with no message (the form shows 'Required'). */
+function checkTradeTotals(type,sale,cash,trade){
+  if(type!=='Trade'&&type!=='Mixed')return {ok:true,diff:0,msg:''};
+  if(sale===null||!Number.isFinite(sale)||cash===null||!Number.isFinite(cash)||trade===null||!Number.isFinite(trade))return {ok:false,diff:null,msg:''};
+  const rawDiff=cash+trade-sale;
+  const diff=Math.round(rawDiff*100)/100+0;
+  if(Math.abs(rawDiff)<=0.005+1e-9)return {ok:true,diff,msg:''};
+  const rel=rawDiff>0?'over':'short';
+  return {ok:false,diff,msg:`Cash + Trade-In = $${(cash+trade).toFixed(2)}, but Sale Price is $${sale.toFixed(2)} (${rel} by $${Math.abs(diff).toFixed(2)})`};
+}
 /* Read-only bridge for the device editor, which lives in the main script and reuses the logging form's own definitions. */
 window.MMLog={BY,YN,numOf,sugList};
 function getVal(x){const k=x.k,v=V[k],o=(V[k+'#']||'').trim();
@@ -2687,7 +2750,7 @@ function formScreen(f,draftTs){
   return `<div class="lg-top"><div style="display:flex;gap:10px;align-items:center"><button class="ibtn" data-lg="menu" aria-label="Back to all forms">${ICO.back}</button><div><h2>${E(f.t)}</h2><p>${E(f.s)}</p></div></div><div class="lg-r">${xbtn()}</div></div>
   ${draftTs?`<div class="lg-note"><span>Draft restored (${agoTxt(draftTs)})</span><button data-lg="discard">Discard</button></div>`:''}
   ${last&&!draftTs?`<div style="margin-bottom:14px"><button class="chip-b" data-lg="repeat">Repeat last entry's details</button></div>`:''}
-  ${f.f.map(fieldHtml).join('')}
+  ${f.f.map((x,i)=>fieldHtml(x,i)+(f.pay&&x.k==='Sale Price'?payHtml():'')).join('')}
   ${sugs.map(s=>`<datalist id="lg-dl-${s}">${sugList(s).map(x=>`<option value="${E(x)}">`).join('')}</datalist>`).join('')}
   <div class="lg-foot"><button class="btn" data-lg="submit">Log entry</button><span class="hint">Ctrl+Enter</span></div>`;
 }
@@ -2702,6 +2765,7 @@ function openForm(id,rep){
   if(!rep&&d&&d.v){V=d.v;ts=d.ts||Date.now()}
   else if(rep){const l=J('lg.last.'+id,{});cur.f.forEach(x=>{if(x.c&&l[x.k]!=null)V[x.k]=l[x.k];if(l[x.k+'#'])V[x.k+'#']=l[x.k+'#']})}
   cur.f.forEach(x=>{if(x.t==='date'&&!V[x.k])V[x.k]=dayISO(0)});
+  if(cur.pay&&!V['Payment Type'])V['Payment Type']='Cash';
   show(formScreen(cur,ts));setTimeout(()=>{ctx();imeiWarn()},0);
   const d2=$('#overlay .drawer.lg');const first=d2&&$('.lg-in',d2);if(first&&!ts&&matchMedia('(pointer:fine)').matches)first.focus();
 }
@@ -2836,7 +2900,8 @@ async function flush(silent){
   return sent}
 
 async function submit(){
-  if(busy||!cur)return;const f=cur;if(!validate(f))return;
+  if(busy||!cur)return;const f=cur;const okF=validate(f),okP=payValidate(f);if(!okF)return;
+  if(!okP){const w=$$('.lg-f').find(e=>e.dataset.f==='Cash Received');w&&w.scrollIntoView({block:'center',behavior:'smooth'});if(!$('#toasts .toast'))toast('Check the highlighted fields');return}
   const item={id:uid(),form:f.id,tab:f.tab,values:payload(f),ts:Date.now()};item.sum=summ(f,item.values);
   busy=true;const btn=$('[data-lg="submit"]');if(btn){btn.disabled=true;btn.textContent='Sending…'}
   let st='queued',err='';
@@ -2897,7 +2962,7 @@ document.addEventListener('click',e=>{
     case 'calc':cur=null;show(calcScreen());calcUpdate();break;
     case 'submit':submit();break;
     case 'dq':{V[d.k]=dayISO(+d.n);const el=$$('input[type=date]').find(i=>i.dataset.k===d.k);if(el)el.value=V[d.k];setErr(d.k,'');saveDraft();break}
-    case 'pick':{const f=fOf(d.k),v=d.v;
+    case 'pick':{if(d.k==='Payment Type'&&cur&&cur.pay){payPick(t,d);break}const f=fOf(d.k),v=d.v;
       if(f.t==='multi'){let arr=V[d.k]=Array.isArray(V[d.k])?V[d.k]:[];const i=arr.indexOf(v);
         if(i>=0)arr.splice(i,1);else{arr=V[d.k]=(f.ex||[]).includes(v)?[v]:arr.filter(z=>!(f.ex||[]).includes(z));arr.push(v)}
         $$('[data-lg="pick"]',t.parentNode).forEach(b=>b.setAttribute('aria-pressed',arr.includes(b.dataset.v)))}
@@ -2916,7 +2981,7 @@ function onField(e){
   const t=e.target;if(!t.classList||!t.classList.contains('lg-in')||!cur)return;const k=t.dataset.k;
   V[k]=t.value;const base=k.replace(/#$/,'');setErr(base,'');
   if(t.tagName==='SELECT'){const o=t.closest('.lg-f').querySelector('.lg-oth');if(o){o.hidden=t.value!=='__o';if(t.value==='__o')o.focus()}}
-  ctx();imeiWarn();saveDraft();
+  ctx();payUpdate();imeiWarn();saveDraft();
 }
 document.addEventListener('input',onField);
 document.addEventListener('change',onField);
