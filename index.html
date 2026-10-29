@@ -934,6 +934,25 @@ function tradeSplit(items) {
   const trade = Math.round(sum(list, i => i ? i.tradeValue : 0) * 100) / 100;
   return { cash, trade };
 }
+
+/* Return trade badge HTML or empty string */
+function tradeBadge(o){
+  if(!o||!o.isTrade)return '';
+  var t=o.tradeId?'Trade ID '+esc(o.tradeId):'Trade';
+  return '<span class="pill acc" style="margin-left:6px" title="'+t+'">Trade</span>';
+}
+
+/* Return formatted cost cell with title tooltip for trades */
+function costCell(r){
+  if(!(r.tradeValue>0))return M(r.buyPrice);
+  return `<span title="Cash spent ${mny(r.cashSpent)} · Trade value received ${mny(r.tradeValue)}">${M(r.buyPrice)}</span>`;
+}
+
+/* Return cash spent and trade value breakdown hint HTML */
+function tradeLines(c,t){
+  if(!(t>0))return '';
+  return `<div class="hint" style="color:var(--muted);margin:-6px 0 12px"><div>Cash spent <b>${M(c)}</b></div><div>Trade value received <b>${M(t)}</b> <span>(trade value is not cash)</span></div></div>`;
+}
 const CAT_MAP={'transportation & vehicle':'Transportation','trasportation':'Transportation'};
 const TYPE_MAP={'heaphones':'Headphones','wifi adapter':'WiFi Adapter'};
 function canonCondition(v){if(!v)return null;const s=String(v).replace(/\s+/g,' ').trim();const l=s.toLowerCase();
@@ -1160,7 +1179,7 @@ function inventoryStats(D){
   const stock=D.items.filter(i=>!i.sold);
   const med={};['Phone','PC','Accessory'].forEach(k=>med[k]=median(D.items.filter(i=>i.sold&&i.kind===k&&i.profit!=null).map(i=>i.profit)));
   const B=[['0–14 days',0,14],['15–30 days',15,30],['31–60 days',31,60],['61+ days',61,1e9]].map(([l,a,b])=>({l,a,b,items:stock.filter(i=>(i.age??0)>=a&&(i.age??0)<=b)}));
-  return{stock,cost:sum(stock,i=>i.buyPrice),cash:Math.round(sum(stock,i=>i.cashSpent)*100)/100,tradeValue:Math.round(sum(stock,i=>i.tradeValue)*100)/100,avgAge:avg(stock,i=>i.age),med,buckets:B};
+  return{stock,cost:sum(stock,i=>i.buyPrice),cash:Math.round(sum(stock,i=>i.cashSpent!=null?i.cashSpent:i.buyPrice)*100)/100,tradeValue:Math.round(sum(stock,i=>i.tradeValue)*100)/100,avgAge:avg(stock,i=>i.age),med,buckets:B};
 }
 function investingStats(D){
   const P=[...groupBy(D.investments,i=>i.portfolio).entries()].map(([name,es])=>{
@@ -1204,7 +1223,7 @@ const ICON={
 const KIND_ICON={Phone:ICON.tag,PC:ICON.box,Accessory:ICON.tag};
 
 /* ----- app state ----- */
-const S={view:'home',range:'90d',cs:'',ce:'',kind:'All',gran:null,F:{},rstat:'All',theme:'auto',privacy:false,off:{},bucket:null,palIdx:0,dhf:'all'};
+const S={view:'home',range:'90d',cs:'',ce:'',kind:'All',gran:null,F:{},rstat:'All',rtrade:'All',theme:'auto',privacy:false,off:{},bucket:null,palIdx:0,dhf:'all'};
 const VIEW_NAMES=['home','spending','reselling','inventory','investing','data'];
 const VIEW_LABEL={home:'Home',spending:'Spending',reselling:'Reselling',inventory:'Stock',investing:'Investing',data:'Data'};
 const VIEW_ICON={home:'home',spending:'spend',reselling:'resell',inventory:'box',investing:'invest',data:'data'};
@@ -1324,10 +1343,10 @@ function openDetail(id){
     const same=store.D.items.filter(i=>i.id!==o.id&&i.name.toLowerCase()===o.name.toLowerCase()&&i.sold&&i.profit!=null).sort((a,b)=>b.sellDate-a.sellDate).slice(0,5);
     const pc=o.profit==null?'':(o.profit>=0?'pos':'neg');
     summary=`${o.name} (${o.kind}) bought ${fdy(o.buyDate)} for ${mny(o.buyPrice)}`+(o.sold?`, sold ${fdy(o.sellDate)} for ${mny(o.sellPrice)}, profit ${mny(o.profit)}`:`, still in stock`);
-    h=`<div class="dh"><div><span class="pill ${o.sold?'good':'warn'}">${o.sold?'Sold':'In stock'}</span><h2 style="margin-top:8px">${esc(o.name)}</h2><p class="hint" style="color:var(--muted)">${esc(o.kind)}${o.condition?' · '+esc(o.condition):''}</p></div><button class="ibtn" data-act="close" aria-label="Close" data-focus>${ICON.x}</button></div>
-      ${o.sold?`<div class="big ${pc}">${SM(o.profit)}<span style="font-size:14px;font-weight:600;color:var(--muted)"> profit${o.roi!=null?' · '+pct(o.roi)+' ROI':''}</span></div>`:`<div class="big">${M(o.buyPrice)}<span style="font-size:14px;font-weight:600;color:var(--muted)"> paid · ${o.age!=null?plural(o.age,'day')+' in stock':''}</span></div>`}
+    h=`<div class="dh"><div><span class="pill ${o.sold?'good':'warn'}">${o.sold?'Sold':'In stock'}</span>${tradeBadge(o)}<h2 style="margin-top:8px">${esc(o.name)}</h2><p class="hint" style="color:var(--muted)">${esc(o.kind)}${o.condition?' · '+esc(o.condition):''}</p></div><button class="ibtn" data-act="close" aria-label="Close" data-focus>${ICON.x}</button></div>
+      ${o.sold?`<div class="big ${pc}">${SM(o.profit)}<span style="font-size:14px;font-weight:600;color:var(--muted)"> profit${o.roi!=null?' · '+pct(o.roi)+' ROI':''}</span></div>`:`<div class="big">${M(o.cashSpent!=null?o.cashSpent:o.buyPrice)}<span style="font-size:14px;font-weight:600;color:var(--muted)"> ${o.tradeValue>0?'cash spent':'paid'} · ${o.age!=null?plural(o.age,'day')+' in stock':''}</span></div>`}
       <div class="steps"><div class="s"><b>Bought</b>${fdy(o.buyDate)}</div><div class="ln"><span>${o.sold&&o.days!=null?plural(o.days,'day'):(o.age!=null?plural(o.age,'day')+' and counting':'')}</span></div><div class="s"><b>${o.sold?'Sold':'Not sold yet'}</b>${o.sold?fdy(o.sellDate):'—'}</div></div>
-      ${kv([['Paid',mny(o.buyPrice)],['Bought from',o.seller],['Bought on',fdy(o.buyDate)],['Sale price',o.sold?mny(o.sellPrice):null],['Sold to',o.buyer],['Sold on',o.sold?fdy(o.sellDate):null],['Listing clicks',o.clicks],...Object.entries(o.specs).map(([k,v])=>[k,v]),['Notes',o.notes],['Sheet row',o.sheet+' · row '+o.row]])}
+      ${kv([['Paid',mny(o.buyPrice)],...(o.isTrade&&o.buyPrice!=null?[['Cash spent',mny(o.cashSpent!=null?o.cashSpent:o.buyPrice)],['Trade value received',mny(o.tradeValue||0)]]:[]),['Trade ID',o.tradeId],['Source',o.isTradeIn?o.source:null],['Bought from',o.seller],['Bought on',fdy(o.buyDate)],['Sale price',o.sold?mny(o.sellPrice):null],['Sold to',o.buyer],['Sold on',o.sold?fdy(o.sellDate):null],['Listing clicks',o.clicks],...Object.entries(o.specs).map(([k,v])=>[k,v]),['Notes',o.notes],['Sheet row',o.sheet+' · row '+o.row]])}
       ${same.length?`<h3 style="margin-bottom:6px">Other ${esc(o.name)} sales</h3><div class="list">${same.map(s=>`<button class="li" data-act="open" data-id="${s.id}"><span class="tx"><b>${fdy(s.sellDate)}</b><span>${plural(s.days??0,'day')} to sell${s.buyer?' · '+esc(s.buyer):''}</span></span><span class="rt ${s.profit>=0?'pos':'neg'}">${SM(s.profit)}</span></button>`).join('')}</div>`:''}
       <button class="btn sec" style="margin-top:16px" data-act="copysum" data-v="${esc(summary)}">Copy summary</button>
       ${deviceFootHtml(o)}`;
@@ -1966,7 +1985,7 @@ async function undoEdit(info,el){
 function cmdList(){
   return [...VIEW_NAMES.map(v=>({g:'Go to',t:VIEW_LABEL[v],a:()=>go(v)})),
     {g:'Actions',t:'Switch theme (auto / light / dark)',a:cycleTheme},{g:'Actions',t:(S.privacy?'Show':'Hide')+' amounts (privacy mode)',a:togglePrivacy},
-    {g:'Actions',t:'Show keyboard shortcuts',a:openHelp},{g:'Actions',t:'Open Data & sync',a:()=>go('data')},{g:'Actions',t:'Reset filters',a:()=>{S.F={};S.rstat='All';S.kind='All';render();toast('Filters reset')}}];
+    {g:'Actions',t:'Show keyboard shortcuts',a:openHelp},{g:'Actions',t:'Open Data & sync',a:()=>go('data')},{g:'Actions',t:'Reset filters',a:()=>{S.F={};S.rstat='All';S.rtrade='All';S.kind='All';render();toast('Filters reset')}}];
 }
 function palEntries(q){
   const D=store.D,words=q.toLowerCase().split(/\s+/).filter(Boolean);const out=[];
@@ -2219,7 +2238,7 @@ function vHome(){
     ${kpi({label:'Reselling profit',val:SM(rs.profit),delta:dlt(rs.profit,rs.prevProfit),spark:rs.spark,sub:plural(rs.sold.length,'sale'),tip:'Profit = sale price − purchase price, for items sold in the selected range. Compared with the previous period of equal length.',act:'goto',v:'reselling'})}
     ${kpi({label:'Spending',val:M(ss.total),delta:dlt(ss.total,ss.prevTotal),inverse:true,spark:ss.cur,sub:mny(ss.perDay)+'/day',tip:'Everything you bought in the range. Refunds are left out. A rise shows in red because it means more money out.',act:'goto',v:'spending'})}
     ${kpi({label:'Invested',val:M(inv.total),delta:undefined,spark:ts.map(x=>x.v),sub:`<span class="${inv.gain>=0?'pos':'neg'}">${SM(inv.gain)}</span> all-time`,tip:'Latest logged value of every portfolio. Gain = value − everything you added.',act:'goto',v:'investing'})}
-    ${kpi({label:'Cash tied up in stock',val:M(st.cost),sub:plural(st.stock.length,'item')+avgAge,tip:'What you paid for devices that have not sold yet.',act:'goto',v:'inventory'})}
+    ${kpi({label:'Cash tied up in stock',val:M(st.cash),sub:plural(st.stock.length,'item')+avgAge,tip:st.tradeValue>0?'Real cash paid for devices that have not sold yet. Trade-in value is not counted as cash.':'What you paid for devices that have not sold yet.',act:'goto',v:'inventory'})}
   </div>
   ${card('Insights',ins.length?`<div class="insights">${ins.map(x=>`<button class="ins" data-act="${x.act}" data-v="${x.v||''}" data-k="${x.k||''}" data-x="${esc(x.x||'')}" data-id="${x.id||''}"><span class="ic">${ICON[x.i]||ICON.bulb}</span><p>${x.t}</p></button>`).join('')}</div>`:'<div class="empty">Insights appear once there is enough history.</div>','<span class="hint">Fresh picks every day</span>')}
   <div class="grid g21">
@@ -2308,7 +2327,7 @@ function velocityHtml(rs,kind){
       return `<span class="rl">${esc(names[k]||k)}<small style="color:var(--muted);font-weight:500"> ${n}</small></span>`+VBK.map(b=>{const c=rows.filter(i=>i.days>=b[1]&&i.days<=b[2]).length;return `<span class="c" style="--a:${(c/n).toFixed(2)}" title="${c} of ${n}">${c||''}</span>`}).join('')+`<span class="av">${Math.round(avg(rows,i=>i.days))}</span>`}).join('')+`</div></div>`
     :'<div class="empty">No completed sales in this range yet.</div>';
   const stock=store.D.items.filter(i=>!i.sold&&i.age!=null&&(kind==='All'||i.kind===kind)).sort((a,b)=>b.age-a.age);
-  const tied=sum(stock,i=>i.buyPrice);
+  const tied=sum(stock,i=>i.cashSpent!=null?i.cashSpent:i.buyPrice);
   const list=stock.length?`<div class="list">${stock.slice(0,6).map(i=>`<button class="li" data-act="open" data-id="${esc(i.id)}"><span class="tx"><b>${esc(i.name)}</b><span>${plural(i.age,'day')} in stock${i.buyPrice!=null?' · paid '+mny(i.buyPrice):''}</span></span></button>`).join('')}</div><p class="hint" style="color:var(--muted);margin-top:8px">${M(tied)} tied up across ${plural(stock.length,'item')} in stock</p>`:'<div class="empty">Nothing in stock.</div>';
   return `<div class="grid g2">${card('How fast things sell',heat,'<span class="hint">Darker = more of that type</span>')}${card('Sitting the longest',list)}</div>`;
 }
@@ -2343,12 +2362,12 @@ function vReselling(){
   ${card('Days held vs profit',chartBox('scat',true),'<span class="hint">Each dot is one sale. Hover for the name.</span>')}
   ${card('Model leaderboard',tableShell('lead',{placeholder:'Search models',sort:{k:'tot',dir:-1},noOpen:true,rows:()=>resellingStats(store.D,RG(),S.kind).lead,text:r=>r.k+' '+r.kind,
     cols:[{k:'k',h:'Model'},{k:'kind',h:'Type'},{k:'n',h:'Sold',num:true},{k:'avg',h:'Avg profit',num:true,cell:r=>SM(r.avg)},{k:'days',h:'Avg days',num:true,cell:r=>r.days==null?'—':Math.round(r.days)},{k:'tot',h:'Total profit',num:true,cell:r=>`<b>${SM(r.tot)}</b>`}]}))}
-  ${card('Every item',tableShell('items',{placeholder:'Search name, buyer, seller, notes',sort:{k:'date',dir:-1},hidden:['cond','seller'],rows:()=>itemRows(),
-    text:r=>[r.name,r.kind,r.buyer,r.seller,r.notes,r.condition].join(' '),metaRight:()=>'',
-    cols:[{k:'name',h:'Item',cell:r=>esc(r.name)},{k:'kind',h:'Type'},{k:'status',h:'Status',cell:r=>`<span class="pill ${r.sold?'good':'warn'}">${r.sold?'Sold':'In stock'}</span>`},{k:'cond',h:'Condition',val:r=>r.condition,cell:r=>esc(r.condition||'—')},
-      {k:'date',h:'Date',val:r=>+(r.sold?r.sellDate:r.buyDate)||0,cell:r=>fd(r.sold?r.sellDate:r.buyDate),csv:r=>dkey(r.sold?r.sellDate:r.buyDate)},{k:'buyPrice',h:'Cost',num:true,cell:r=>M(r.buyPrice)},{k:'sellPrice',h:'Sold for',num:true,cell:r=>r.sold?M(r.sellPrice):'—'},
+  ${card('Every item',tableShell('items',{placeholder:'Search name, buyer, seller, notes, Trade ID',sort:{k:'date',dir:-1},hidden:['cond','seller'],rows:()=>itemRows(),
+    text:r=>[r.name,r.kind,r.buyer,r.seller,r.notes,r.condition,r.tradeId].join(' '),metaRight:()=>'',
+    cols:[{k:'name',h:'Item',cell:r=>esc(r.name)+tradeBadge(r)},{k:'kind',h:'Type'},{k:'status',h:'Status',cell:r=>`<span class="pill ${r.sold?'good':'warn'}">${r.sold?'Sold':'In stock'}</span>`},{k:'cond',h:'Condition',val:r=>r.condition,cell:r=>esc(r.condition||'—')},
+      {k:'date',h:'Date',val:r=>+(r.sold?r.sellDate:r.buyDate)||0,cell:r=>fd(r.sold?r.sellDate:r.buyDate),csv:r=>dkey(r.sold?r.sellDate:r.buyDate)},{k:'buyPrice',h:'Cost',num:true,cell:r=>costCell(r)},{k:'sellPrice',h:'Sold for',num:true,cell:r=>r.sold?M(r.sellPrice):'—'},
       {k:'profit',h:'Profit',num:true,cell:r=>r.profit==null?'—':`<b class="${r.profit>=0?'pos':'neg'}">${SM(r.profit)}</b>`},{k:'roi',h:'ROI',num:true,cell:r=>pct(r.roi)},{k:'days',h:'Days',num:true,val:r=>r.sold?r.days:r.age,cell:r=>(r.sold?r.days:r.age)??'—'},{k:'buyer',h:'Buyer',cell:r=>esc(r.buyer||'—')},{k:'seller',h:'Bought from',cell:r=>esc(r.seller||'—')}],
-    sumKey:r=>r.profit,sumLabel:'profit'}).replace('<div data-tbl="items">',`<div class="activef" style="margin-bottom:8px">${seg('rstat',[['All','All'],['Sold','Sold'],['Stock','In stock']],stl)}</div><div data-tbl="items">`))}`;
+    sumKey:r=>r.profit,sumLabel:'profit'}).replace('<div data-tbl="items">',`<div class="activef" style="margin-bottom:8px;display:flex;gap:8px;flex-wrap:wrap">${seg('rstat',[['All','All'],['Sold','Sold'],['Stock','In stock']],stl)}${seg('rtrade',[['All','All deals'],['Trade','Trades only']],S.rtrade)}</div><div data-tbl="items">`))}`;
   return {html,mount(){
     const lab=rs.cum.map(p=>fd(p.x));
     mkChart('cum',{type:'line',data:{labels:lab,datasets:[{label:'Profit',data:rs.cum.map(p=>p.y),borderColor:cv('--c3'),backgroundColor:cv('--c3'),fill:false,tension:.25,pointRadius:rs.cum.length>60?0:2,borderWidth:2.5}]},options:baseOpts({xTicks:7})},`Cumulative profit reaches ${mny(rs.profit)} across ${rs.sold.length} sales.`);
@@ -2364,6 +2383,7 @@ function itemRows(){
   if(S.rstat==='Sold')a=a.filter(i=>i.sold&&inR(i.sellDate,R.start,R.end));
   else if(S.rstat==='Stock')a=a.filter(i=>!i.sold);
   else a=a.filter(i=>!i.sold||inR(i.sellDate,R.start,R.end));
+  if(S.rtrade==='Trade')a=a.filter(i=>i.isTrade);
   return a;
 }
 
@@ -2371,14 +2391,15 @@ function vInventory(){
   const D=store.D,st=inventoryStats(D);
   const sel=S.bucket!=null?st.buckets[S.bucket]:null;
   const html=`<div class="grid g4">
-    ${kpi({label:'Cash tied up',val:M(st.cost),sub:'what you paid for unsold items',tip:'Sum of purchase prices for everything still in stock.'})}
+    ${kpi({label:'Cash tied up',val:M(st.cash),sub:st.tradeValue>0?'cash you paid for unsold items':'what you paid for unsold items',tip:st.tradeValue>0?'Real cash paid for everything still in stock. Trade-in value is not counted as cash.':'Sum of purchase prices for everything still in stock.'})}
     ${kpi({label:'Items in stock',val:String(st.stock.length),sub:['Phone','PC','Accessory'].map(k=>st.stock.filter(i=>i.kind===k).length+' '+kindWord(k).toLowerCase()).join(' · ')})}
     ${kpi({label:'Average age',val:st.avgAge==null?'—':Math.round(st.avgAge)+' days',sub:'since you bought them',tip:'Days from purchase date to today.'})}
   </div>
-  ${card('How long things have been sitting',`<div class="bars">${st.buckets.map((b,i)=>`<button class="bar" data-act="bucket" data-v="${i}" aria-pressed="${S.bucket===i}"><span class="nm">${b.l}</span><span class="tr"><i style="width:${st.stock.length?Math.max(b.items.length?4:0,b.items.length/st.stock.length*100):0}%;background:${i>=3?'var(--bad)':i===2?'var(--warn)':'var(--good)'}"></i></span><span class="nv">${plural(b.items.length,'item')}<small>${M(sum(b.items,x=>x.buyPrice))}</small></span></button>`).join('')}</div>`,sel?`<button class="chip-b" data-act="bucket" data-v="${S.bucket}" aria-pressed="true">${sel.l}${ICON.x.replace('<svg','<svg class="x"')}</button>`:'<span class="hint">Click a row to filter the list</span>')}
-  ${card('In stock',tableShell('stock',{placeholder:'Search stock',sort:{k:'age',dir:-1},rows:()=>{const s=inventoryStats(store.D);return S.bucket!=null?s.buckets[S.bucket].items:s.stock},text:r=>[r.name,r.kind,r.seller,r.condition,r.notes].join(' '),sumKey:r=>r.buyPrice,sumLabel:'invested',
-    cols:[{k:'name',h:'Item'},{k:'kind',h:'Type'},{k:'condition',h:'Condition',cell:r=>esc(r.condition||'—')},{k:'buyDate',h:'Bought',val:r=>+r.buyDate||0,cell:r=>fd(r.buyDate),csv:r=>r.buyDate?dkey(r.buyDate):''},
-      {k:'age',h:'Age',val:r=>r.age,cell:r=>r.age==null?'—':`<span class="pill ${r.age<=30?'good':r.age<=60?'warn':'bad'}">${r.age} days</span>`},{k:'buyPrice',h:'Paid',num:true,cell:r=>M(r.buyPrice)},
+  ${tradeLines(st.cash,st.tradeValue)}
+  ${card('How long things have been sitting',`<div class="bars">${st.buckets.map((b,i)=>`<button class="bar" data-act="bucket" data-v="${i}" aria-pressed="${S.bucket===i}"><span class="nm">${b.l}</span><span class="tr"><i style="width:${st.stock.length?Math.max(b.items.length?4:0,b.items.length/st.stock.length*100):0}%;background:${i>=3?'var(--bad)':i===2?'var(--warn)':'var(--good)'}"></i></span><span class="nv">${plural(b.items.length,'item')}<small>${M(sum(b.items,x=>x.cashSpent!=null?x.cashSpent:x.buyPrice))}</small></span></button>`).join('')}</div>`,sel?`<button class="chip-b" data-act="bucket" data-v="${S.bucket}" aria-pressed="true">${sel.l}${ICON.x.replace('<svg','<svg class="x"')}</button>`:'<span class="hint">Click a row to filter the list</span>')}
+  ${card('In stock',tableShell('stock',{placeholder:'Search stock or Trade ID',sort:{k:'age',dir:-1},rows:()=>{const s=inventoryStats(store.D);return S.bucket!=null?s.buckets[S.bucket].items:s.stock},text:r=>[r.name,r.kind,r.seller,r.condition,r.notes,r.tradeId].join(' '),sumKey:r=>r.cashSpent!=null?r.cashSpent:r.buyPrice,sumLabel:'invested',
+    cols:[{k:'name',h:'Item',cell:r=>esc(r.name)+tradeBadge(r)},{k:'kind',h:'Type'},{k:'condition',h:'Condition',cell:r=>esc(r.condition||'—')},{k:'buyDate',h:'Bought',val:r=>+r.buyDate||0,cell:r=>fd(r.buyDate),csv:r=>r.buyDate?dkey(r.buyDate):''},
+      {k:'age',h:'Age',val:r=>r.age,cell:r=>r.age==null?'—':`<span class="pill ${r.age<=30?'good':r.age<=60?'warn':'bad'}">${r.age} days</span>`},{k:'buyPrice',h:'Paid',num:true,cell:r=>costCell(r)},
       {k:'min',h:'Break-even + typical profit',num:true,val:r=>r.buyPrice==null?null:r.buyPrice+(st.med[r.kind]||0),cell:r=>r.buyPrice==null?'—':`<span title="Paid ${mny(r.buyPrice)} plus your median ${r.kind.toLowerCase()} profit of ${mny(st.med[r.kind]||0)}">${M(r.buyPrice+(st.med[r.kind]||0))}</span>`},
       {k:'seller',h:'Bought from',cell:r=>esc(r.seller||'—')}]}))}`;
   return {html};
@@ -2526,9 +2547,10 @@ document.addEventListener('click',e=>{
     case 'kind':S.kind=S.kind===d.v&&d.v!=='All'?'All':d.v;render();break;
     case 'gran':S.gran=d.v;render();break;
     case 'rstat':S.rstat=d.v;render();break;
+    case 'rtrade':S.rtrade=d.v;render();break;
     case 'filt':S.F[d.k]=S.F[d.k]===d.v?null:d.v;render();break;
     case 'clearf':S.F={};render();break;
-    case 'clearall':{S.F={};S.rstat='All';const st=TS[d.t];if(st){st.q='';const i=$('#'+d.t+'-q');if(i)i.value=''}render();break}
+    case 'clearall':{S.F={};S.rstat='All';S.rtrade='All';const st=TS[d.t];if(st){st.q='';const i=$('#'+d.t+'-q');if(i)i.value=''}render();break}
     case 'bucket':S.bucket=S.bucket===+d.v?null:+d.v;render();break;
     case 'port':S.off[d.v]=!S.off[d.v];render();break;
     case 'tsort':{const st=TS[d.t];st.sort=st.sort&&st.sort.k===d.k?{k:d.k,dir:-st.sort.dir}:{k:d.k,dir:1};fillTable(d.t);break}
