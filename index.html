@@ -2959,7 +2959,18 @@ function calcScreen(){
   <div class="lg-f"><label class="lg-l" for="mc-tgt">Target profit (% of cost)</label><input type="text" class="lg-set" id="mc-tgt" inputmode="decimal" autocomplete="off" value="25" data-mc></div>
   <div class="lg-f"><label class="lg-l" for="mc-fee">Selling fees (%), 0 for local cash pickup</label><input type="text" class="lg-set" id="mc-fee" inputmode="decimal" autocomplete="off" value="0" data-mc></div>
   <div class="lg-f"><label class="lg-l" for="mc-ext">Other costs ($, shipping, parts)</label><input type="text" class="lg-set" id="mc-ext" inputmode="decimal" autocomplete="off" value="0" data-mc></div>
+  <div class="lg-f"><label class="lg-l" for="mc-trade">Trade-in value you accept ($, optional)</label><input type="text" class="lg-set" id="mc-trade" inputmode="decimal" autocomplete="off" placeholder="0.00" data-mc></div>
   <div class="lg-note" id="mc-out" role="status" style="display:block;font-weight:500"></div><div style="height:24px"></div>`;
+}
+/* Trade-in margin calculations */
+function tradeCalc(all, k, tgt, trade, floorPct = 30) {
+  const list = Math.ceil((all * (1 + tgt / 100)) / k);
+  const floorPrice = Math.ceil(Math.round(((all * (1 + floorPct / 100)) / k) * 100 * 1e6) / 1e6) / 100;
+  const profit = Math.round((list * k - all) * 100) / 100;
+  const cashAtList = Math.max(0, Math.round((list - trade) * 100) / 100);
+  const cashForFloor = Math.max(0, Math.round((floorPrice - trade) * 100) / 100);
+  const coveredByTrade = trade >= floorPrice;
+  return { trade, list, profit, cashAtList, floorPrice, cashForFloor, coveredByTrade };
 }
 function calcUpdate(){
   const g=id=>{const el=$('#'+id);return el?numOf(el.value):null};
@@ -2968,9 +2979,21 @@ function calcUpdate(){
   if(cost==null||cost<=0||tgt==null||fee<0||fee>=100){out.innerHTML='Enter what you paid and a target to see the price.';return}
   const all=cost+ext,k=1-fee/100;
   const be=all/k,price=(all*(1+tgt/100))/k,net=price*k-all;
-  out.innerHTML=`<div>List at <b style="font-size:20px">${M(Math.ceil(price))}</b></div>
+  let html=`<div>List at <b style="font-size:20px">${M(Math.ceil(price))}</b></div>
    <div>Break-even price: ${M(Math.ceil(be*100)/100)}</div>
    <div>Net profit at that price: <b class="${net>=0?'pos':'neg'}">${sgn(Math.round((Math.ceil(price)*k-all)*100)/100)}</b> · Markup ${pct((Math.ceil(price)*k-all)/all,0)} · Margin ${pct((Math.ceil(price)*k-all)/Math.ceil(price),0)}</div>`;
+  const tv=g('mc-trade');
+  if(tv!=null&&tv>0){
+    const t=tradeCalc(all,k,tgt,tv);
+    html+=`<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--surface2)">
+  <div>Trade-in value: <b>${M(t.trade)}</b></div>
+  <div>Cash to collect at the list price: <b>${M(t.cashAtList)}</b></div>
+  <div>Profit on the sale (trade-in counted at its value): <b class="${t.profit>=0?'pos':'neg'}">${sgn(t.profit)}</b></div>
+  <div>Cash needed to keep a 30% ROI floor: <b>${M(t.cashForFloor)}</b>${t.coveredByTrade?' (the trade-in alone covers it)':''}</div>
+  <div class="hint" style="color:var(--muted)">Trade-in value is not cash until you resell that device.</div>
+</div>`;
+  }
+  out.innerHTML=html;
 }
 document.addEventListener('input',e=>{if(e.target.dataset&&e.target.dataset.mc!==undefined)calcUpdate()});
 
