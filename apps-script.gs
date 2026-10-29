@@ -17,6 +17,10 @@ const EDITABLE_TABS = ['Expenses'];
 // Formula tabs (Master Inventory, PCs, PnA, Summary...) must never be added to this list or to EDITABLE_TABS.
 const EDIT_ONLY_TABS = ['Form Responses - Bought', 'Form Responses - PCs', 'Bought Access - Form', 'Form Responses - Sold', 'Form Responses - Sold PCs', 'Sold Access - Form'];
 
+// TRADE: the only tabs a `trade` request may write to (one Sold tab and one Bought tab per trade). Never Expenses or any formula tab.
+const TRADE_SOLD_TABS = ['Form Responses - Sold', 'Form Responses - Sold PCs', 'Sold Access - Form'];
+const TRADE_BOUGHT_TABS = ['Form Responses - Bought', 'Form Responses - PCs', 'Bought Access - Form'];
+
 // The "Edit Log" tab is the ONLY tab this script may create. Each edited cell adds one row here (old value and new value).
 const EDIT_LOG_TAB = 'Edit Log';
 const EDIT_LOG_HEADERS = ['Timestamp', 'Tab', 'Row ID', 'Column', 'Old value', 'New value', 'Action'];
@@ -180,7 +184,7 @@ function checkAll() {
 
 function doGet(e) {
   const p = (e && e.parameter) || {};
-  if (p.action !== 'read' && p.action !== 'check') return json({ ok: true, service: 'my-money-entry', version: 3, read: true, edit: true });
+  if (p.action !== 'read' && p.action !== 'check') return json({ ok: true, service: 'my-money-entry', version: 3, read: true, edit: true, backfill: true, trade: true });
   if (SECRET && p.secret !== SECRET) return json({ ok: false, error: 'auth' });
   try {
     if (p.action === 'check') return json({ ok: true, version: 3, at: new Date().toISOString(), tabs: checkAll() });
@@ -218,6 +222,122 @@ function markId(id) {
   const out = {};
   entries.forEach(p => { out[p[0]] = p[1]; });
   props.setProperty('SEEN_IDS', JSON.stringify(out));
+}
+
+/* ---------- TRADE: one sold row + one received-device row as ONE request, all or nothing ----------
+   planAddRow follows exactly the same rules as the plain add in doPost (header match, next free row, optional Row ID, never overwrite)
+   but only READS. addTrade plans both rows first, writes only if both are safe, undoes its own writes if anything fails midway,
+   and remembers the id only after both rows landed, so a retry of the same id can never add a second pair. */
+function planAddRow(ss, tabName, inVals) {
+  const sheet = findSheet(ss, tabName);
+  if (!sheet) return { ok: false, error: 'no tab: ' + tabName };
+
+  const norm = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn() || 1).getValues()[0].map(norm);
+  const inputVals = inVals || {};
+  const matchedCols = {}, matchedKeys = new Set();
+
+  headers.forEach((h, idx) => {
+    if (h === 'timestamp') {
+      matchedCols[idx + 1] = new Date();
+    } else if (h) {
+      const k = Object.keys(inputVals).find(key => norm(key) === h);
+      if (k !== undefined) {
+        matchedKeys.add(k);
+        let v = inputVals[k];
+        if (v && typeof v === 'object' && v.$date) {
+          const [y, m, d] = v.$date.split('-').map(Number);
+          v = new Date(y, m - 1, d);
+        }
+        matchedCols[idx + 1] = v;
+      }
+    }
+  });
+  const unmatched = Object.keys(inputVals).filter(k => !matchedKeys.has(k));
+
+  const cols = Object.keys(matchedCols).map(Number);
+  let targetRow = 2;
+  const maxRows = sheet.getMaxRows();
+  if (maxRows > 1 && cols.length > 0) {
+    const data = sheet.getRange(2, 1, maxRows - 1, sheet.getLastColumn()).getValues();
+    for (let r = data.length - 1; r >= 0; r--) {
+      if (cols.some(c => data[r][c - 1] !== '')) {
+        targetRow = r + 3;
+        break;
+      }
+    }
+  }
+
+  const ridCol = headers.indexOf('rowid') + 1;
+  let rowId;
+  if (ridCol > 0 && cols.length > 0) {
+    const given = matchedCols[ridCol];
+    if (given === undefined || given === null || String(given).trim() === '') {
+      rowId = makeRowId();
+      matchedCols[ridCol] = rowId;
+      if (cols.indexOf(ridCol) < 0) cols.push(ridCol);
+    } else {
+      rowId = String(given);
+    }
+  }
+
+  if (targetRow <= maxRows) {
+    const clash = cols.some(c => { const cell = sheet.getRange(targetRow, c); return cell.getFormula() !== '' || cell.getValue() !== ''; });
+    if (clash) return { ok: false, error: 'target row not empty' };
+  }
+
+  return { ok: true, sheet: sheet, targetRow: targetRow, maxRows: maxRows, cols: cols, matchedCols: matchedCols, rowId: rowId, unmatched: unmatched };
+}
+
+function addTrade(ss, body) {
+  const id = body && body.id;
+  if (typeof id !== 'string' || !id.trim()) return { ok: false, error: 'trade needs an id' };
+
+  // Ignore retries of a trade that already landed
+  if (seenId(id)) return { ok: true, dup: true };
+
+  const soldTabStr = String((body && body.soldTab) || '').trim().toLowerCase();
+  if (!TRADE_SOLD_TABS.some(t => t.toLowerCase() === soldTabStr)) return { ok: false, error: 'tab not allowed: ' + body.soldTab };
+  const boughtTabStr = String((body && body.boughtTab) || '').trim().toLowerCase();
+  if (!TRADE_BOUGHT_TABS.some(t => t.toLowerCase() === boughtTabStr)) return { ok: false, error: 'tab not allowed: ' + body.boughtTab };
+
+  const isObjectWithKeys = obj => obj && typeof obj === 'object' && !Array.isArray(obj) && Object.keys(obj).length > 0;
+  if (!isObjectWithKeys(body.soldValues) || !isObjectWithKeys(body.boughtValues)) return { ok: false, error: 'trade needs soldValues and boughtValues' };
+
+  // Plan BOTH rows before writing anything (reads only).
+  const soldPlan = planAddRow(ss, body.soldTab, body.soldValues);
+  if (!soldPlan.ok) return { ok: false, error: soldPlan.error, which: 'sold' };
+  const boughtPlan = planAddRow(ss, body.boughtTab, body.boughtValues);
+  if (!boughtPlan.ok) return { ok: false, error: boughtPlan.error, which: 'bought' };
+
+  // Write sold, then bought. If anything throws, put back every cell we wrote (each was verified empty, so '' restores it exactly).
+  const written = [];
+  try {
+    const plans = [soldPlan, boughtPlan];
+    for (let i = 0; i < plans.length; i++) {
+      const p = plans[i];
+      if (p.targetRow > p.maxRows) p.sheet.insertRowsAfter(p.maxRows, p.targetRow - p.maxRows);
+      for (let j = 0; j < p.cols.length; j++) {
+        const c = p.cols[j];
+        p.sheet.getRange(p.targetRow, c).setValue(p.matchedCols[c]);
+        written.push([p.sheet, p.targetRow, c]);
+      }
+    }
+  } catch (err) {
+    let rolledBack = true;
+    for (let k = written.length - 1; k >= 0; k--) {
+      try { written[k][0].getRange(written[k][1], written[k][2]).setValue(''); } catch (rbErr) { rolledBack = false; }
+    }
+    if (rolledBack) return { ok: false, error: 'trade write failed, nothing was kept: ' + String(err), rolledBack: true };
+    markId(id); // the undo failed too: remember the id so a retry can never add a second pair
+    return { ok: false, error: 'trade partly written, check the Sold and Bought tabs: ' + String(err) + '. Do not retry: this trade will not be added again.', partial: true };
+  }
+
+  markId(id);
+  const res = { ok: true, trade: true, id: id, soldRow: soldPlan.targetRow, boughtRow: boughtPlan.targetRow, unmatchedSold: soldPlan.unmatched, unmatchedBought: boughtPlan.unmatched };
+  if (soldPlan.rowId !== undefined) res.soldRowId = soldPlan.rowId;
+  if (boughtPlan.rowId !== undefined) res.boughtRowId = boughtPlan.rowId;
+  return res;
 }
 
 /* ---------- editing and deleting ONE existing row (new requests use `target` and `changes`, never `tab` and `values`,
@@ -495,6 +615,18 @@ function doPost(e) {
 
     // Undo the latest Edit Log change (also handled before anything that could add a row)
     if (body.action === 'undo') return json(undoRow(SpreadsheetApp.getActiveSpreadsheet(), body));
+
+    // Fill missing Row IDs (also handled before anything that could add a row). The script lock is already held here.
+    // Same rule as the hand-run backfillRowIds: only truly empty Row ID cells on rows with real data, nothing else is written.
+    if (body.action === 'backfill') {
+      const counts = fillEmptyRowIds(SpreadsheetApp.getActiveSpreadsheet(), new Set());
+      const total = Object.keys(counts).reduce((sum, k) => sum + counts[k], 0);
+      return json({ ok: true, total: total, counts: counts });
+    }
+
+    // A trade: one Sold row and one received-device Bought row as ONE request, all or nothing (handled before the plain add path).
+    // The script lock is already held here. A retry of the same id returns {ok:true, dup:true} and adds nothing.
+    if (body.action === 'trade') return json(addTrade(SpreadsheetApp.getActiveSpreadsheet(), body));
 
     // Ignore retries of an entry that already landed
     if (seenId(body.id)) return json({ ok: true, dup: true });
