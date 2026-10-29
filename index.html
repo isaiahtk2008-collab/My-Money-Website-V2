@@ -1361,7 +1361,7 @@ async function fillMissingIds(){
   try{
     const j=await sheetCall({action:'backfill'},'backfill');
     closeOverlay();
-    toast(j.total?`Filled ${j.total} missing ID${j.total===1?'':'s'}`:'Every row already has an ID');
+    toast(j.total?`Filled ${j.total} missing ID${j.total===1?'':'s'}`:'No empty Row IDs found. If a row still shows no ID, check that its tab has a “Row ID” column.');
     if(store.source&&store.source.kind==='google')store.load(store.source).catch(()=>{});
   }catch(e){
     rowShowErr(e);

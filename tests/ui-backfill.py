@@ -70,8 +70,8 @@ with sync_playwright() as p:
     r_empty, r_with, by_row = setup_table(page)
     page.evaluate(f"openDetail('{by_row(r_empty)}')")
     page.locator('button[data-act=idfill]').click()
-    page.locator('#toasts .toast').filter(has_text='Every row already has an ID').wait_for()
-    check('S2: says every row already has an ID', True)
+    page.locator('#toasts .toast').filter(has_text='No empty Row IDs found').wait_for()
+    check('S2: says no empty Row IDs were found (not that every row has one)', True)
     check('S2: no page errors', not errors, str(errors))
     b.close()
 
