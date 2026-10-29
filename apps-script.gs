@@ -1,4 +1,4 @@
-// My Money sheet connector v3: reads AND writes your sheet (adds rows; edits or deletes ONE Expenses row only after re-checking it).
+// My Money sheet connector v3: reads AND writes your sheet (adds rows; edits or deletes ONE row only after re-checking it; deletes only from Expenses and the Sold tabs).
 // HOW TO INSTALL: open your Google Sheet > Extensions > Apps Script. Select ALL the old code, delete it, paste this,
 // press Save. Then Deploy > Manage deployments > pencil icon > Version: New version > Deploy.
 // Keep "Execute as: Me" and "Who has access: Anyone". The /exec link stays the same.
@@ -13,9 +13,13 @@ const ALLOWED_TABS = ['Form Responses - Bought', 'Form Responses - PCs', 'Bought
 // Formula tabs (Master Inventory, PCs, PnA, Summary...) are not listed, so a row there can never be edited or deleted.
 const EDITABLE_TABS = ['Expenses'];
 
-// EDIT ONLY: the six entry tabs. An existing row can be EDITED here (every change is written to the "Edit Log" tab first), but a row can NEVER be deleted.
+// EDIT ONLY: the six entry tabs. An existing row can be EDITED here (every change is written to the "Edit Log" tab first). A row can be deleted only from the three Sold tabs (see SALE_DELETE_TABS), never from a Bought tab.
 // Formula tabs (Master Inventory, PCs, PnA, Summary...) must never be added to this list or to EDITABLE_TABS.
 const EDIT_ONLY_TABS = ['Form Responses - Bought', 'Form Responses - PCs', 'Bought Access - Form', 'Form Responses - Sold', 'Form Responses - Sold PCs', 'Sold Access - Form'];
+
+// DELETE (sale rows): the only entry tabs a row can be deleted from (plus Expenses via EDITABLE_TABS).
+// Bought tabs and formula tabs must never be added here. A sale row is logged in full to the "Edit Log" tab before it is removed.
+const SALE_DELETE_TABS = ['Form Responses - Sold', 'Form Responses - Sold PCs', 'Sold Access - Form'];
 
 // TRADE: the only tabs a `trade` request may write to (one Sold tab and one Bought tab per trade). Never Expenses or any formula tab.
 const TRADE_SOLD_TABS = ['Form Responses - Sold', 'Form Responses - Sold PCs', 'Sold Access - Form'];
@@ -358,10 +362,13 @@ function sameCell(live, want) {
 // A request may carry `rowId`. Then the row is found by its "Row ID" cell (exactly one match, otherwise refuse) and the `row` number is ignored,
 // so rows deleted above it cannot shift the target. The `expect` check below STILL runs on that row, as a second lock.
 // Without `rowId` nothing is different: the `row` number plus `expect`, exactly as before.
-function lockRow(ss, body, allowEditOnly) {
+function lockRow(ss, body, allowEditOnly, allowSaleDelete) {
   const reqTab = String(body.target || '').trim().toLowerCase();
-  // allowEditOnly adds EDIT_ONLY_TABS. Only editRow passes it; deleteRow never does, so those tabs can never be deleted from.
-  const allowed = allowEditOnly === true ? EDITABLE_TABS.concat(EDIT_ONLY_TABS) : EDITABLE_TABS;
+  // allowEditOnly adds EDIT_ONLY_TABS. Only editRow passes it. allowSaleDelete adds SALE_DELETE_TABS. Only deleteRow passes it.
+  // Bought tabs are therefore never allowed for delete (they are in EDIT_ONLY_TABS but not in SALE_DELETE_TABS).
+  let allowed = EDITABLE_TABS;
+  if (allowEditOnly === true) allowed = allowed.concat(EDIT_ONLY_TABS);
+  if (allowSaleDelete === true) allowed = allowed.concat(SALE_DELETE_TABS);
   if (!allowed.some(t => t.toLowerCase() === reqTab)) return { error: 'tab not allowed: ' + body.target };
   const sheet = findSheet(ss, reqTab);
   if (!sheet) return { error: 'no tab: ' + body.target };
@@ -439,11 +446,45 @@ function editRow(ss, body) {
 }
 
 // Removes exactly that one row, and only if it holds no formulas.
-// Never passes allowEditOnly to lockRow, so the six EDIT_ONLY_TABS can never have a row deleted.
+// Allowed tabs: Expenses, and the three Sold tabs (SALE_DELETE_TABS). Never passes allowEditOnly to lockRow, so the three Bought tabs can never have a row deleted.
+// Expenses: deleted as before (no log row). A Sold tab row is also refused if it has a Trade ID (trade sales are fixed by editing or by hand),
+// and its full old row is written to the Edit Log (Action 'delete') BEFORE it is removed. If the log cannot be written, nothing is deleted.
 function deleteRow(ss, body) {
-  const g = lockRow(ss, body);
+  const g = lockRow(ss, body, false, true);
   if (g.error) return { ok: false, error: g.error };
   for (let c = 1; c <= g.lastCol; c++) if (g.sheet.getRange(g.row, c).getFormula() !== '') return { ok: false, error: 'row has formulas' };
+
+  const isSale = SALE_DELETE_TABS.some(t => t.toLowerCase() === String(g.sheet.getName()).trim().toLowerCase());
+  if (!isSale) {
+    g.sheet.deleteRow(g.row);
+    return { ok: true, row: g.row, deleted: true };
+  }
+
+  // Sale row: exactly one Trade ID column, and this row's Trade ID must be empty.
+  const tradeCols = g.headers.map((h, i) => (h === 'tradeid' ? i + 1 : 0)).filter(Boolean);
+  if (tradeCols.length !== 1) return { ok: false, error: 'tab needs exactly one Trade ID column' };
+  if (String(g.sheet.getRange(g.row, tradeCols[0]).getValue()).trim() !== '') return { ok: false, error: 'trade sale: edit it or fix it by hand' };
+
+  let logSheet;
+  try { logSheet = ensureEditLog(ss); } catch (logErr) { return { ok: false, error: 'edit log unavailable' }; }
+
+  // The full old row as {header: value}, so it can be re-created by hand.
+  const rawHeaders = g.sheet.getRange(1, 1, 1, g.lastCol).getValues()[0];
+  const values = g.sheet.getRange(g.row, 1, 1, g.lastCol).getValues()[0];
+  const old = {};
+  for (let i = 0; i < g.lastCol; i++) {
+    let key = String(rawHeaders[i] || '').trim() || 'col ' + (i + 1);
+    if (Object.prototype.hasOwnProperty.call(old, key)) key = key + ' (col ' + (i + 1) + ')';
+    old[key] = values[i];
+  }
+  const ridCols = g.headers.map((h, i) => (h === 'rowid' ? i + 1 : 0)).filter(Boolean);
+  const rowIdValue = ridCols.length === 1 ? g.sheet.getRange(g.row, ridCols[0]).getValue() : g.row;
+
+  try {
+    logSheet.appendRow([new Date(), g.sheet.getName(), rowIdValue, 'ALL COLUMNS (row deleted)', JSON.stringify(old), '', 'delete']);
+  } catch (logErr) {
+    return { ok: false, error: 'edit log write failed' };
+  }
   g.sheet.deleteRow(g.row);
   return { ok: true, row: g.row, deleted: true };
 }
