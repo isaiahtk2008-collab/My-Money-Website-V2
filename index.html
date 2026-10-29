@@ -1152,6 +1152,7 @@ const ICON={
   user:P('<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>'),
   kbd:P('<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>'),
   refresh:P('<path d="M20 11a8 8 0 00-14-4L4 9"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0014 4l2-2"/><path d="M20 20v-5h-5"/>'),
+  idcard:P('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M15 8h2M15 12h2M7 16c0-1.5 1.5-2 2-2s2 .5 2 2M15 16h2"/>'),
   chev:P('<path d="M9 6l6 6-6 6"/>'),
   check:P('<path d="M5 12l5 5 9-10"/>')
 };
@@ -1355,18 +1356,21 @@ function rowErrText(e){
 function rowShowErr(e){const n=$('#ed-msg');const t=rowErrText(e);if(n){n.textContent=t;n.hidden=false}else toast(t)}
 function rowSetBusy(on){rowBusy=on;$$('#overlay button').forEach(b=>{b.disabled=on})}
 /* One tap to fill every empty Row ID (the script only ever fills empty Row ID cells on rows with data; nothing else is written). */
-async function fillMissingIds(){
+async function fillMissingIds(bar){
   if(rowBusy)return;
-  rowSetBusy(true);
+  /* bar: tapped from the toolbar, no popout is open, so only the toolbar button is locked and nothing is closed */
+  if(bar){rowBusy=true;$$('[data-act="idfillbar"]').forEach(b=>{b.disabled=true;b.setAttribute('aria-busy','true')})}
+  else rowSetBusy(true);
   try{
     const j=await sheetCall({action:'backfill'},'backfill');
-    closeOverlay();
+    if(!bar)closeOverlay();
     toast(j.total?`Filled ${j.total} missing ID${j.total===1?'':'s'}`:'No empty Row IDs found. If a row still shows no ID, check that its tab has a “Row ID” column.');
     if(store.source&&store.source.kind==='google')store.load(store.source).catch(()=>{});
   }catch(e){
     rowShowErr(e);
   }finally{
-    rowSetBusy(false);
+    if(bar){$$('[data-act="idfillbar"]').forEach(b=>{b.disabled=false;b.removeAttribute('aria-busy')});rowBusy=false}
+    else rowSetBusy(false);
   }
 }
 /* Keep every screen in step straight away: patch the copy of the sheet the page holds, then quietly re-read the live sheet. */
@@ -2435,6 +2439,7 @@ function setupTop(){
   $('#tools').innerHTML=`<button class="ibtn search" data-act="palette" aria-label="Search">${ICON.search}<span>Search</span><kbd>⌘K</kbd></button>
     <button class="ibtn" data-act="theme" aria-label="Theme: ${S.theme}" title="Theme: ${S.theme}">${ICON[S.theme==='dark'?'moon':S.theme==='light'?'sun':'auto']}</button>
     <button class="ibtn" data-act="privacy" aria-pressed="${S.privacy}" aria-label="Hide amounts" title="Hide amounts (P)">${S.privacy?ICON.eyeoff:ICON.eye}</button>
+    <button class="ibtn" data-act="idfillbar" aria-label="Fill missing IDs" title="Fill missing IDs">${ICON.idcard}</button>
     <button class="ibtn" data-act="refresh" aria-label="Refresh data" title="Refresh data (R)">${ICON.refresh}</button>
     <button class="ibtn" data-act="help" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">${ICON.kbd}</button>`;
   const rb=$('#rangebar');
@@ -2507,6 +2512,7 @@ document.addEventListener('click',e=>{
     case 'rowdelgo':deleteRowGo(d.id);break;
     case 'rowedit':openRowEdit(d.id);break;
     case 'idfill':fillMissingIds();break;
+    case 'idfillbar':fillMissingIds(true);break;
     case 'devedit':openDeviceEdit(d.id);break;
     case 'issuefix':openIssueFix(+d.i);break;
     case 'issuecopy':copyIssueRows(+d.i);break;
