@@ -191,10 +191,12 @@ t('a second edit reuses the existing Edit Log (no second tab, header not duplica
   assert.equal(editLog.grid[2][5], 130);
 });
 
-t('delete on all six edit-only tabs is refused and nothing changes', () => {
+// The three Sold tabs CAN now be deleted from (see tests/sale-row-delete.test.mjs); the three Bought tabs still can never be.
+t('delete on the three Bought edit-only tabs is refused and nothing changes', () => {
   const sheets = makeFixtures();
   const ctx = load(sheets);
   EDIT_ONLY.forEach((tabName, idx) => {
+    if (!['Form Responses - Bought', 'Form Responses - PCs', 'Bought Access - Form'].includes(tabName)) return;
     const sheet = sheets.find(s => s.name === tabName);
     const before = snap(sheet);
     const res = post(ctx, { action: 'delete', target: tabName, rowId: `r${idx}1`, expect: { Model: 'iPhone 12', Price: 100 } });
