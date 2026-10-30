@@ -1891,7 +1891,9 @@ function deviceFootHtml(o){
   const ok=s.state==='ok';
   const delBtn=ok?`<button type="button" class="btn danger" data-act="devdel" data-id="${esc(o.id)}" aria-describedby="de-delnote">Delete</button>`:`<button type="button" class="btn danger" disabled aria-describedby="de-delnote">Delete</button>`;
   const note=ok?'Deletes only the sale. The device goes back to inventory and the purchase stays.':s.state==='unsold'?'Delete purchases directly in Google Sheets':s.state==='trade'?"Trade sales can't be deleted here. Edit it or fix it in Google Sheets":s.state==='noid'?'Run the ID backfill first':"Can't safely match this sale to its sheet row";
-  return `<div class="dfoot">${delBtn}<button type="button" class="btn" data-act="devedit" data-id="${esc(o.id)}">Edit</button></div><p class="hint" id="de-delnote" style="color:var(--muted);margin-top:8px">${esc(note)}</p>`;
+  /* A sold item whose SALE row has no Row ID gets the same one-tap fill as the purchase case above. Every other state is unchanged. */
+  const fillBtn=s.state==='noid'?`<button type="button" class="btn" data-act="idfill" style="margin-top:8px">Fill missing IDs</button>`:'';
+  return `<div class="dfoot">${delBtn}<button type="button" class="btn" data-act="devedit" data-id="${esc(o.id)}">Edit</button></div><p class="hint" id="de-delnote" style="color:var(--muted);margin-top:8px">${esc(note)}</p>${fillBtn}`;
 }
 
 function deFieldHtml(x,i,val){
