@@ -2198,11 +2198,11 @@ const INSIGHT_LIB=[
 /* ---- inventory (10) ---- */
 {id:'in01',run:c=>{const h=c.h,old=c.D.items.filter(i=>!i.sold&&i.age!=null).sort((a,b)=>b.age-a.age)[0];if(!old||old.age<=30)return null;
   return {i:'alert',t:'<b>'+h.esc(old.name)+'</b> has been in stock '+old.age+' days. Consider lowering the price.',act:'open',id:old.id}}},
-{id:'in02',run:c=>{const s=c.st;if(!s||s.stock.length<3||!(s.cost>0))return null;return {i:'spend',t:'<b>'+c.h.mny(s.cost)+'</b> of your cash is sitting in unsold stock.',act:'goto',v:'inventory'}}},
+{id:'in02',run:c=>{const s=c.st;if(!s||s.stock.length<3||!(s.cash>0))return null;return {i:'spend',t:'<b>'+c.h.mny(s.cash)+'</b> of your cash is sitting in unsold stock.',act:'goto',v:'inventory'}}},
 {id:'in03',run:c=>{const s=c.st;if(!s||s.stock.length<4)return null;const old=s.stock.filter(i=>i.age>30);if(old.length<1)return null;
   return {i:'clock',t:'<b>'+old.length+' of '+s.stock.length+'</b> items in stock are older than 30 days.',act:'goto',v:'inventory'}}},
 {id:'in04',run:c=>{const s=c.st;if(!s||!s.buckets||s.buckets.length<4)return null;const b=s.buckets[3];if(!b||!b.items||b.items.length<1)return null;
-  return {i:'alert',t:'<b>'+b.items.length+'</b> items have sat for 61+ days, tying up '+c.h.mny(c.h.sum(b.items,i=>i.buyPrice))+'.',act:'goto',v:'inventory'}}},
+  return {i:'alert',t:'<b>'+b.items.length+'</b> items have sat for 61+ days, tying up '+c.h.mny(c.h.sum(b.items,i=>i.cashSpent!=null?i.cashSpent:i.buyPrice))+'.',act:'goto',v:'inventory'}}},
 {id:'in05',run:c=>{const s=c.st;if(!s||s.stock.length<3)return null;const p=s.stock.filter(i=>i.buyPrice!=null);if(!p.length)return null;const m=p.reduce((a,b)=>a.buyPrice>=b.buyPrice?a:b);
   return {i:'tag',t:'Your priciest unsold item is <b>'+c.h.esc(m.name)+'</b> at '+c.h.mny(m.buyPrice)+'.',act:'open',id:m.id}}},
 {id:'in06',run:c=>{const s=c.st;if(!s)return null;const f=s.stock.filter(i=>i.age!=null&&i.age<=7);if(f.length<1)return null;
