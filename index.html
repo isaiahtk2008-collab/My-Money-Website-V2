@@ -817,6 +817,49 @@ button.iss-btn:hover,button.iss-btn:focus-visible{background:var(--surface2)}
 @media (prefers-reduced-motion:reduce){.dh-arc{animation:none}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 @media print{.rail,.top .tools,.rangebar .chips,.toolbar{display:none}.card{box-shadow:none;break-inside:avoid}.app{display:block}.top{position:static}}
+/* ===== Mobile design A: Material 3 Expressive (additive, mobile-only) ===== */
+@media (max-width:720px){
+  body{font-family:"Google Sans","Google Sans Text",var(--font),system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
+  .app{padding-bottom:calc(100px + env(safe-area-inset-bottom,0px))}
+  header.top{gap:10px;padding:12px 0 8px;background:transparent}
+  .top .ttl{min-width:0}
+  .top .ttl h1#ttl{font-size:22px;font-weight:700;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.2px}
+  .top .ttl p.sub#sub{font-size:12.5px;font-weight:500;color:var(--muted);margin:2px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .top .tools#tools{display:flex;align-items:center;gap:8px;overflow-x:auto;overscroll-behavior-x:contain;margin-inline:-16px;padding:2px 16px 6px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .top .tools#tools::-webkit-scrollbar{display:none}
+  .top .tools#tools button{flex:0 0 44px;width:44px;height:44px;min-width:44px;min-height:44px;border-radius:50%;background:var(--surface2);border:1px solid color-mix(in srgb,var(--line) 60%,transparent);color:var(--ink);display:inline-flex;align-items:center;justify-content:center;padding:0;transition:background .15s ease,transform .1s ease}
+  .top .tools#tools button:active{background:var(--accent-soft);transform:scale(.95)}
+  #syncpill{flex-shrink:0;height:36px;border-radius:18px;padding:0 14px;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--line)}
+  .rangebar#rangebar{display:flex;flex-direction:column;gap:6px;margin-top:2px}
+  .rangebar#rangebar .chips{display:flex;align-items:center;gap:8px;overflow-x:auto;overscroll-behavior-x:contain;margin:0;padding:2px 0 4px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .rangebar#rangebar .chips::-webkit-scrollbar{display:none}
+  .rangebar#rangebar button.chip-b{flex:0 0 auto;min-height:36px;height:36px;padding:0 16px;border-radius:18px;font-size:13px;font-weight:600;border:1px solid color-mix(in srgb,var(--line) 80%,transparent);background:var(--surface);color:var(--ink);display:inline-flex;align-items:center;justify-content:center}
+  .rangebar#rangebar button.chip-b[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  .card{border-radius:28px;background:var(--surface);border:1px solid color-mix(in srgb,var(--line) 75%,transparent);box-shadow:none;padding:16px}
+  .grid.g4{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .grid.g4 .card{padding:14px 12px;border-radius:22px;display:flex;flex-direction:column;justify-content:space-between}
+  .grid.g4 .kpi .lab{font-size:11.5px;font-weight:600;line-height:1.3;letter-spacing:.1px}
+  .grid.g4 .kpi .val{font-size:22px;font-weight:800;line-height:1.2;letter-spacing:-.4px;margin:4px 0 6px}
+  .grid.g4 .kpi .foot{flex-wrap:wrap;gap:4px;align-items:center}
+  .grid.g4 .kpi .foot .chip{padding:2px 6px;font-size:10.5px;border-radius:8px}
+  .grid.g4 .kpi .foot .sub{font-size:10.5px}
+  .card>header h3{font-size:15px;font-weight:700;letter-spacing:-.1px}
+  .seg button[aria-pressed]{min-height:40px;font-size:13px;font-weight:600}
+  .lg-fab{width:56px;height:56px;border-radius:18px;background:var(--accent);color:var(--accent-ink);bottom:calc(88px + env(safe-area-inset-bottom,0px));right:max(16px,env(safe-area-inset-right,0px));box-shadow:0 4px 16px color-mix(in srgb,var(--ink) 18%,transparent)}
+  nav.rail#rail{left:max(12px,env(safe-area-inset-left,0px));right:max(12px,env(safe-area-inset-right,0px));bottom:calc(10px + env(safe-area-inset-bottom,0px));width:auto;height:66px;padding:0 8px;align-items:center;justify-content:space-around;border-radius:33px;background:color-mix(in srgb,var(--surface2) 94%,var(--bg));border:1px solid color-mix(in srgb,var(--line) 70%,transparent);box-shadow:0 8px 24px color-mix(in srgb,var(--ink) 12%,transparent);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);z-index:70}
+  nav.rail#rail button.nav{flex:1 1 0;min-width:44px;min-height:48px;height:48px;gap:2px;border-radius:24px;background:transparent;color:var(--muted);padding:2px 4px;transition:color .15s ease,background .15s ease}
+  nav.rail#rail button.nav span{font-size:11px;font-weight:600;letter-spacing:0;line-height:1.1}
+  nav.rail#rail button.nav svg{width:20px;height:20px}
+  nav.rail#rail button.nav[aria-current="page"]{background:var(--accent-soft);color:var(--accent)}
+  nav.rail#rail button.nav[aria-current="page"] span{font-weight:700;color:var(--accent)}
+  /* header grid: title row, then [$ settings][scrolling tools][sync pill] */
+  .top .row1{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:6px 8px}
+  .top .row1 .ttl{grid-column:1/-1;min-width:0}
+  .top .row1 #secbtn{grid-column:1;grid-row:2;flex:none}
+  .top .row1 .tools#tools{grid-column:2;grid-row:2;min-width:0;margin:0;max-width:none;padding-inline:0}
+  .top .row1 #syncpill{grid-column:3;grid-row:2;margin-left:0}
+  .top .row1 #secbtn{width:44px;height:44px;min-width:44px;padding:0;border-radius:50%;background:var(--surface2);color:var(--ink);border:1px solid color-mix(in srgb,var(--line) 60%,transparent)}
+}
 </style>
 <div class="app" id="app">
   <nav class="rail" id="rail" aria-label="Main"></nav>
