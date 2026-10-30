@@ -1513,6 +1513,111 @@ async function saveRowEdit(id){
 }
 document.addEventListener('submit',e=>{const f=e.target&&e.target.closest&&e.target.closest('[data-rowform]');if(!f)return;e.preventDefault();saveRowEdit(f.dataset.rowform)});
 
+/* ================= DELETE ONE SALE ROW FROM A DEVICE (Sold tabs only) =================
+   Own section on purpose: the edit section below is scanned by a test that forbids any delete call in it. Only the sale row can be targeted; the Bought tabs never can. */
+/* DELETE A SALE (device drawer). Removes ONLY the sale row from a Sold tab; the purchase row is never a target. The device then shows as in inventory again.
+   dsPlan = can this device's sale be deleted safely; dsRequest = the one request that is sent; dsPatch = the loaded data after the delete; dsErrText = refusal text. All pure. */
+function dsPlan(item, raw){
+  if(!item||(item.kind!=='Phone'&&item.kind!=='PC'))return {state:'nomatch'};
+  if(item.sold!==true)return {state:'unsold'};
+  const p=deSalePlan(item,raw);
+  if(p.state!=='ok')return {state:p.state};
+  const tk=deRowKey(p.row,'Trade ID');
+  const rowTrade=tk!==undefined&&p.row[tk]!=null&&String(p.row[tk]).trim()!=='';
+  if(item.tradeId||item.isTradeSale||rowTrade)return {state:'trade'};
+  const expect=deExpect(p.form,p.row,[]);
+  if(!expect)return {state:'noexpect'};
+  return {state:'ok',tab:p.tab,rowId:p.rowId,tabKey:p.tabKey,row:p.row,form:p.form,expect};
+}
+
+function dsRequest(plan){
+  if(!plan||plan.state!=='ok'||!DE_SALE_TABS.includes(plan.tab)||!plan.rowId||!plan.expect)return null;
+  return {action:'delete',target:plan.tab,rowId:String(plan.rowId),expect:plan.expect};
+}
+
+function dsPatch(raw, item, plan){
+  if(!raw||!plan||!raw[plan.tabKey]||!Array.isArray(raw[plan.tabKey].rows))return raw;
+  const targetId=String(plan.rowId).trim();
+  let matchIdx=-1,matches=0;
+  const sRows=raw[plan.tabKey].rows;
+  for(let i=0;i<sRows.length;i++){
+    const k=deRowKey(sRows[i],'Row ID');
+    if(k!==undefined&&sRows[i][k]!=null&&String(sRows[i][k]).trim()===targetId){
+      matches++;
+      matchIdx=i;
+    }
+  }
+  if(matches!==1)return raw;
+  const nextSaleRows=sRows.slice(0,matchIdx).concat(sRows.slice(matchIdx+1));
+  let nextRaw=Object.assign({},raw,{[plan.tabKey]:Object.assign({},raw[plan.tabKey],{rows:nextSaleRows})});
+  const invKey=item&&item.kind==='Phone'?'Phones':'PCs';
+  const invTab=raw[invKey];
+  const idx=item?item.row-2:-1;
+  if(invTab&&Array.isArray(invTab.rows)&&idx>=0&&idx<invTab.rows.length){
+    const r=invTab.rows[idx];
+    const sk=deRowKey(r,'Status');
+    if(sk!==undefined&&r[sk]!=null&&String(r[sk]).trim().toUpperCase()==='SOLD'){
+      const copy=Object.assign({},r);
+      copy[sk]='IN INVENTORY';
+      const cols=['Sale Price','Sale Date','Sold To','Profit','ROI%','ROI','Days Held','Clicks on Listing','Asking Price'];
+      for(let i=0;i<cols.length;i++){
+        const ck=deRowKey(copy,cols[i]);
+        if(ck!==undefined)copy[ck]=null;
+      }
+      const nextInvRows=invTab.rows.slice();
+      nextInvRows[idx]=copy;
+      nextRaw=Object.assign({},nextRaw,{[invKey]:Object.assign({},nextRaw[invKey],{rows:nextInvRows})});
+    }
+  }
+  return nextRaw;
+}
+
+function dsErrText(e){
+  const m=(e&&e.message)||'';
+  if(m==='trade sale: edit it or fix it by hand')return "This is a trade sale, so it can't be deleted here. Edit it or fix it in Google Sheets. Nothing was changed.";
+  if(m==='edit log unavailable'||m==='edit log write failed')return 'Your sheet could not write its safety log, so nothing was deleted.';
+  if(m==='tab needs exactly one Trade ID column')return 'The sale tab needs exactly one Trade ID column, so the delete was refused. Nothing was changed.';
+  if(/tab not allowed/.test(m))return 'Your entry script needs the newest version before it can delete sales. Paste the updated script into Apps Script and redeploy it. Nothing was changed.';
+  return rowErrText(e);
+}
+
+function openDeviceSaleDelete(id){
+  const rec=store.D.byId.get(id);if(!rec||rec.type!=='item')return;const o=rec.o;
+  const s=dsPlan(o,store.base||store.raw);if(s.state!=='ok')return;
+  const bk=deRowKey(s.row,"Buyer's Name")||deRowKey(s.row,'Sold to');
+  const buyer=o.buyer||(bk&&s.row[bk])||'(no buyer recorded)';
+  openOverlay(`<div class="palbox" style="padding:20px" role="alertdialog" aria-modal="true" aria-label="Delete this sale">
+    <div class="dh"><h2>Delete this sale?</h2><button type="button" class="ibtn" data-act="close" aria-label="Close">${ICON.x}</button></div>
+    <p>This removes only the sale from your Google Sheet. The device goes back to inventory. The purchase is not deleted.</p>
+    <p class="hint" style="color:var(--muted)">${esc(o.name)} · sold for ${mny(o.sellPrice)} to ${esc(buyer)}<br>${esc(s.tab)} · ID ${esc(s.rowId)}</p>
+    <p class="ed-msg" id="ed-msg" role="alert" hidden></p>
+    <div class="ed-actions"><button type="button" class="btn sec" data-act="close" data-focus>Cancel</button><button type="button" class="btn danger" data-act="devdelgo" data-id="${esc(id)}">Delete sale</button></div></div>`,'pal');
+}
+
+async function deleteDeviceSaleGo(id){
+  if(rowBusy)return;
+  const rec=store.D.byId.get(id);
+  const showErr=t=>{const n=$('#ed-msg');if(n){n.textContent=t;n.hidden=false}else toast(t)};
+  const gone='Could not match this sale any more. Press Refresh and try again. Nothing was changed.';
+  if(!rec||rec.type!=='item'){showErr(gone);return}
+  const plan=dsPlan(rec.o,store.base||store.raw);
+  if(plan.state!=='ok'){showErr(gone);return}
+  const req=dsRequest(plan);
+  if(!req){showErr(gone);return}
+  rowSetBusy(true);
+  try{
+    await sheetCall(req);
+    try{store.set(dsPatch(store.base||store.raw,rec.o,plan))}catch(_){}   /* the sheet has already deleted the row; the re-read below fixes the screen even if this local patch fails */
+    closeOverlay();
+    toast('Sale deleted. The device is back in inventory');
+    syncSoon();
+  }catch(e){
+    showErr(dsErrText(e));
+  }finally{
+    rowSetBusy(false);
+  }
+}
+
 /* ================= EDIT ONE PURCHASE ROW FROM A DEVICE (Phones and PCs) =================
    Writes go only to the device's own purchase row in "Form Responses - Bought" / "Form Responses - PCs", found by its Row ID.
    Never PnA, Master Inventory, PCs or Summary (formula tabs). Only fields the person touched AND changed are sent.
@@ -1739,7 +1844,11 @@ function deviceFootHtml(o){
   const p=dePlan(o,store.base||store.raw);
   if(p.state==='nomatch') return `<div class="dfoot"><p class="hint" style="color:var(--muted)">Can't safely match this item to its sheet row</p></div>`;
   if(p.state==='noid') return `<div class="dfoot"><p class="hint" style="color:var(--muted)">Run the ID backfill first</p><button type="button" class="btn" data-act="idfill">Fill missing IDs</button></div>`;
-  return `<div class="dfoot"><button type="button" class="btn danger" disabled aria-describedby="de-delnote">Delete</button><button type="button" class="btn" data-act="devedit" data-id="${esc(o.id)}">Edit</button></div><p class="hint" id="de-delnote" style="color:var(--muted);margin-top:8px">Delete purchases and sales directly in Google Sheets for now</p>`;
+  const s=dsPlan(o,store.base||store.raw);
+  const ok=s.state==='ok';
+  const delBtn=ok?`<button type="button" class="btn danger" data-act="devdel" data-id="${esc(o.id)}" aria-describedby="de-delnote">Delete</button>`:`<button type="button" class="btn danger" disabled aria-describedby="de-delnote">Delete</button>`;
+  const note=ok?'Deletes only the sale. The device goes back to inventory and the purchase stays.':s.state==='unsold'?'Delete purchases directly in Google Sheets':s.state==='trade'?"Trade sales can't be deleted here. Edit it or fix it in Google Sheets":s.state==='noid'?'Run the ID backfill first':"Can't safely match this sale to its sheet row";
+  return `<div class="dfoot">${delBtn}<button type="button" class="btn" data-act="devedit" data-id="${esc(o.id)}">Edit</button></div><p class="hint" id="de-delnote" style="color:var(--muted);margin-top:8px">${esc(note)}</p>`;
 }
 
 function deFieldHtml(x,i,val){
@@ -2576,6 +2685,8 @@ document.addEventListener('click',e=>{
     case 'rowedit':openRowEdit(d.id);break;
     case 'idfill':fillMissingIds();break;
     case 'devedit':openDeviceEdit(d.id);break;
+    case 'devdel':openDeviceSaleDelete(d.id);break;
+    case 'devdelgo':deleteDeviceSaleGo(d.id);break;
     case 'issuefix':openIssueFix(+d.i);break;
     case 'issuecopy':copyIssueRows(+d.i);break;
     case 'copysnap':copyText(JSON.stringify(store.base||store.raw),'Snapshot copied');break;
