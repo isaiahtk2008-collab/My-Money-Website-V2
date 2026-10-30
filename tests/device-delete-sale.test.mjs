@@ -381,3 +381,27 @@ test('SAFETY SCAN: the delete section has exactly one send, sends the plan reque
   assert.ok(html.includes("case 'devdel':openDeviceSaleDelete(d.id);break;"));
   assert.ok(html.includes("case 'devdelgo':deleteDeviceSaleGo(d.id);break;"));
 });
+
+test('footer: a sold device whose SALE row has no Row ID gets a Fill missing IDs button; every other case does not', () => {
+  // sale row without a Row ID, purchase row has one
+  const noSaleId = fixtures(); noSaleId.SoldPhones.rows[0]['Row ID'] = '';
+  const item = soldItem(noSaleId); item.id = 'i0';
+  drawer(noSaleId, item);
+  const f = run('deviceFootHtml(item)');
+  assert.match(f, /data-act="idfill"/);
+  assert.match(f, /Fill missing IDs/);
+  assert.match(f, /Run the ID backfill first/);
+  assert.match(f, /danger" disabled/, 'Delete stays disabled until the ID exists');
+  assert.ok(!/data-act="devdel"/.test(f));
+  assert.match(f, /data-act="devedit"/, 'Edit is still offered');
+
+  // fully matched sold device, unsold device and trade sale: no fill button
+  const good = fixtures();
+  const sold = soldItem(good); sold.id = 'i0'; drawer(good, sold);
+  assert.ok(!/idfill/.test(run('deviceFootHtml(item)')));
+  const pixel = soldItem(good, 'Pixel 6'); pixel.id = 'i1'; drawer(good, pixel);
+  assert.ok(!/idfill/.test(run('deviceFootHtml(item)')));
+  const tr = fixtures(); tr.SoldPhones.rows[0]['Trade ID'] = 'T-9';
+  const trItem = soldItem(tr); trItem.id = 'i0'; drawer(tr, trItem);
+  assert.ok(!/idfill/.test(run('deviceFootHtml(item)')));
+});
