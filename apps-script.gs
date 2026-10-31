@@ -7,15 +7,15 @@ const SECRET = ''; // optional: a word here AND the same word in My Money > Log 
 
 // WRITE: these are the ONLY tabs entries can be added to (matched ignoring case and spaces).
 // Summary, Master Inventory, PCs, PnA and the other formula tabs are not listed, so they can never be touched.
-const ALLOWED_TABS = ['Form Responses - Bought', 'Form Responses - PCs', 'Bought Access - Form', 'Form Responses - Sold', 'Form Responses - Sold PCs', 'Sold Access - Form', 'Expenses', 'Investment Tracking Sheet', 'Loans', 'Deposits'];
+const ALLOWED_TABS = ['Form Responses - Bought', 'Form Responses - PCs', 'Bought Access - Form', 'Form Responses - Sold', 'Form Responses - Sold PCs', 'Sold Access - Form', 'Expenses', 'Investment Tracking Sheet', 'Owed'];
 
 // EDIT / DELETE: the ONLY tabs where an existing row can be changed or removed (matched ignoring case and spaces).
 // Formula tabs (Master Inventory, PCs, PnA, Summary...) are not listed, so a row there can never be edited or deleted.
 const EDITABLE_TABS = ['Expenses'];
 
-// EDIT ONLY: the six entry tabs plus the Loans and Deposits tabs. An existing row can be EDITED here (every change is written to the "Edit Log" tab first). A row can be deleted only from the three Sold tabs (see SALE_DELETE_TABS), never from a Bought, Loans or Deposits tab.
+// EDIT ONLY: the six entry tabs plus the Owed tab. An existing row can be EDITED here (every change is written to the "Edit Log" tab first). A row can be deleted only from the three Sold tabs (see SALE_DELETE_TABS), never from a Bought or Owed tab.
 // Formula tabs (Master Inventory, PCs, PnA, Summary...) must never be added to this list or to EDITABLE_TABS.
-const EDIT_ONLY_TABS = ['Form Responses - Bought', 'Form Responses - PCs', 'Bought Access - Form', 'Form Responses - Sold', 'Form Responses - Sold PCs', 'Sold Access - Form', 'Loans', 'Deposits'];
+const EDIT_ONLY_TABS = ['Form Responses - Bought', 'Form Responses - PCs', 'Bought Access - Form', 'Form Responses - Sold', 'Form Responses - Sold PCs', 'Sold Access - Form', 'Owed'];
 
 // DELETE (sale rows): the only entry tabs a row can be deleted from (plus Expenses via EDITABLE_TABS).
 // Bought tabs and formula tabs must never be added here. A sale row is logged in full to the "Edit Log" tab before it is removed.
@@ -44,9 +44,8 @@ const READ_TABS = {
   SoldPhones:   { tab: 'Form Responses - Sold',     keys: [] },
   SoldPCs:      { tab: 'Form Responses - Sold PCs', keys: [] },
   SoldAccess:   { tab: 'Sold Access - Form',        keys: [] },
-  // Loans and Deposits: you create these two tabs by hand (the script never creates them). If a tab is missing it is reported as missing and the website simply skips it.
-  Loans:        { tab: 'Loans',                     keys: [] },
-  Deposits:     { tab: 'Deposits',                  keys: [] }
+  // Owed (loans and deposits, told apart by its Type column): you create this tab by hand (the script never creates it). If it is missing it is reported as missing and the website simply skips it.
+  Owed:         { tab: 'Owed',                      keys: [] }
 };
 
 // Every reply is JSON. `status` is added alongside the existing `ok` flag so older and newer callers both work.

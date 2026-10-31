@@ -1,7 +1,7 @@
 # Run with: python3 tests/ui-owed.py        (needs: pip install playwright && playwright install chromium)
-# Drives the real page in Chromium with a fake entry script (never touches Google). Proves the Owed screen (Loans and Deposits):
+# Drives the real page in Chromium with a fake entry script (never touches Google). Proves the Owed screen (Loans and Deposits, ONE sheet tab named Owed):
 # the empty state before the two tabs exist, the numbers and ordering, safe escaping of names, every update request (only edit, only
-# Loans or Deposits, never delete), refusals, no-op saves, the Add buttons, that the other screens still load, and the phone-width nav bar.
+# Owed, never delete), refusals, no-op saves, the Add buttons, that the other screens still load, and the phone-width nav bar.
 import datetime, json, pathlib, sys
 from playwright.sync_api import sync_playwright
 
@@ -19,20 +19,22 @@ def day(n):
     return (datetime.date.today() + datetime.timedelta(days=n)).isoformat()
 
 def sample_raw_js():
-    loans = [
-        {'Timestamp': day(-30), 'Row ID': 'L1', 'Borrower': 'Sam', 'Phone / Email': None, 'Item / Device': 'ThinkPad T480', 'Amount Loaned': 200, 'Amount Repaid': None, 'Date Loaned': day(-30), 'Return By': day(-5), 'Status': None, 'Date Closed': None, 'Notes': None, '_row': 2},
-        {'Timestamp': day(-3), 'Row ID': 'L2', 'Borrower': 'Alex', 'Phone / Email': None, 'Item / Device': None, 'Amount Loaned': 100, 'Amount Repaid': 40, 'Date Loaned': day(-3), 'Return By': day(10), 'Status': 'Out', 'Date Closed': None, 'Notes': None, '_row': 3},
-        {'Timestamp': day(-60), 'Row ID': 'L3', 'Borrower': 'Casey', 'Phone / Email': None, 'Item / Device': 'Mouse', 'Amount Loaned': 30, 'Amount Repaid': 30, 'Date Loaned': day(-60), 'Return By': day(-40), 'Status': 'Returned', 'Date Closed': day(-41), 'Notes': None, '_row': 4},
-        {'Timestamp': day(-1), 'Row ID': 'L4', 'Borrower': '<img src=x onerror=window.__xss=1>', 'Phone / Email': None, 'Item / Device': None, 'Amount Loaned': 10, 'Amount Repaid': None, 'Date Loaned': day(-1), 'Return By': None, 'Status': None, 'Date Closed': None, 'Notes': None, '_row': 5},
-        {'Timestamp': day(-2), 'Row ID': None, 'Borrower': 'NoIdPerson', 'Phone / Email': None, 'Item / Device': None, 'Amount Loaned': 5, 'Amount Repaid': None, 'Date Loaned': day(-2), 'Return By': day(3), 'Status': None, 'Date Closed': None, 'Notes': None, '_row': 6},
-        {'Timestamp': None, 'Row ID': None, 'Borrower': None, 'Amount Loaned': None, '_row': 7},
+    def row(n, rid, typ, person, item, total, paid, out, due, status=None, closed=None):
+        return {'Timestamp': out, 'Row ID': rid, 'Type': typ, 'Person': person, 'Phone / Email': None, 'Item / Device': item, 'Total Amount': total,
+                'Amount Paid': paid, 'Date Out': out, 'Due Date': due, 'Status': status, 'Date Closed': closed, 'Notes': None, '_row': n}
+    rows = [
+        row(2, 'L1', 'Loan', 'Sam', 'ThinkPad T480', 200, None, day(-30), day(-5)),
+        row(3, 'L2', 'Loan', 'Alex', None, 100, 40, day(-3), day(10), 'Out'),
+        row(4, 'L3', 'Loan', 'Casey', 'Mouse', 30, 30, day(-60), day(-40), 'Returned', day(-41)),
+        row(5, 'L4', 'Loan', '<img src=x onerror=window.__xss=1>', None, 10, None, day(-1), None),
+        row(6, None, 'Loan', 'NoIdPerson', None, 5, None, day(-2), day(3)),
+        {'Timestamp': None, 'Row ID': None, 'Type': None, 'Person': None, 'Total Amount': None, '_row': 7},   # empty spare row
+        row(8, 'D1', 'Deposit', 'Jordan', 'Surface Laptop 4', 900, 200, day(-4), day(2)),
+        row(9, 'D2', 'Deposit', 'Riley', 'Pixel 9 Pro', 700, 100, day(-20), day(-2), 'Waiting'),
+        row(10, 'D3', 'Deposit', 'Morgan', 'MacBook Air', 800, 150, day(-50), day(-30), 'Picked Up', day(-31)),
+        row(11, 'X1', None, 'Mystery', 'Unknown thing', 20, None, day(-5), None),   # has a name but no Type: not shown, but counted in a note
     ]
-    deps = [
-        {'Timestamp': day(-4), 'Row ID': 'D1', 'Customer': 'Jordan', 'Phone / Email': None, 'Device': 'Surface Laptop 4', 'Total Price': 900, 'Deposit Paid': 200, 'Date Deposit Taken': day(-4), 'Pickup By': day(2), 'Status': None, 'Date Closed': None, 'Notes': None, '_row': 2},
-        {'Timestamp': day(-20), 'Row ID': 'D2', 'Customer': 'Riley', 'Phone / Email': None, 'Device': 'Pixel 9 Pro', 'Total Price': 700, 'Deposit Paid': 100, 'Date Deposit Taken': day(-20), 'Pickup By': day(-2), 'Status': 'Waiting', 'Date Closed': None, 'Notes': None, '_row': 3},
-        {'Timestamp': day(-50), 'Row ID': 'D3', 'Customer': 'Morgan', 'Phone / Email': None, 'Device': 'MacBook Air', 'Total Price': 800, 'Deposit Paid': 150, 'Date Deposit Taken': day(-50), 'Pickup By': day(-30), 'Status': 'Picked Up', 'Date Closed': day(-31), 'Notes': None, '_row': 4},
-    ]
-    return json.dumps({'Loans': {'sheet': 'Loans', 'headers': [], 'rows': loans}, 'Deposits': {'sheet': 'Deposits', 'headers': [], 'rows': deps}})
+    return json.dumps({'Owed': {'sheet': 'Owed', 'headers': [], 'rows': rows}})
 
 def run(mode_holder, p, width=1100, height=800):
     b = p.chromium.launch()
@@ -81,7 +83,7 @@ with sync_playwright() as p:
     # ---- empty state: the two tabs do not exist yet (embedded snapshot) ----
     page.evaluate("go('owed')")
     txt = page.locator('#view').inner_text()
-    check('empty state explains the two tabs to add', 'Loans' in txt and 'Deposits' in txt and 'Row ID' in txt and 'Pickup By' in txt and 'Return By' in txt)
+    check('empty state explains the one tab to add and its header row', 'Owed' in txt and 'Row ID' in txt and 'Type' in txt and 'Due Date' in txt and 'Total Amount' in txt)
     check('empty state has no Add or Update buttons and no errors', page.locator('[data-owed-add],[data-owed-edit]').count() == 0 and not errors, str(errors))
 
     # ---- numbers, ordering, escaping ----
@@ -102,6 +104,7 @@ with sync_playwright() as p:
     check('a row without a Row ID has no Update button and says so', 'Needs a Row ID' in body and page.locator('[data-owed-edit=loan]').count() == 3)
     check('amounts never show a doubled dollar sign', '$$' not in body, body)
     check('the blank spare row is ignored', 'Borrower' not in body.replace('Add loan', ''))
+    check('a row with a name but no Type is not listed and is explained in a note', 'Mystery' not in body and '1 row in the Owed tab has a name but no Type' in body, body)
     page.screenshot(path=str(SHOTS / 'owed-desktop.png'), full_page=True)
 
     # ---- update a loan: part repayment ----
@@ -110,9 +113,9 @@ with sync_playwright() as p:
     page.fill('#owed-pay', '25'); page.locator('#overlay button[type=submit]').click()
     page.wait_for_function("document.querySelectorAll('#overlay *').length===0")
     req = posts[-1]
-    check('repayment request is an edit on Loans only, by Row ID', req['action'] == 'edit' and req['target'] == 'Loans' and req['rowId'] == 'L2', str(req))
-    check('only Amount Repaid changes (40 + 25 = 65)', req['changes'] == {'Amount Repaid': 65}, str(req))
-    check('the safety check carries Row ID, name, loaned, repaid and status', req['expect'] == {'Row ID': 'L2', 'Borrower': 'Alex', 'Amount Loaned': 100, 'Amount Repaid': 40, 'Status': 'Out'}, str(req['expect']))
+    check('repayment request is an edit on Owed only, by Row ID', req['action'] == 'edit' and req['target'] == 'Owed' and req['rowId'] == 'L2', str(req))
+    check('only Amount Paid changes (40 + 25 = 65)', req['changes'] == {'Amount Paid': 65}, str(req))
+    check('the safety check carries Row ID, Type, name, total, paid and status', req['expect'] == {'Row ID': 'L2', 'Type': 'Loan', 'Person': 'Alex', 'Total Amount': 100, 'Amount Paid': 40, 'Status': 'Out'}, str(req['expect']))
     check('the screen shows the new balance immediately (35 left on Alex)', '35' in page.locator('#view').inner_text() and page.evaluate("owedModel(store.base||store.raw).loans.find(x=>x.id==='L2').owed") == 35)
 
     # ---- repay in full: auto Returned + Date Closed ----
@@ -120,7 +123,7 @@ with sync_playwright() as p:
     page.fill('#owed-pay', '200'); page.locator('#overlay button[type=submit]').click()
     page.wait_for_function("document.querySelectorAll('#overlay *').length===0")
     req = posts[-1]
-    check('full repayment marks the loan Returned and stamps today as Date Closed', req['changes'] == {'Amount Repaid': 200, 'Status': 'Returned', 'Date Closed': {'$date': day(0)}}, str(req['changes']))
+    check('full repayment marks the loan Returned and stamps today as Date Closed', req['changes'] == {'Amount Paid': 200, 'Status': 'Returned', 'Date Closed': {'$date': day(0)}}, str(req['changes']))
     check('the loan moves to Closed and the totals drop', page.evaluate("owedModel(store.base||store.raw).totals.owedToMe") == 50 and 'Closed (2)' in page.locator('#view').inner_text())
 
     # ---- no-op and bad input send nothing ----
@@ -136,11 +139,11 @@ with sync_playwright() as p:
 
     # ---- row changed in the sheet: refused, screen untouched ----
     mode['reply'] = {'ok': False, 'error': 'row changed'}
-    before = page.evaluate("JSON.stringify((store.base||store.raw).Loans.rows)")
+    before = page.evaluate("JSON.stringify((store.base||store.raw).Owed.rows)")
     page.locator('[data-owed-edit=loan][data-oid=L2]').click()
     page.fill('#owed-pay', '5'); page.locator('#overlay button[type=submit]').click()
     page.wait_for_selector('#ed-msg:not([hidden])')
-    check('a changed row is refused with a clear message and nothing changes locally', 'changed' in page.locator('#ed-msg').inner_text() and page.evaluate("JSON.stringify((store.base||store.raw).Loans.rows)") == before)
+    check('a changed row is refused with a clear message and nothing changes locally', 'changed' in page.locator('#ed-msg').inner_text() and page.evaluate("JSON.stringify((store.base||store.raw).Owed.rows)") == before)
     page.keyboard.press('Escape')
     mode['reply'] = {'ok': True, 'row': 0}
 
@@ -158,27 +161,50 @@ with sync_playwright() as p:
     page.select_option('#owed-status', 'Picked Up'); page.locator('#overlay button[type=submit]').click()
     page.wait_for_function("document.querySelectorAll('#overlay *').length===0")
     req = posts[-1]
-    check('deposit pick-up is an edit on Deposits only with Status and Date Closed', req['action'] == 'edit' and req['target'] == 'Deposits' and req['rowId'] == 'D1' and req['changes'] == {'Status': 'Picked Up', 'Date Closed': {'$date': day(0)}}, str(req))
-    check('the deposit guard carries Row ID, customer, total, paid', req['expect'] == {'Row ID': 'D1', 'Customer': 'Jordan', 'Total Price': 900, 'Deposit Paid': 200}, str(req['expect']))
+    check('deposit pick-up is an edit on Owed only with Status and Date Closed', req['action'] == 'edit' and req['target'] == 'Owed' and req['rowId'] == 'D1' and req['changes'] == {'Status': 'Picked Up', 'Date Closed': {'$date': day(0)}}, str(req))
+    check('the deposit guard carries Row ID, Type, name, total, paid', req['expect'] == {'Row ID': 'D1', 'Type': 'Deposit', 'Person': 'Jordan', 'Total Amount': 900, 'Amount Paid': 200}, str(req['expect']))
     page.locator('[data-owed-edit=dep][data-oid=D2]').click()
     page.fill('#owed-pay', '50'); page.fill('#owed-date', day(7)); page.locator('#overlay button[type=submit]').click()
     page.wait_for_function("document.querySelectorAll('#overlay *').length===0")
     req = posts[-1]
-    check('extra payment adds to Deposit Paid and a new pick-up date is sent as a date', req['changes'] == {'Deposit Paid': 150, 'Pickup By': {'$date': day(7)}}, str(req['changes']))
+    check('extra payment adds to Amount Paid and a new pick-up date is sent as a Due Date', req['changes'] == {'Amount Paid': 150, 'Due Date': {'$date': day(7)}}, str(req['changes']))
 
     # ---- the Add buttons open the normal Log forms ----
     page.locator('#view [data-lg=open][data-id=loan]').click()
     labs = ' '.join(page.locator('#overlay label, #overlay .lab, #overlay h2, #overlay legend').all_inner_texts())
     check('Add loan opens the Loan form with its fields', all(x in labs for x in ['Borrower', 'Amount Loaned', 'Date Loaned', 'Return By']), labs)
+    check('the Loan form starts with Type set to Loan and no other Type offered', page.locator('#overlay [data-k=Type][aria-pressed=true]').count() == 1 and page.locator('#overlay [data-k=Type]').count() == 1 and page.locator('#overlay [data-k=Type]').inner_text() == 'Loan')
     page.keyboard.press('Escape')
     page.locator('#view [data-lg=open][data-id=dep]').click()
     labs = ' '.join(page.locator('#overlay label, #overlay .lab, #overlay h2, #overlay legend').all_inner_texts())
     check('Add deposit opens the Deposit form with its fields', all(x in labs for x in ['Customer', 'Total Price', 'Deposit Paid', 'Pickup By']), labs)
+    check('the Deposit form starts with Type set to Deposit', page.locator('#overlay [data-k=Type][aria-pressed=true]').inner_text() == 'Deposit')
     page.keyboard.press('Escape')
 
     # ---- safety across everything above ----
     check('no request ever deletes, trades, undoes or adds a row from the Owed screen', all(r.get('action') == 'edit' for r in posts) and len(posts) >= 4, str([r.get('action') for r in posts]))
-    check('every request targets only Loans or Deposits', all(r.get('target') in ('Loans', 'Deposits') for r in posts))
+    check('every request targets only the Owed tab', all(r.get('target') == 'Owed' for r in posts))
+    # ---- the Add forms really send a new row for the Owed tab, with the right Type ----
+    def wait_post(n):
+        for _ in range(60):
+            if len(posts) > n: return posts[-1]
+            page.wait_for_timeout(100)
+        return None
+    n = len(posts)
+    page.locator('#view [data-lg=open][data-id=loan]').click()
+    page.fill('#overlay [data-k="Person"]', 'Pat'); page.fill('#overlay [data-k="Total Amount"]', '300')
+    page.locator('#overlay [data-lg=submit]').click()
+    req = wait_post(n)
+    check('Add loan sends one new row to the Owed tab with Type Loan', req is not None and req.get('tab') == 'Owed' and req['values'].get('Type') == 'Loan' and req['values'].get('Person') == 'Pat' and req['values'].get('Total Amount') == 300, str(req))
+    check('the new loan row carries a Date Out and a Due Date', req is not None and '$date' in req['values'].get('Date Out', {}) and '$date' in req['values'].get('Due Date', {}), str(req))
+    page.locator('#overlay [data-act=close]').first.click()
+    n = len(posts)
+    page.locator('#view [data-lg=open][data-id=dep]').click()
+    page.fill('#overlay [data-k="Person"]', 'Dana'); page.fill('#overlay [data-k="Item / Device"]', 'iPad'); page.fill('#overlay [data-k="Total Amount"]', '500'); page.fill('#overlay [data-k="Amount Paid"]', '100')
+    page.locator('#overlay [data-lg=submit]').click()
+    req = wait_post(n)
+    check('Add deposit sends one new row to the Owed tab with Type Deposit', req is not None and req.get('tab') == 'Owed' and req['values'].get('Type') == 'Deposit' and req['values'].get('Amount Paid') == 100 and req['values'].get('Total Amount') == 500, str(req))
+    page.locator('#overlay [data-act=close]').first.click()
     check('no page errors the whole way through', not errors, str(errors))
     b.close()
 
