@@ -1111,14 +1111,31 @@ function parseSheetId(s){const m=String(s).match(/\/d\/([a-zA-Z0-9_-]+)/);return
 /* Pure (no browser, no writes): finds the ONE purchase row, and for a sold device the ONE sale row, in the six entry tabs kept by loadViaScript.
    Any doubt (no match, several matches, no usable key, tab missing) gives {purchase:null,sale:null,ok:false}. It never guesses.
    Phones: IMEI = the purchase form's "Serial Number". Sales: the sold form's "Device Label" (phones) or "Device" (PCs) text.
-   PCs need item.serial (the PCs tab has no serial column today). Accessories have no reliable shared key, so they never match. */
+   PCs need item.serial (the PCs tab has no serial column today). Accessories match the PURCHASE row only, by type + brand/model + price + date + seller (all must agree on exactly one row); they never match a sale row. */
 function matchDeviceRows(item, raw) {
   const fail = {purchase: null, sale: null, ok: false};
   if (!item || typeof item !== 'object' || !raw || typeof raw !== 'object') return fail;
-  if (item.kind !== 'Phone' && item.kind !== 'PC') return fail;
+  if (item.kind !== 'Phone' && item.kind !== 'PC' && item.kind !== 'Accessory') return fail;
   const clean = s => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]/g, '');
   const get = (r, h) => { if (!r || typeof r !== 'object') return undefined; const t = clean(h); for (const k of Object.keys(r)) if (clean(k) === t) return r[k]; };
   const rowId = r => { const v = get(r, 'Row ID'); if (v == null) return null; const s = String(v).trim(); return s || null; };
+  if (item.kind === 'Accessory') {
+    /* Accessories have no serial, so the PURCHASE row is found by type + brand/model + price + date + seller together.
+       ALL five must be present, exactly ONE purchase row AND exactly ONE inventory row may share them, or it fails. No sale row is ever matched. */
+    const bTab = raw.BoughtAccess, pTab = raw.Accessories;
+    if (!bTab || !Array.isArray(bTab.rows) || !pTab || !Array.isArray(pTab.rows)) return fail;
+    const pad = n => String(n).padStart(2, '0');
+    const dkey = v => { if (v == null || v === '') return ''; if (Object.prototype.toString.call(v) === '[object Date]') return isNaN(v) ? '' : v.getFullYear() + '-' + pad(v.getMonth() + 1) + '-' + pad(v.getDate()); if (typeof v === 'object' && v.$date != null) v = v.$date; const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? m[1] + '-' + m[2] + '-' + m[3] : ''; };
+    const pkey = v => { if (v == null || v === '') return ''; const n = typeof v === 'number' ? v : Number(String(v).replace(/[$,\s]/g, '')); return isFinite(n) ? String(Math.round(n * 100)) : ''; };
+    const mk = (type, name, price, date, seller) => { const a = [clean(type), clean(name), pkey(price), dkey(date), clean(seller)]; return a.every(Boolean) ? a.join('|') : ''; };
+    const itemKey = mk(item.type || (item.specs && item.specs.Type), item.name, item.buyPrice, item.buyDate, item.seller);
+    if (!itemKey) return fail;
+    const invMatches = pTab.rows.filter(r => mk(get(r, 'Item Type'), String(get(r, 'Brand') == null ? '' : get(r, 'Brand')) + ' ' + String(get(r, 'Model') == null ? '' : get(r, 'Model')), get(r, 'Purchase Price'), get(r, 'Date Purchased'), get(r, 'Bought From')) === itemKey);
+    if (invMatches.length !== 1) return fail;
+    const bMatches = bTab.rows.filter(r => mk(get(r, 'Item Type'), String(get(r, 'Serial Number') == null ? '' : get(r, 'Serial Number')) + ' ' + String(get(r, 'Model') == null ? '' : get(r, 'Model')), get(r, 'Purchase Price'), get(r, 'Date Purchased'), get(r, 'Bought From')) === itemKey);
+    if (bMatches.length !== 1) return fail;
+    return {purchase: {tab: bTab.sheet || 'Bought Access - Form', rowId: rowId(bMatches[0]), row: bMatches[0]}, sale: null, ok: true};
+  }
   const normSer = s => String(s == null ? '' : s).replace(/\s+/g, '').toUpperCase();
   const normLab = s => String(s == null ? '' : s).replace(/\s+/g, ' ').trim().toLowerCase();
   const rawSer = item.serial != null ? item.serial : (item.specs && (item.specs.IMEI != null ? item.specs.IMEI : item.specs['Serial Number']));
@@ -1668,9 +1685,9 @@ async function deleteDeviceSaleGo(id){
 /* The logging form's definitions (BY, YN, numOf, sugList) are private to its module; it hands them over on window.MMLog. Missing = the editor stays off. */
 const deL=()=>window.MMLog||{};
 const deNum=s=>{const f=deL().numOf;return f?f(s):null};
-const DE_FORM={Phone:'bphone',PC:'bpc'};
+const DE_FORM={Phone:'bphone',PC:'bpc',Accessory:'bacc'};
 const DE_TYPES=['text','tel','int','money','date','radio','yn'];
-const DE_TABS=['Form Responses - Bought','Form Responses - PCs'];   /* the ONLY tabs this editor may ever target */
+const DE_TABS=['Form Responses - Bought','Form Responses - PCs','Bought Access - Form'];   /* the ONLY tabs this editor may ever target */
 const deKey=s=>String(s==null?'':s).toLowerCase().replace(/[^a-z0-9]/g,'');
 
 function deRowKey(row,label){
@@ -1684,10 +1701,12 @@ function dePlan(item,raw){
   const m=matchDeviceRows(item,raw);
   if(!m||!m.ok||!m.purchase) return {state:'nomatch'};
   if(!DE_TABS.includes(m.purchase.tab)) return {state:'nomatch'};
-  const form=(deL().BY||{})[DE_FORM[item&&item.kind]];
+  let form=(deL().BY||{})[DE_FORM[item&&item.kind]];
+  /* The accessory form's multi-pick fields (Connection Type, Included Accessories) are edited as plain comma-separated text. */
+  if(form&&item.kind==='Accessory') form=Object.assign({},form,{f:form.f.map(x=>x.t==='multi'?Object.assign({},x,{t:'text'}):x)});
   if(!form||!form.f.every(x=>DE_TYPES.includes(x.t))) return {state:'nomatch'};
   if(!m.purchase.rowId) return {state:'noid'};
-  return {state:'ok',form,tab:m.purchase.tab,rowId:String(m.purchase.rowId),row:m.purchase.row,tabKey:item.kind==='Phone'?'BoughtPhones':'BoughtPCs'};
+  return {state:'ok',form,tab:m.purchase.tab,rowId:String(m.purchase.rowId),row:m.purchase.row,tabKey:item.kind==='Phone'?'BoughtPhones':item.kind==='PC'?'BoughtPCs':'BoughtAccess'};
 }
 
 function deStr(x,v){
@@ -1887,7 +1906,7 @@ function deviceFootHtml(o){
   const p=dePlan(o,store.base||store.raw);
   if(p.state==='nomatch') return `<div class="dfoot"><p class="hint" style="color:var(--muted)">Can't safely match this item to its sheet row</p></div>`;
   if(p.state==='noid') return `<div class="dfoot"><p class="hint" style="color:var(--muted)">Run the ID backfill first</p><button type="button" class="btn" data-act="idfill">Fill missing IDs</button></div>`;
-  const s=dsPlan(o,store.base||store.raw);
+  const s=(o.kind==='Accessory'&&o.sold!==true)?{state:'unsold'}:dsPlan(o,store.base||store.raw);
   const ok=s.state==='ok';
   const delBtn=ok?`<button type="button" class="btn danger" data-act="devdel" data-id="${esc(o.id)}" aria-describedby="de-delnote">Delete</button>`:`<button type="button" class="btn danger" disabled aria-describedby="de-delnote">Delete</button>`;
   const note=ok?'Deletes only the sale. The device goes back to inventory and the purchase stays.':s.state==='unsold'?'Delete purchases directly in Google Sheets':s.state==='trade'?"Trade sales can't be deleted here. Edit it or fix it in Google Sheets":s.state==='noid'?'Run the ID backfill first':"Can't safely match this sale to its sheet row";
