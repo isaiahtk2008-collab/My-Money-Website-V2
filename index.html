@@ -862,6 +862,45 @@ button.iss-btn:hover,button.iss-btn:focus-visible{background:var(--surface2)}
   .top .row1 #secbtn{width:44px;height:44px;min-width:44px;padding:0;border-radius:50%;background:var(--surface2);color:var(--ink);border:1px solid color-mix(in srgb,var(--line) 60%,transparent)}
 }
 </style>
+<style id="mm-visibility">
+/* Visibility + nav reorder (additive; delete this block to undo the look). Higher contrast, larger nav, clearer cards and focus. */
+:root{--muted:#4a5364;--faint:#677183;--line:#cdd3de;--rail:84px;--card-shadow:0 1px 2px rgba(22,26,34,.08),0 10px 28px rgba(22,26,34,.07)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--muted:#c0c8d4;--faint:#9aa5b6;--line:#363e4c;--card-shadow:0 1px 0 rgba(255,255,255,.04) inset,0 8px 24px rgba(0,0,0,.35)}}
+:root[data-theme="dark"]{--muted:#c0c8d4;--faint:#9aa5b6;--line:#363e4c;--card-shadow:0 1px 0 rgba(255,255,255,.04) inset,0 8px 24px rgba(0,0,0,.35)}
+.logo{background:linear-gradient(145deg,var(--accent),color-mix(in srgb,var(--accent) 70%,#7a5cff));box-shadow:0 4px 14px color-mix(in srgb,var(--accent) 35%,transparent)}
+@media (min-width:701px){
+  button.nav{width:68px;min-height:58px;transition:background-color .15s ease,box-shadow .15s ease}
+  button.nav span{font-size:12px;font-weight:700}
+  button.nav svg{width:26px;height:26px}
+  button.nav:hover{background:color-mix(in srgb,var(--accent-soft) 55%,transparent)}
+  button.nav[aria-current="page"]{background:var(--accent-soft);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 35%,transparent)}
+}
+nav.rail#rail button.nav{position:relative;cursor:grab;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:none}
+nav.rail#rail button.nav.dragging{cursor:grabbing;transform:scale(1.06);box-shadow:0 8px 20px rgba(0,0,0,.28);z-index:5;opacity:.92;transition:none}
+nav.rail#rail button.nav[aria-current="page"]::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--accent)}
+.navreset{font-size:11px;font-weight:600;color:var(--muted);border:1px solid var(--line);border-radius:10px;padding:4px 6px;margin-top:6px}
+.navreset:hover{color:var(--ink);border-color:var(--accent)}
+@media (max-width:700px){
+  .navreset{display:none}
+  nav.rail#rail button.nav span{font-size:11px;font-weight:700;letter-spacing:-.1px}
+  @media (max-width:400px){nav.rail#rail button.nav span{font-size:10px;font-weight:700;letter-spacing:-.15px}}
+  nav.rail#rail button.nav svg{width:22px;height:22px}
+  nav.rail#rail button.nav[aria-current="page"]{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 35%,transparent)}
+  nav.rail#rail button.nav[aria-current="page"]::before{left:14px;right:14px;top:auto;bottom:2px;width:auto;height:3px;border-radius:3px}
+}
+.card{box-shadow:var(--card-shadow);transition:transform .15s ease,box-shadow .15s ease}
+button.card.kpi:hover{transform:translateY(-1px)}
+.card>header h3{font-size:16px;font-weight:750}
+.card .hint,.kpi .sub,.kpi .lab{font-size:13px}
+.chip{font-size:12.5px;padding:3px 9px;font-variant-numeric:tabular-nums}
+.spark{filter:drop-shadow(0 1px 2px color-mix(in srgb,currentColor 30%,transparent))}
+.spark :is(polyline,path){stroke-width:2.2px}
+:focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 85%,#fff);outline-offset:2px}
+.ibtn{height:40px;min-width:40px;transition:border-color .15s ease,background-color .15s ease}
+.ibtn:hover{border-color:var(--accent)}
+@media (prefers-reduced-motion:reduce){button.nav,.card,.ibtn{transition:none}button.card.kpi:hover{transform:none}}
+@media (forced-colors:active){.card,.ibtn,.chip,button.nav[aria-current="page"]{border:1px solid CanvasText}}
+</style>
 <div class="app" id="app">
   <nav class="rail" id="rail" aria-label="Main"></nav>
   <div class="main">
@@ -3028,13 +3067,94 @@ document.addEventListener('submit', e => {
 const VIEWS={home:vHome,spending:vSpending,reselling:vReselling,inventory:vInventory,investing:vInvesting,data:vData,owed:vOwed};
 const SUBS={spending:'Where your money goes',reselling:'What your flips earn',inventory:'Devices waiting to sell',investing:'Your portfolios',data:'Sources, sync and quality',owed:'Loans and deposits'};
 
+/* ===== NAV REORDER (drag a menu button to move it; order saved on this device only) ===== */
+function orderNav(saved,defaults){
+  try{
+    if(!Array.isArray(saved)||saved.length!==defaults.length)return defaults.slice();
+    const ok=new Set(defaults);
+    for(const v of saved)if(!ok.has(v))return defaults.slice();
+    return new Set(saved).size===defaults.length?saved.slice():defaults.slice();
+  }catch(_){return defaults.slice()}
+}
+function navOrder(){
+  try{const raw=LS.get('nav.order');return orderNav(raw?JSON.parse(raw):null,VIEW_NAMES)}catch(_){return VIEW_NAMES.slice()}
+}
+function navIsCustom(){const o=navOrder();return o.some((v,i)=>v!==VIEW_NAMES[i])}
+function navSave(arr){try{LS.set('nav.order',JSON.stringify(arr))}catch(_){}}
+function navReset(){try{LS.set('nav.order','')}catch(_){}render()}
+(()=>{
+  let active=null,startX=0,startY=0,pid=null,timer=null,dragging=false,justDragged=false;
+  const phone=()=>window.matchMedia('(max-width:700px)').matches;
+  const stop=e=>{if(e.cancelable)e.preventDefault()};
+  function endDrag(){
+    clearTimeout(timer);
+    if(!active)return;
+    try{active.removeEventListener('touchmove',stop)}catch(_){}
+    try{active.releasePointerCapture(pid)}catch(_){}
+    active.classList.remove('dragging');
+    if(dragging){
+      dragging=false;justDragged=true;setTimeout(()=>{justDragged=false},120);
+      navSave(orderNav($$('#rail .nav').map(b=>b.dataset.v),VIEW_NAMES));
+      setTimeout(render,0); /* redraw so the Reset button shows right away */
+    }
+    active=null;pid=null;
+  }
+  function startDrag(){
+    dragging=true;active.classList.add('dragging');
+    try{active.setPointerCapture(pid)}catch(_){}
+    active.addEventListener('touchmove',stop,{passive:false});
+  }
+  document.addEventListener('pointerdown',e=>{
+    const btn=e.target.closest&&e.target.closest('#rail .nav');
+    if(!btn||e.button!==0)return;
+    active=btn;pid=e.pointerId;startX=e.clientX;startY=e.clientY;dragging=false;
+    if(e.pointerType!=='mouse')timer=setTimeout(()=>{if(active)startDrag()},250);
+  });
+  document.addEventListener('pointermove',e=>{
+    if(!active||e.pointerId!==pid)return;
+    if(!dragging){
+      const dist=Math.hypot(e.clientX-startX,e.clientY-startY);
+      if(e.pointerType==='mouse'&&dist>6)startDrag();else if(dist>10)clearTimeout(timer);
+      return;
+    }
+    const row=phone(),pos=row?e.clientX:e.clientY;
+    const sibs=$$('#rail .nav').filter(el=>el!==active);
+    for(const sib of sibs){
+      const r=sib.getBoundingClientRect(),mid=row?r.left+r.width/2:r.top+r.height/2;
+      if(pos<mid){sib.before(active);return}
+    }
+    const last=sibs[sibs.length-1];if(last)last.after(active);
+  });
+  document.addEventListener('pointerup',endDrag);
+  document.addEventListener('pointercancel',endDrag);
+  window.addEventListener('blur',endDrag);
+  /* a drag must never open the page; a normal click still does */
+  document.addEventListener('click',e=>{if(justDragged&&e.target.closest&&e.target.closest('#rail .nav')){e.stopPropagation();e.preventDefault()}},true);
+  /* keyboard: Alt + arrow moves the focused menu button */
+  document.addEventListener('keydown',e=>{
+    const btn=document.activeElement&&document.activeElement.closest&&document.activeElement.closest('#rail .nav');
+    if(!btn||!e.altKey)return;
+    const row=phone(),prev=row?'ArrowLeft':'ArrowUp',next=row?'ArrowRight':'ArrowDown';
+    if(e.key!==prev&&e.key!==next)return;
+    e.preventDefault();
+    const list=navOrder(),id=btn.dataset.v,i=list.indexOf(id),t=e.key===prev?i-1:i+1;
+    if(i<0||t<0||t>=list.length)return;
+    list.splice(i,1);list.splice(t,0,id);navSave(list);render();
+    const nb=$('#rail .nav[data-v="'+id+'"]');if(nb)nb.focus();
+    let live=$('#navlive');
+    if(!live){live=document.createElement('div');live.id='navlive';live.className='sr';live.setAttribute('aria-live','polite');document.body.appendChild(live)}
+    live.textContent=((nb&&nb.querySelector('span')||{}).textContent||id)+' moved to position '+(t+1)+' of '+list.length;
+  });
+})();
+/* ===== NAV REORDER END ===== */
+
 /* ================= SHELL ================= */
 function setupTop(){
   const h=new Date().getHours();
   $('#ttl').textContent=S.view==='home'?(h<12?'Good morning':h<18?'Good afternoon':'Good evening')+', Isaiah':({spending:'Spending',reselling:'Reselling',inventory:'Stock',investing:'Investing',data:'Data & sync',owed:'Owed'})[S.view];
   $('#sub').textContent=S.view==='home'?new Date().toLocaleDateString('en-CA',{weekday:'long',month:'long',day:'numeric'})+' · '+store.source.name+', '+ago(store.syncedAt):SUBS[S.view];
   document.title='My Money';
-  $('#rail').innerHTML=`<button type="button" class="logo" data-sec="open" aria-label="Security &amp; Settings" title="Security &amp; Settings">$</button>`+VIEW_NAMES.map(v=>`<button class="nav" data-act="go" data-v="${v}" ${S.view===v?'aria-current="page"':''}>${ICON[VIEW_ICON[v]]}<span>${VIEW_LABEL[v]}</span></button>`).join('')+'<span class="sp"></span>';
+  $('#rail').innerHTML=`<button type="button" class="logo" data-sec="open" aria-label="Security &amp; Settings" title="Security &amp; Settings">$</button>`+navOrder().map(v=>`<button class="nav" data-act="go" data-v="${v}" ${S.view===v?'aria-current="page"':''}>${ICON[VIEW_ICON[v]]}<span>${VIEW_LABEL[v]}</span></button>`).join('')+'<span class="sp"></span>'+(navIsCustom()?'<button type="button" class="navreset" data-act="navreset" title="Put the menu back in the original order">Reset order</button>':'');
   $('#tools').innerHTML=`<button class="ibtn search" data-act="palette" aria-label="Search">${ICON.search}<span>Search</span><kbd>⌘K</kbd></button>
     <button class="ibtn" data-act="theme" aria-label="Theme: ${S.theme}" title="Theme: ${S.theme}">${ICON[S.theme==='dark'?'moon':S.theme==='light'?'sun':'auto']}</button>
     <button class="ibtn" data-act="privacy" aria-pressed="${S.privacy}" aria-label="Hide amounts" title="Hide amounts (P)">${S.privacy?ICON.eyeoff:ICON.eye}</button>
@@ -3077,6 +3197,7 @@ document.addEventListener('click',e=>{
   if(a==='scrim'){if(e.target===t)closeOverlay();return}
   switch(a){
     case 'go':go(d.v);break;
+    case 'navreset':navReset();break;
     case 'goto':if(d.k&&d.x){S.F={};S.F[d.k]=d.x}else if(d.v==='spending')S.F={};go(d.v);break;
     case 'open':{const id=d.id||d.v;if(id&&store.D.byId.has(id)){if($('#overlay .palbox'))closeOverlay();openDetail(id)}break}
     case 'range':S.range=d.v;LS.set('range',d.v);S.gran=null;render();break;
