@@ -319,7 +319,7 @@ t('Expenses still edits (by Row ID and by row number) and deletes as before; a d
   assert.equal(editLog.grid.length, logLen);
 });
 
-t('reading (read and check) writes nothing, creates no tab, and returns the six new keys after the original five', () => {
+t('reading (read and check) writes nothing, creates no tab, and returns the six entry keys, then Owed (reported missing when the tab does not exist yet)', () => {
   const sheets = makeFixtures();
   const ctx = load(sheets);
   const readRes = get(ctx, { action: 'read' });
@@ -327,7 +327,13 @@ t('reading (read and check) writes nothing, creates no tab, and returns the six 
   const keys = Object.keys(readRes.tabs);
   assert.deepEqual(keys.slice(0, 5), ['Expenses', 'Phones', 'PCs', 'Accessories', 'Investments']);
   const six = ['BoughtPhones', 'BoughtPCs', 'BoughtAccess', 'SoldPhones', 'SoldPCs', 'SoldAccess'];
-  assert.deepEqual(keys.slice(5), six);
+  assert.deepEqual(keys.slice(5, 11), six);
+  assert.deepEqual(keys.slice(11), ['Owed']);
+  // The fixtures have no Owed tab: it must come back as missing (not an error) and must not be created.
+  ['Owed'].forEach(k => {
+    assert.equal(readRes.tabs[k].missing, true);
+    assert.deepEqual(readRes.tabs[k].rows, []);
+  });
   six.forEach((k, i) => {
     assert.equal(readRes.tabs[k].sheet, EDIT_ONLY[i]);
     assert.equal(readRes.tabs[k].rows.length, 2);
@@ -347,7 +353,7 @@ t('EDITABLE_TABS and EDIT_ONLY_TABS hold exactly the intended tabs and no formul
   const ctx = load(makeFixtures());
   const data = JSON.parse(vm.runInContext('JSON.stringify({e: EDITABLE_TABS, o: EDIT_ONLY_TABS})', ctx));
   assert.deepEqual(data.e, ['Expenses']);
-  assert.deepEqual(data.o, EDIT_ONLY);
+  assert.deepEqual(data.o, EDIT_ONLY.concat(['Owed']));
   for (const ft of ['Master Inventory', 'PCs', 'PnA', 'Summary', 'Edit Log']) {
     assert.ok(!data.e.includes(ft));
     assert.ok(!data.o.includes(ft));
