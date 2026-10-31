@@ -200,6 +200,6 @@ test('deUndoErrText: friendly text for each refusal, and the fallback', () => {
 
 test('safety: neither tab list contains a formula tab', () => {
   const tabs = [...plain(run('DE_TABS')), ...plain(run('DE_SALE_TABS'))];
-  assert.deepEqual(tabs, ['Form Responses - Bought', 'Form Responses - PCs', 'Form Responses - Sold', 'Form Responses - Sold PCs']);
+  assert.deepEqual(tabs, ['Form Responses - Bought', 'Form Responses - PCs', 'Bought Access - Form', 'Form Responses - Sold', 'Form Responses - Sold PCs']);
   for (const bad of ['Master Inventory', 'PnA', 'PCs', 'Summary']) assert.ok(!tabs.includes(bad));
 });

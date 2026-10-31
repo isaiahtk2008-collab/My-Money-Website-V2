@@ -1,7 +1,7 @@
 // Run with: node --test tests/device-match.test.mjs
 // Loads the REAL loadViaScript and matchDeviceRows out of index.html (no copies) into a sandbox with stubs, and proves:
 //  - matchDeviceRows finds exactly ONE purchase row (and, for a sold device, exactly ONE sale row), otherwise {purchase:null,sale:null,ok:false}
-//  - accessories never match (no reliable shared key), and a missing tab / null input never throws
+//  - accessories match the PURCHASE row only (type + brand/model + price + date + seller, exactly one row each side), and a missing tab / null input never throws
 //  - loadViaScript keeps the six optional entry tabs when the script sends them, and returns exactly the old five keys when it does not
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -210,4 +210,67 @@ test('loader: a missing or broken REQUIRED tab still throws, exactly as before',
   await assert.rejects(() => loadViaScript('https://script.example/exec', TABS));
   p = makeBasePayload(); delete p.tabs.PCs.rows; payload = p;
   await assert.rejects(() => loadViaScript('https://script.example/exec', TABS));
+});
+
+// ---- accessories: the PURCHASE row only, matched on type + brand/model + price + date + seller together ----
+const accItem = (over = {}) => Object.assign({ kind: 'Accessory', name: 'Samsung Odyssey G3', type: 'Monitor', sold: false, buyPrice: 61.79, buyDate: new Date(2026, 6, 3), seller: 'Dang Hoang', specs: { Type: 'Monitor' } }, over);
+const accRaw = () => ({
+  Accessories: { sheet: 'PnA', rows: [
+    { 'Item ID': 'ACC-00001', 'Item Type': 'Monitor', Brand: 'Acer ', Model: 'G237HL ', 'Purchase Price': '$19.01', 'Date Purchased': '2026-07-03', 'Bought From': 'Dang Hoang' },
+    { 'Item ID': 'ACC-00002', 'Item Type': 'Monitor', Brand: 'Samsung', Model: 'Odyssey G3 ', 'Purchase Price': '$61.79', 'Date Purchased': '2026-07-03', 'Bought From': 'Dang Hoang' }
+  ] },
+  BoughtAccess: { sheet: 'Bought Access - Form', rows: [
+    { 'Row ID': 'aa01', 'Item Type': 'Monitor', 'Serial Number': 'Acer ', Model: 'G237HL ', 'Purchase Price': 19.01, 'Date Purchased': { $date: '2026-07-03' }, 'Bought From': 'Dang Hoang' },
+    { 'Row ID': 'aa02', 'Item Type': 'Monitor', 'Serial Number': 'Samsung', Model: 'Odyssey G3 ', 'Purchase Price': 61.79, 'Date Purchased': { $date: '2026-07-03' }, 'Bought From': 'Dang Hoang' }
+  ] }
+});
+
+test('accessory: the real monitor example matches ONE purchase row, and never a sale row', () => {
+  const raw = accRaw();
+  const res = matchDeviceRows(accItem(), raw);
+  assert.equal(res.ok, true);
+  assert.equal(res.sale, null);
+  assert.equal(res.purchase.tab, 'Bought Access - Form');
+  assert.equal(res.purchase.rowId, 'aa02');
+  assert.equal(res.purchase.row, raw.BoughtAccess.rows[1]);
+  const sold = matchDeviceRows(accItem({ sold: true }), raw);
+  assert.equal(sold.ok, true);
+  assert.equal(sold.sale, null, 'a sold accessory still never matches a sale row');
+});
+
+test('accessory: a blank Row ID still matches (rowId null), so the drawer can offer Fill missing IDs', () => {
+  const raw = accRaw(); raw.BoughtAccess.rows[1]['Row ID'] = '';
+  const res = matchDeviceRows(accItem(), raw);
+  assert.equal(res.ok, true);
+  assert.equal(res.purchase.rowId, null);
+});
+
+test('accessory: ISO text dates and a different date format on the sheet side both work, an unreadable date fails', () => {
+  const raw = accRaw(); raw.BoughtAccess.rows[1]['Date Purchased'] = '2026-07-03';
+  assert.equal(matchDeviceRows(accItem(), raw).ok, true);
+  raw.BoughtAccess.rows[1]['Date Purchased'] = '7/3/2026';
+  assert.deepEqual(plain(matchDeviceRows(accItem(), raw)), FAIL);
+});
+
+test('accessory: ANY one of price, date, seller, type or name disagreeing means ok false', () => {
+  for (const over of [{ buyPrice: 61.8 }, { buyDate: new Date(2026, 6, 4) }, { seller: 'Someone Else' }, { type: 'Mouse', specs: { Type: 'Mouse' } }, { name: 'Samsung Odyssey G5' }]) {
+    assert.deepEqual(plain(matchDeviceRows(accItem(over), accRaw())), FAIL, JSON.stringify(over));
+  }
+});
+
+test('accessory: two identical purchase rows, or two identical inventory rows, means ok false (never guess)', () => {
+  const dupBought = accRaw(); dupBought.BoughtAccess.rows.push(Object.assign({}, dupBought.BoughtAccess.rows[1], { 'Row ID': 'aa99' }));
+  assert.deepEqual(plain(matchDeviceRows(accItem(), dupBought)), FAIL);
+  const dupInv = accRaw(); dupInv.Accessories.rows.push(Object.assign({}, dupInv.Accessories.rows[1], { 'Item ID': 'ACC-00099' }));
+  assert.deepEqual(plain(matchDeviceRows(accItem(), dupInv)), FAIL);
+});
+
+test('accessory: a missing key field on the item, or a missing tab, fails without throwing', () => {
+  for (const over of [{ buyPrice: null }, { buyDate: null }, { seller: null }, { name: '' }, { type: undefined, specs: {} }]) {
+    assert.deepEqual(plain(matchDeviceRows(accItem(over), accRaw())), FAIL, JSON.stringify(over));
+  }
+  const noBought = accRaw(); delete noBought.BoughtAccess;
+  assert.deepEqual(plain(matchDeviceRows(accItem(), noBought)), FAIL);
+  const noInv = accRaw(); delete noInv.Accessories;
+  assert.deepEqual(plain(matchDeviceRows(accItem(), noInv)), FAIL);
 });

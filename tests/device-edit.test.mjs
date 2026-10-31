@@ -272,7 +272,7 @@ test('dePatch: immutability, header-matching, and bailouts', () => {
   assert.strictEqual(Object.keys(rowE).length, Object.keys(r1).length);
 });
 
-test('SAFETY SCAN: the edit code can only target the two purchase tabs and never touches the log form hooks', () => {
+test('SAFETY SCAN: the edit code can only target the three purchase tabs and never touches the log form hooks', () => {
   // Scan CODE only: the explanatory comments in that section name the forbidden things on purpose.
   const region = between(
     '/* ================= EDIT ONE PURCHASE ROW FROM A DEVICE',
@@ -284,7 +284,7 @@ test('SAFETY SCAN: the edit code can only target the two purchase tabs and never
     assert.ok(!region.includes(forbidden), `Region must not include ${forbidden}`);
   }
 
-  assert.deepEqual(plain(run('DE_TABS')), ['Form Responses - Bought', 'Form Responses - PCs']);
+  assert.deepEqual(plain(run('DE_TABS')), ['Form Responses - Bought', 'Form Responses - PCs', 'Bought Access - Form']);
 
   // Chunk 3e: exactly two calls leave this section, the one edit (which targets plan.tab) and the one undo (which targets nothing).
   assert.strictEqual(constLine('DE_SALE_TABS'), "const DE_SALE_TABS=['Form Responses - Sold','Form Responses - Sold PCs'];");
@@ -299,4 +299,22 @@ test('SAFETY SCAN: the edit code can only target the two purchase tabs and never
   for (const hook of ['lg-in', 'data-ty', 'data-lg', 'data-k=', 'data-e=']) {
     assert.ok(!region.includes(hook), `Region must not include logging-form hook: ${hook}`);
   }
+});
+
+test('accessory: dePlan targets Bought Access - Form via BoughtAccess, the multi-pick fields become plain text, and a blank Row ID gives noid', () => {
+  const item = { kind: 'Accessory', name: 'Samsung Odyssey G3', type: 'Monitor', sold: false, buyPrice: 61.79, buyDate: new Date(2026, 6, 3), seller: 'Dang Hoang', specs: { Type: 'Monitor' } };
+  const mkRaw = id => ({
+    Accessories: { sheet: 'PnA', rows: [{ 'Item Type': 'Monitor', Brand: 'Samsung', Model: 'Odyssey G3', 'Purchase Price': '$61.79', 'Date Purchased': '2026-07-03', 'Bought From': 'Dang Hoang' }] },
+    BoughtAccess: { sheet: 'Bought Access - Form', rows: [{ 'Row ID': id, 'Item Type': 'Monitor', 'Serial Number': 'Samsung', Model: 'Odyssey G3', 'Purchase Price': 61.79, 'Date Purchased': { $date: '2026-07-03' }, 'Bought From': 'Dang Hoang', 'Connection Type': 'Wired USB-A, 3.5mm Audio', 'Included Accessories': 'Stand/mount' }] }
+  });
+  ctx.item = item; ctx.raw = mkRaw('aa02');
+  const p = plain(run('dePlan(item,raw)'));
+  assert.equal(p.state, 'ok');
+  assert.equal(p.tab, 'Bought Access - Form');
+  assert.equal(p.tabKey, 'BoughtAccess');
+  assert.equal(p.rowId, 'aa02');
+  assert.ok(p.form.f.every(x => ['text', 'tel', 'int', 'money', 'date', 'radio', 'yn'].includes(x.t)), 'no multi fields left');
+  assert.ok(p.form.f.some(x => x.k === 'Connection Type'), 'the multi fields are still editable, as text');
+  ctx.raw = mkRaw('');
+  assert.equal(plain(run('dePlan(item,raw)')).state, 'noid');
 });
