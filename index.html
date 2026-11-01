@@ -638,6 +638,34 @@ button.li:hover{background:var(--surface2);border-radius:10px}
 .li .ic{width:32px;height:32px;border-radius:10px;background:var(--surface2);display:grid;place-items:center;color:var(--muted);flex:none}
 .li .ic svg{width:16px;height:16px}
 .lg-gh+.list .li .ic svg{width:18px;height:18px}
+
+/* ---------- Urgent glow + menu status (red = needs you now; amber = open and waiting) ---------- */
+.glow-urgent{--glow:var(--bad);box-shadow:0 0 8px 1px color-mix(in srgb,var(--glow) 40%,transparent);animation:urgent-glow 2.4s ease-in-out infinite}
+@keyframes urgent-glow{0%,100%{box-shadow:0 0 8px 1px color-mix(in srgb,var(--glow) 40%,transparent)}50%{box-shadow:0 0 16px 3px color-mix(in srgb,var(--glow) 55%,transparent)}}
+.st-wrap{display:block}
+.st-row{position:relative}
+.st-wrap>.st-row>.li{border-top:1px solid var(--line)}
+.list>.st-wrap:first-child>.st-row>.li{border-top:0}
+.st-hit{position:absolute;left:4px;top:50%;transform:translateY(-50%);width:32px;height:32px;border-radius:10px;background:transparent;border:0;cursor:pointer;padding:0;z-index:2}
+.st-hit:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.lg-gh+.list .li .ic[data-st="pending"]{color:var(--warn);background:color-mix(in srgb,var(--warn) 12%,transparent);border:1px solid color-mix(in srgb,var(--warn) 40%,transparent)}
+.lg-gh+.list .li .ic[data-st="issue"]{color:var(--bad);background:color-mix(in srgb,var(--bad) 12%,transparent);border:1px solid color-mix(in srgb,var(--bad) 40%,transparent);--glow:var(--bad);box-shadow:0 0 8px 1px color-mix(in srgb,var(--glow) 40%,transparent);animation:urgent-glow 3s ease-in-out infinite}
+.lg-gh+.list .li .ic[data-st="overdue"]{color:var(--bad);background:color-mix(in srgb,var(--bad) 12%,transparent);border:1px solid color-mix(in srgb,var(--bad) 40%,transparent);--glow:var(--bad);box-shadow:0 0 8px 1px color-mix(in srgb,var(--glow) 40%,transparent);animation:urgent-glow 1.6s ease-in-out infinite}
+.st-badge{position:absolute;top:-5px;right:-5px;min-width:16px;height:16px;font-size:10px;font-weight:700;line-height:16px;text-align:center;padding:0 4px;pointer-events:none;border:2px solid var(--surface);box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center}
+.st-badge.pending{border-radius:9999px;background:var(--warn);color:var(--surface)}
+.st-badge.issue{border-radius:5px;background:var(--bad);color:var(--surface)}
+.st-badge.overdue{border-radius:9999px;background:var(--bad);color:var(--surface)}
+.st-panel[hidden]{display:none}
+.st-panel{border-radius:12px;background:var(--surface2);border:1px solid var(--line);margin:2px 4px 8px;padding:10px}
+.st-head{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12.5px;font-weight:700;margin-bottom:8px}
+.st-item{display:flex;justify-content:space-between;align-items:center;width:100%;text-align:left;font-size:13px;padding:8px 10px;border-radius:8px;background:transparent;gap:8px;color:inherit;border:0;cursor:pointer;box-sizing:border-box}
+.st-item:hover{background:var(--surface)}
+.st-more{color:var(--muted);font-size:12px;padding:4px 10px}
+.nav .nbadge{position:absolute;top:2px;right:8px;min-width:16px;height:16px;border-radius:9999px;background:var(--bad);color:var(--surface);font-size:10px;font-weight:700;line-height:16px;text-align:center;pointer-events:none;padding:0 3px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center}
+.nav.urgent svg{color:var(--bad);filter:drop-shadow(0 0 4px color-mix(in srgb,var(--bad) 55%,transparent));animation:urgent-icon-glow 1.6s ease-in-out infinite}
+@keyframes urgent-icon-glow{0%,100%{filter:drop-shadow(0 0 4px color-mix(in srgb,var(--bad) 55%,transparent))}50%{filter:drop-shadow(0 0 8px color-mix(in srgb,var(--bad) 70%,transparent))}}
+.nav.urgent span:not(.nbadge){color:var(--bad)}
+.chip.bad.glow-urgent{border-radius:inherit}
 .li .tx{flex:1;min-width:0}
 .li .tx b{font-weight:600;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .li .tx span{color:var(--muted);font-size:12.5px}
@@ -2896,6 +2924,183 @@ function owedDue(item) {
   return { text: `Due in ${d} day${s(d)}`, tone: d <= 3 ? 'warn' : 'good' };
 }
 
+/* ---------- Menu status (read-only) ----------
+   Works out which "Log an entry" rows need attention, from data already loaded. It never writes to the sheet, the page or storage.
+   Result is keyed by form id and only has keys for rows with something to show:
+     loan, dep  -> 'pending' (open) or 'overdue' (an open one is past its date)
+     bphone, bpc, bacc, sphone, spc, sacc, exp -> 'issue' (missing price, or a Row ID that is blank or repeated)
+   count is the true number flagged; items is the top 8, each with the screen it points at. */
+function menuStatus(raw, today = TODAY) {
+  try {
+    const result = {};
+
+    // Overdue first (most days overdue first), then earliest date, then the rest. Loans use `due`, deposits use `pickup`.
+    const dueOf = x => (x && (x.due || x.pickup)) || null;
+    const sortOwed = (a, b) => {
+      const aOver = Boolean(a && a.overdue);
+      const bOver = Boolean(b && b.overdue);
+      if (aOver !== bOver) return aOver ? -1 : 1;
+      if (aOver) {
+        const aDays = typeof a.daysLeft === 'number' ? a.daysLeft : 0;
+        const bDays = typeof b.daysLeft === 'number' ? b.daysLeft : 0;
+        if (aDays !== bDays) return aDays - bDays;
+      } else {
+        const aDate = dueOf(a);
+        const bDate = dueOf(b);
+        if (aDate && bDate) {
+          if (aDate.getTime() !== bDate.getTime()) return aDate.getTime() - bDate.getTime();
+        } else if (aDate && !bDate) {
+          return -1;
+        } else if (!aDate && bDate) {
+          return 1;
+        }
+      }
+      return 0;
+    };
+
+    // Loans and deposits come from the existing Owed model
+    if (raw && typeof raw === 'object') {
+      const model = owedModel(raw, today);
+      if (model) {
+        const openLoans = Array.isArray(model.loans) ? model.loans.filter(x => Boolean(x && x.open)) : [];
+        if (openLoans.length > 0) {
+          result.loan = {
+            status: openLoans.some(x => Boolean(x.overdue)) ? 'overdue' : 'pending',
+            count: openLoans.length,
+            items: [...openLoans].sort(sortOwed).slice(0, 8).map(x => ({
+              text: `${x.name || ''} — ${mny(x.owed)} · ${owedDue(x).text}`,
+              view: 'owed'
+            }))
+          };
+        }
+
+        const openDeps = Array.isArray(model.deps) ? model.deps.filter(x => Boolean(x && x.open)) : [];
+        if (openDeps.length > 0) {
+          result.dep = {
+            status: openDeps.some(x => Boolean(x.overdue)) ? 'overdue' : 'pending',
+            count: openDeps.length,
+            items: [...openDeps].sort(sortOwed).slice(0, 8).map(x => {
+              const dev = x.device ? owedStr(x.device) : '';
+              return {
+                text: `${x.name || ''} — ${mny(x.paid)} held${dev ? ` on ${dev}` : ''} · ${owedDue(x).text}`,
+                view: 'owed'
+              };
+            })
+          };
+        }
+      }
+    }
+
+    // Purchase and sale tabs: a named row with no usable price, or a repeated Row ID
+    const devConfigs = [
+      { id: 'bphone', tab: 'BoughtPhones', name: 'Phone Model', price: 'Purchased Price' },
+      { id: 'bpc', tab: 'BoughtPCs', name: 'PC model', price: 'Purchase Price' },
+      { id: 'bacc', tab: 'BoughtAccess', name: 'Model', price: 'Purchase Price' },
+      { id: 'sphone', tab: 'SoldPhones', name: 'Device Label', price: 'Sale Price' },
+      { id: 'spc', tab: 'SoldPCs', name: 'Device', price: 'Sale Price' },
+      { id: 'sacc', tab: 'SoldAccess', name: 'Item Sold', price: 'Sale Price' }
+    ];
+
+    if (raw && typeof raw === 'object') {
+      for (const cfg of devConfigs) {
+        const tab = raw[cfg.tab];
+        if (!tab || typeof tab !== 'object') continue;
+
+        const rows = Array.isArray(tab.rows) ? tab.rows : [];
+        const nonNullRows = rows.filter(r => r && typeof r === 'object');
+        if (nonNullRows.length === 0) continue;
+
+        const firstNonNullRow = nonNullRows[0];
+        // Only check prices when the tab really has that column, so a differently named header never causes false alarms
+        const hasPriceCol = (Array.isArray(tab.headers) && tab.headers.includes(cfg.price)) ||
+          (firstNonNullRow && Object.prototype.hasOwnProperty.call(firstNonNullRow, cfg.price));
+
+        const rowIdCounts = {};
+        for (const r of nonNullRows) {
+          const rid = owedStr(r['Row ID']);
+          if (rid) rowIdCounts[rid] = (rowIdCounts[rid] || 0) + 1;
+        }
+
+        let count = 0;
+        const items = [];
+
+        for (const r of nonNullRows) {
+          const nameVal = owedStr(r[cfg.name]);
+          const priceVal = r[cfg.price];
+          const priceStr = owedStr(priceVal);
+
+          if (!nameVal && !priceStr) continue; // spare row
+
+          const problems = [];
+          if (hasPriceCol && nameVal && num(priceVal) === null) problems.push('missing price');
+          const rid = owedStr(r['Row ID']);
+          if (rid && rowIdCounts[rid] > 1) problems.push(`duplicate Row ID ${rid}`);
+
+          if (problems.length > 0) {
+            count++;
+            if (items.length < 8) {
+              items.push({ text: `${nameVal || `Row ${r._row}`} — ${problems.join(', ')}`, view: 'data' });
+            }
+          }
+        }
+
+        if (count > 0) result[cfg.id] = { status: 'issue', count, items };
+      }
+    }
+
+    // Expenses: only when the sheet has a Row ID column. Flags real rows with a blank or repeated ID.
+    if (raw && typeof raw === 'object' && raw.Expenses) {
+      const expTab = raw.Expenses;
+      const expRows = Array.isArray(expTab.rows) ? expTab.rows : [];
+      const firstRow = expRows.find(r => r && typeof r === 'object');
+
+      let rowIdKey = null;
+      const headersToCheck = [];
+      if (Array.isArray(expTab.headers)) headersToCheck.push(...expTab.headers);
+      if (firstRow) headersToCheck.push(...Object.keys(firstRow));
+      for (const h of headersToCheck) {
+        if (typeof h === 'string' && h.toLowerCase().replace(/[^a-z0-9]/g, '') === 'rowid') { rowIdKey = h; break; }
+      }
+
+      if (rowIdKey) {
+        const isRealRow = r => {
+          if (!r || typeof r !== 'object') return false;
+          for (const k of Object.keys(r)) {
+            if (k === rowIdKey || k.startsWith('_')) continue;
+            if (owedStr(r[k]) !== '') return true;
+          }
+          return false;
+        };
+
+        const realRows = expRows.filter(isRealRow);
+        const idCounts = {};
+        for (const r of realRows) {
+          const rid = owedStr(r[rowIdKey]);
+          if (rid) idCounts[rid] = (idCounts[rid] || 0) + 1;
+        }
+
+        let expCount = 0;
+        const expItems = [];
+        for (const r of realRows) {
+          const rid = owedStr(r[rowIdKey]);
+          const problems = [];
+          if (!rid) problems.push('no Row ID');
+          else if (idCounts[rid] > 1) problems.push(`duplicate Row ID ${rid}`);
+          if (problems.length > 0) {
+            expCount++;
+            if (expItems.length < 8) expItems.push({ text: `Row ${r._row} — ${problems.join(', ')}`, view: 'data' });
+          }
+        }
+        if (expCount > 0) result.exp = { status: 'issue', count: expCount, items: expItems };
+      }
+    }
+
+    return result;
+  } catch (e) {
+    return {};
+  }
+}
+
 /* Shared by both kinds: amount parsing and date checking. Returns {error} or the parsed values. */
 function owedParse(amountText, dateText, amountMsg, dateMsg) {
   const a = owedStr(amountText);
@@ -2980,7 +3185,7 @@ function owedRows(items, kind, openN) {
     return `<div style="${line}"><div style="min-width:220px;flex:1"><div><b>${esc(x.name)}</b>${(isLoan ? x.item : x.device) ? ` <span class="hint" style="color:var(--muted)">· ${esc(isLoan ? x.item : x.device)}</span>` : ''}</div>`
       + `<div class="hint">${esc(meta.filter(Boolean).join(' · '))}</div></div>`
       + `<div style="display:flex;align-items:center;gap:10px"><div style="text-align:right"><div>${M(isLoan ? x.owed : x.balance)}</div><div class="hint">${isLoan ? 'balance' : 'to pay'}</div></div>`
-      + `<span class="chip ${due.tone}">${esc(due.text)}</span>${act}</div></div>`;
+      + `<span class="chip ${due.tone}${due.tone==='bad'?' glow-urgent':''}">${esc(due.text)}</span>${act}</div></div>`;
   }).join('') : `<div class="empty"><b>Nothing here</b>${isLoan ? 'No open loans right now.' : 'No deposits waiting for pickup.'}</div>`;
   if (closed.length) {
     html += `<details style="margin-top:14px"><summary style="cursor:pointer;color:var(--muted);font-weight:600">Closed (${closed.length})</summary><div style="margin-top:8px">`
@@ -3155,7 +3360,7 @@ function setupTop(){
   $('#ttl').textContent=S.view==='home'?(h<12?'Good morning':h<18?'Good afternoon':'Good evening')+', Isaiah':({spending:'Spending',reselling:'Reselling',inventory:'Stock',investing:'Investing',data:'Data & sync',owed:'Owed'})[S.view];
   $('#sub').textContent=S.view==='home'?new Date().toLocaleDateString('en-CA',{weekday:'long',month:'long',day:'numeric'})+' · '+store.source.name+', '+ago(store.syncedAt):SUBS[S.view];
   document.title='My Money';
-  $('#rail').innerHTML=`<button type="button" class="logo" data-sec="open" aria-label="Security &amp; Settings" title="Security &amp; Settings">$</button>`+navOrder().map(v=>`<button class="nav" data-act="go" data-v="${v}" ${S.view===v?'aria-current="page"':''}>${ICON[VIEW_ICON[v]]}<span>${VIEW_LABEL[v]}</span></button>`).join('')+'<span class="sp"></span>'+(navIsCustom()?'<button type="button" class="navreset" data-act="navreset" title="Put the menu back in the original order">Reset order</button>':'');
+  $('#rail').innerHTML=`<button type="button" class="logo" data-sec="open" aria-label="Security &amp; Settings" title="Security &amp; Settings">$</button>`+((od)=>{try{od=owedModel(store.base||store.raw).totals.overdue||0}catch(e){od=0}return navOrder().map(v=>{const urg=v==='owed'&&od>0;return `<button class="nav${urg?' urgent':''}" data-act="go" data-v="${v}" ${S.view===v?'aria-current="page"':''}${urg?` aria-label="Owed, ${od} overdue"`:''}>${ICON[VIEW_ICON[v]]}<span>${VIEW_LABEL[v]}</span>${urg?`<i class="nbadge" aria-hidden="true">${od>99?'99+':od}</i>`:''}</button>`}).join('')})()+'<span class="sp"></span>'+(navIsCustom()?'<button type="button" class="navreset" data-act="navreset" title="Put the menu back in the original order">Reset order</button>':'');
   $('#tools').innerHTML=`<button class="ibtn search" data-act="palette" aria-label="Search">${ICON.search}<span>Search</span><kbd>⌘K</kbd></button>
     <button class="ibtn" data-act="theme" aria-label="Theme: ${S.theme}" title="Theme: ${S.theme}">${ICON[S.theme==='dark'?'moon':S.theme==='light'?'sun':'auto']}</button>
     <button class="ibtn" data-act="privacy" aria-pressed="${S.privacy}" aria-label="Hide amounts" title="Hide amounts (P)">${S.privacy?ICON.eyeoff:ICON.eye}</button>
@@ -3542,8 +3747,9 @@ function menuScreen(){
     :`<button class="chip-b" data-lg="settings"><i class="dot" style="background:var(--warn)"></i>Not connected: saving on this device${q?' ('+q+')':''}</button>`;
   /* order: Money (expense + investment), Buying, Selling, then the Tools section (margin calculator) at the bottom.
      Dot colours follow each form's position in FORMS so they stay the same as before the reorder. */
-  const groups=['Money','Buying','Selling'].map(g=>`<h4 class="lg-gh">${g}</h4><div class="list">${FORMS.filter(f=>f.g===g).map(f=>{const n=FORMS.indexOf(f)+1;const d=J('lg.d.'+f.id,null);
-    return `<button class="li" data-lg="open" data-id="${f.id}"><span class="ic">${FORM_ICO[f.id]||'<i class="dot" style="background:var(--c'+n+')"></i>'}</span><span class="tx"><b>${E(f.t)}</b><span>${E(f.s)}</span></span>${d&&d.v?'<span class="pill warn">Draft</span>':''}${chev()}</button>`}).join('')}</div>`).join('');
+  const st=menuStatus(store.base||store.raw)||{};
+  const groups=['Money','Buying','Selling'].map(g=>`<h4 class="lg-gh">${g}</h4><div class="list">${FORMS.filter(f=>f.g===g).map(f=>{const n=FORMS.indexOf(f)+1;const d=J('lg.d.'+f.id,null);const info=st[f.id];const stAttr=info?` data-st="${info.status}"`:'';const stWord=info?(info.status==='pending'?'open':info.status==='issue'?'issue(s)':'overdue'):'';const hit=info?`<button type="button" class="st-hit" data-lg="stoggle" data-id="${f.id}" aria-expanded="false" aria-controls="st-${f.id}" aria-label="${E(f.t)}: ${info.count} ${stWord}. Show details"><span class="st-badge ${info.status}">${info.count>99?'99+':info.count}</span></button>`:'';const panel=info?`<div class="st-panel" id="st-${f.id}" role="region" aria-label="${E(f.t)} details" hidden><div class="st-head"><span>${info.count} ${info.status==='issue'?(info.count===1?'issue':'issues'):'open'}</span><span class="pill ${info.status==='pending'?'warn':'bad'}">${info.status==='pending'?'Pending':info.status==='issue'?'Issue':'Overdue'}</span></div>${(info.items||[]).map(it=>`<button type="button" class="st-item" data-lg="stgo" data-view="${it.view}"><span>${E(it.text)}</span><span aria-hidden="true">→</span></button>`).join('')}${info.count>(info.items||[]).length?`<div class="st-more">+${info.count-info.items.length} more</div>`:''}</div>`:'';
+    return `<div class="st-wrap"><div class="st-row"><button class="li" data-lg="open" data-id="${f.id}"><span class="ic"${stAttr}>${FORM_ICO[f.id]||'<i class="dot" style="background:var(--c'+n+')"></i>'}</span><span class="tx"><b>${E(f.t)}</b><span>${E(f.s)}</span></span>${d&&d.v?'<span class="pill warn">Draft</span>':''}${chev()}</button>${hit}</div>${panel}</div>`}).join('')}</div>`).join('');
   return `<div class="lg-top"><div><h2>Log an entry</h2><p>Goes straight to your sheet</p></div><div class="lg-r"><button class="ibtn" data-lg="settings" aria-label="Sheet connection and queue">${ICO.cfg}</button>${xbtn()}</div></div>${status}${groups}<h4 class="lg-gh">Tools</h4><div class="list"><button class="li" data-lg="calc"><span class="tx"><b>Margin calculator</b><span>Work out a listing price from cost and target profit</span></span>${chev()}</button></div><div style="height:24px"></div>`;
 }
 
@@ -3821,6 +4027,14 @@ document.addEventListener('click',e=>{
   switch(a){
     case 'menu':cur=null;show(menuScreen());flush(true);break;
     case 'open':openForm(d.id,false);break;
+    case 'stoggle':{
+      const p=$('#st-'+d.id);
+      if(p){const show=p.hidden;
+        $$('.st-panel').forEach(el=>{el.hidden=true});
+        $$('.st-hit').forEach(b=>b.setAttribute('aria-expanded','false'));
+        p.hidden=!show;t.setAttribute('aria-expanded',String(show))}
+      break}
+    case 'stgo':if(d.view){closeOverlay();go(d.view)}break;
     case 'again':openForm(d.id,true);break;
     case 'repeat':openForm(cur.id,true);break;
     case 'discard':LS.set(dKey(cur.id),'');openForm(cur.id,false);break;
