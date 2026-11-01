@@ -715,6 +715,22 @@ button.kpi:hover{border-color:var(--accent)}
 .privacy canvas{filter:blur(8px)}
 .chartbox{position:relative;height:250px}
 .chartbox.tall{height:300px}
+/* Money in/out chart: legend badges + Net Profit switch (additive, hc- prefix) */
+.hc-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.hc-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:var(--surface2);color:var(--muted);font-size:12.5px;font-weight:600;line-height:1.2;--sw:var(--c2)}
+.hc-badge.line{--sw:var(--c3)}
+.hc-sw{display:inline-block;flex:none;background:var(--sw)}
+.hc-sw.bar{width:10px;height:10px;border-radius:3px}
+.hc-sw.ln{width:14px;height:3px;border-radius:2px}
+.hc-switch{display:inline-flex;align-items:center;gap:8px;padding:4px 10px 4px 6px;border-radius:999px;background:transparent;border:1px solid var(--line);color:var(--muted);font-size:12.5px;font-weight:600;line-height:1.2;cursor:pointer}
+.hc-switch:focus-visible{outline:2px solid var(--c1);outline-offset:2px}
+.hc-track{position:relative;width:28px;height:16px;border-radius:999px;background:var(--surface2);border:1px solid var(--line);transition:background .15s}
+.hc-track i{position:absolute;top:1px;left:1px;width:12px;height:12px;border-radius:50%;background:var(--faint);transition:transform .15s,background .15s}
+.hc-switch[aria-checked="true"]{color:var(--ink);border-color:var(--c1)}
+.hc-switch[aria-checked="true"] .hc-track{background:var(--c1);border-color:var(--c1)}
+.hc-switch[aria-checked="true"] .hc-track i{transform:translateX(12px);background:var(--bg)}
+@media (prefers-reduced-motion:reduce){.hc-track,.hc-track i{transition:none}}
+@media (max-width:520px){.hc-controls{justify-content:flex-start}}
 .seg{display:inline-flex;background:var(--surface2);border-radius:12px;padding:3px;gap:2px}
 .seg button{padding:5px 12px;border-radius:9px;font-weight:600;font-size:13px;color:var(--muted)}
 .seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
@@ -1500,6 +1516,51 @@ function mkChart(id,cfg,summary){
   CH.push(new Chart(el,cfg));
 }
 const chartBox=(id,tall)=>`<div class="chartbox ${tall?'tall':''}"><canvas id="${id}"></canvas></div>`;
+
+/* ----- Money in/out chart helpers (pure, unit-tested) ----- */
+// Top of the Y axis: the next $500 step above the biggest value, plus 12% headroom so peaks and tooltips do not touch the border.
+function homeYMax(vals){const mx=Math.max(0,...(vals||[]).map(v=>+v||0));const top=Math.max(500,Math.ceil(mx/500)*500);return Math.round(top*1.12)}
+// Bottom of the Y axis: $0 unless the Net Profit line is shown and dips below zero.
+function homeYMin(net,showNet){if(!showNet)return 0;const mn=Math.min(0,...(net||[]).map(v=>+v||0));return mn<0?Math.floor(mn*1.12/500)*500:0}
+// Index of the highest positive value (first one wins on ties), or -1 when there is no positive value.
+function homePeak(vals){let k=-1,mx=0;(vals||[]).forEach((v,i)=>{v=+v||0;if(v>mx){mx=v;k=i}});return k}
+// Net profit per month = reselling profit minus spending.
+function homeNet(pr,sp){return (pr||[]).map((v,i)=>(+v||0)-(+(sp||[])[i]||0))}
+// Fade a #rrggbb colour to the given alpha (anything else is returned unchanged).
+function fadeColor(c,a){const m=/^#([0-9a-f]{6})$/i.exec(c||'');if(!m)return c;const n=parseInt(m[1],16);return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`}
+// Header controls: colour-coded legend badges plus the Net Profit switch.
+function homeControls(){return `<span class="hc-controls"><span class="hc-badge"><i class="hc-sw bar"></i>Spending</span><span class="hc-badge line"><i class="hc-sw ln"></i>Reselling profit</span><button type="button" class="hc-switch" id="homeNet" role="switch" aria-checked="false"><span class="hc-track"><i></i></span>Net Profit</button></span>`}
+// Chart.js config for the Money in/out chart. Builds its own options; the shared baseOpts() is only read, never changed.
+function homeChartConfig(labels,sp,pr,ui){
+  const ink=ui.ink,bar=ui.bar,ln=ui.ln,net=homeNet(pr,sp),peak=homePeak(pr),max=homeYMax([...sp,...pr]);
+  const rank={1:0,0:1,2:2};
+  const glow={id:'homeGlow',beforeDatasetsDraw(ch){
+    try{const a=ch.tooltip&&ch.tooltip.getActiveElements?ch.tooltip.getActiveElements():[];if(!a.length)return;
+      const el=ch.getDatasetMeta(0).data[a[0].index];if(!el)return;
+      const p=el.getProps(['x','y','base','width'],true);const h=p.base-p.y;if(!(h>0)||!(p.width>0))return;
+      const c=ch.ctx;c.save();c.shadowColor=fadeColor(bar,.85);c.shadowBlur=22;c.fillStyle=bar;c.beginPath();
+      if(c.roundRect)c.roundRect(p.x-p.width/2,p.y,p.width,h,6);else c.rect(p.x-p.width/2,p.y,p.width,h);
+      c.fill();c.restore()}catch(e){}}};
+  const pill={id:'homePeak',afterDatasetsDraw(ch){
+    try{if(peak<0)return;const m=ch.getDatasetMeta(1);if(m.hidden)return;const pt=m.data[peak];if(!pt)return;
+      const a=ch.tooltip&&ch.tooltip.getActiveElements?ch.tooltip.getActiveElements():[];if(a.length&&a[0].index===peak)return;
+      const c=ch.ctx,A=ch.chartArea,t='MAX: '+mny(pr[peak]);c.save();c.font="700 11px 'Plus Jakarta Sans',system-ui,sans-serif";
+      const w=c.measureText(t).width+18,h=20;let x=Math.min(Math.max(pt.x-w/2,A.left),A.right-w),y=Math.max(2,pt.y-h-9);
+      c.fillStyle=ln;c.beginPath();if(c.roundRect)c.roundRect(x,y,w,h,10);else c.rect(x,y,w,h);c.fill();
+      c.fillStyle=ui.bg;c.textAlign='center';c.textBaseline='middle';c.fillText(t,x+w/2,y+h/2+.5);c.restore()}catch(e){}}};
+  return {data:{labels,datasets:[
+    {type:'bar',label:'Spending',data:sp,backgroundColor:bar,borderRadius:6,order:2},
+    {type:'line',label:'Reselling profit',data:pr,borderColor:ln,backgroundColor:ln,cubicInterpolationMode:'monotone',tension:0,pointRadius:3,borderWidth:2.5,order:1},
+    {type:'line',label:'Net profit',data:net,hidden:true,borderColor:ui.net,backgroundColor:ui.net,cubicInterpolationMode:'monotone',tension:0,pointRadius:2,borderWidth:1.5,borderDash:[5,4],order:0}]},
+  options:{responsive:true,maintainAspectRatio:false,animation:ui.still?false:{duration:350},layout:{padding:{top:18}},
+    interaction:{mode:'index',intersect:false},
+    plugins:{legend:{display:false},tooltip:{enabled:!ui.privacy,backgroundColor:ui.ink2,titleColor:ui.bg,bodyColor:ui.bg,cornerRadius:10,padding:10,boxWidth:10,boxHeight:10,boxPadding:6,usePointStyle:false,
+      itemSort:(a,b)=>(rank[a.datasetIndex]??9)-(rank[b.datasetIndex]??9),
+      callbacks:{label:c=>' '+c.dataset.label+': '+mny(c.parsed.y),labelColor:c=>({borderColor:'transparent',backgroundColor:c.dataset.type==='bar'?bar:c.dataset.borderColor,borderWidth:0,borderRadius:3})}}},
+    scales:{x:{grid:{display:false},ticks:{color:ink,maxTicksLimit:13,maxRotation:0,autoSkip:true},border:{display:false}},
+      y:{min:0,max,beginAtZero:true,grid:{color:fadeColor(ui.grid,.4)},border:{display:false},ticks:{color:ink,stepSize:500,includeBounds:false,maxTicksLimit:12,callback:v=>'$'+compact(v)}}}},
+  plugins:[glow,pill]};
+}
 
 /* ================= TABLES ================= */
 const TS={},TC={};
@@ -2560,7 +2621,7 @@ function vHome(){
   </div>
   ${card('Insights',ins.length?`<div class="insights">${ins.map(x=>`<button class="ins" data-act="${x.act}" data-v="${x.v||''}" data-k="${x.k||''}" data-x="${esc(x.x||'')}" data-id="${x.id||''}"><span class="ic">${ICON[x.i]||ICON.bulb}</span><p>${x.t}</p></button>`).join('')}</div>`:'<div class="empty">Insights appear once there is enough history.</div>','<span class="hint">Fresh picks every day</span>')}
   <div class="grid g21">
-    ${card('Money in and out, last 12 months',chartBox('homeChart'),'<span class="hint">Bars: spending · Line: reselling profit</span>')}
+    ${card('Money in and out, last 12 months',chartBox('homeChart'),homeControls())}
     <div class="grid" style="align-content:start">
       ${card('Needs attention',att.length?`<div class="list">${att.map(x=>`<button class="li" data-act="${x.act}" data-v="${x.v}" data-k="${x.k||''}" data-x="${esc(x.x||'')}"><span class="ic">${ICON[x.i]}</span><span class="tx"><b style="white-space:normal">${x.t}</b><span>${esc(x.s)}</span></span>${ICON.chev.replace('<svg','<svg width="16" height="16"')}</button>`).join('')}</div>`:`<div class="empty"><b>All clear</b>Nothing needs your attention.</div>`)}
     </div>
@@ -2570,9 +2631,22 @@ function vHome(){
     const B=bucketsFor({start:addD(TODAY,-364),end:TODAY},'month');
     const sp=B.map(b=>sum(D.expenses.filter(e=>!e.isRefund&&e.date>=b.s&&e.date<=b.e),e=>e.amount));
     const pr=B.map(b=>sum(D.items.filter(i=>i.sold&&i.profit!=null&&i.sellDate>=b.s&&i.sellDate<=b.e),i=>i.profit));
-    const o=baseOpts({legend:false,zero:false});
-    mkChart('homeChart',{data:{labels:B.map(b=>b.label),datasets:[{type:'bar',label:'Spending',data:sp,backgroundColor:cv('--c2'),borderRadius:6,order:2},{type:'line',label:'Reselling profit',data:pr,borderColor:cv('--c3'),backgroundColor:cv('--c3'),tension:.35,pointRadius:3,borderWidth:2.5,order:1}]},options:o},
-      `Monthly spending and reselling profit. Latest month: spending ${mny(sp[sp.length-1])}, profit ${mny(pr[pr.length-1])}.`);
+    const summary=`Monthly spending and reselling profit. Latest month: spending ${mny(sp[sp.length-1])}, profit ${mny(pr[pr.length-1])}.`;
+    let enhanced=false;
+    try{
+      const cfg=homeChartConfig(B.map(b=>b.label),sp,pr,{ink:cv('--muted'),grid:cv('--line'),bar:cv('--c2'),ln:cv('--c3'),net:cv('--c1'),bg:cv('--bg'),ink2:cv('--ink'),privacy:!!S.privacy,still:matchMedia('(prefers-reduced-motion:reduce)').matches});
+      mkChart('homeChart',cfg,summary);enhanced=true;
+      const sw=document.getElementById('homeNet'),ch=typeof Chart!=='undefined'&&Chart.getChart?Chart.getChart('homeChart'):null;
+      if(sw&&ch)sw.addEventListener('click',()=>{
+        const on=sw.getAttribute('aria-checked')!=='true';sw.setAttribute('aria-checked',on?'true':'false');
+        ch.setDatasetVisibility(2,on);ch.options.scales.y.min=homeYMin(ch.data.datasets[2].data,on);ch.update();
+      });
+    }catch(e){
+      if(!enhanced){ // fall back to the original simple chart so the dashboard never loses it
+        const o=baseOpts({legend:false,zero:false});
+        mkChart('homeChart',{data:{labels:B.map(b=>b.label),datasets:[{type:'bar',label:'Spending',data:sp,backgroundColor:cv('--c2'),borderRadius:6,order:2},{type:'line',label:'Reselling profit',data:pr,borderColor:cv('--c3'),backgroundColor:cv('--c3'),tension:.35,pointRadius:3,borderWidth:2.5,order:1}]},options:o},summary);
+      }
+    }
   }};
 }
 
