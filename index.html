@@ -3065,6 +3065,272 @@ document.addEventListener('submit', e => {
   owedSave(f.dataset.owedform, f.dataset.oid);
 });
 /* ===== OWED END ===== */
+/* ===== STATUS SIGNALS ENGINE START ===== */
+/* Read-only. Works out which "Log an entry" rows need attention. Never writes to the sheet or to any data. */
+const SS_DEFAULTS = { graceDays: 0, openMode: 'direct', hover: true };
+
+function ssNormPrefs(p) {
+  try {
+    const rawP = (p && typeof p === 'object') ? p : {};
+    let graceDays = parseInt(rawP.graceDays, 10);
+    if (isNaN(graceDays)) graceDays = 0;
+    graceDays = Math.max(0, Math.min(365, graceDays));
+
+    const openMode = rawP.openMode === 'filtered' ? 'filtered' : 'direct';
+
+    let hover = true;
+    if (rawP.hover === false || rawP.hover === 'false' || rawP.hover === 0) {
+      hover = false;
+    }
+
+    return { graceDays, openMode, hover };
+  } catch (e) {
+    return { graceDays: 0, openMode: 'direct', hover: true };
+  }
+}
+
+function ssLoadPrefs() {
+  try {
+    const raw = LS.get('ss.prefs');
+    if (!raw) return ssNormPrefs({});
+    return ssNormPrefs(JSON.parse(raw));
+  } catch (e) {
+    return ssNormPrefs({});
+  }
+}
+
+function ssSavePrefs(p) {
+  const norm = ssNormPrefs(p);
+  try {
+    LS.set('ss.prefs', JSON.stringify(norm));
+  } catch (e) {}
+  return norm;
+}
+
+const SS_LEVEL_RANK = { pending: 1, issue: 2, overdue: 3 };
+
+function ssWorst(levels) {
+  try {
+    if (!Array.isArray(levels)) return null;
+    let maxRank = 0;
+    let worst = null;
+    for (let i = 0; i < levels.length; i++) {
+      const lvl = levels[i];
+      const rank = SS_LEVEL_RANK[lvl] || 0;
+      if (rank > maxRank) {
+        maxRank = rank;
+        worst = lvl;
+      }
+    }
+    return worst;
+  } catch (e) {
+    return null;
+  }
+}
+
+function ssBuild(ctx) {
+  const mkEmpty = () => ({
+    loan: { level: null, count: 0, entries: [] },
+    dep: { level: null, count: 0, entries: [] },
+    bpc: { level: null, count: 0, entries: [] },
+    sphone: { level: null, count: 0, entries: [] }
+  });
+
+  try {
+    if (!ctx) return mkEmpty();
+
+    const prefs = ssNormPrefs(ctx.prefs);
+    const today = ctx.today instanceof Date ? ctx.today : new Date();
+    const fmt = ctx.fmt || {};
+    const fMoney = typeof fmt.mny === 'function' ? fmt.mny : (v => String(v));
+    const fDate = typeof fmt.fdy === 'function' ? fmt.fdy : (v => v ? new Date(v).toLocaleDateString() : '');
+
+    const getDupRowIds = (rawTab) => {
+      const counts = {};
+      try {
+        const rows = rawTab && Array.isArray(rawTab.rows) ? rawTab.rows : [];
+        for (let i = 0; i < rows.length; i++) {
+          const val = rows[i] ? rows[i]['Row ID'] : null;
+          if (val !== undefined && val !== null) {
+            const s = String(val).trim();
+            if (s !== '') counts[s] = (counts[s] || 0) + 1;
+          }
+        }
+      } catch (e) {}
+      return counts;
+    };
+
+    const owedDupCounts = getDupRowIds(ctx.raw && ctx.raw.Owed);
+    const bpcDupCounts = getDupRowIds(ctx.raw && ctx.raw.BoughtPCs);
+    const sphoneDupCounts = getDupRowIds(ctx.raw && ctx.raw.SoldPhones);
+
+    const sortEntries = (entries) => entries.sort((a, b) => {
+      const rA = SS_LEVEL_RANK[a.level] || 0;
+      const rB = SS_LEVEL_RANK[b.level] || 0;
+      if (rA !== rB) return rB - rA;
+      return (a.title || '').localeCompare(b.title || '');
+    });
+
+    const result = mkEmpty();
+
+    /* One loan or deposit record. cfg tells it which fields to use. */
+    const owedEntries = (records, cfg) => {
+      const out = [];
+      for (let i = 0; i < records.length; i++) {
+        const rec = records[i];
+        if (!rec) continue;
+
+        const issues = cfg.issues(rec);
+        const rowId = rec.id !== undefined && rec.id !== null ? String(rec.id).trim() : '';
+        if (!rowId) issues.push('No Row ID, so it cannot be updated');
+        else if (owedDupCounts[rowId] > 1) issues.push('Row ID is used by another row');
+
+        const dueDate = rec[cfg.dateField];
+        let isOverdue = false;
+        let daysPast = 0;
+        if (rec.open && dueDate instanceof Date) {
+          daysPast = Math.round((today - dueDate) / 86400000);
+          if (daysPast > prefs.graceDays) isOverdue = true;
+        }
+
+        let level = null;
+        let reasons = issues;
+        if (isOverdue) {
+          level = 'overdue';
+          reasons = [`${daysPast} ${daysPast === 1 ? 'day' : 'days'} past ${cfg.dateWord}`].concat(issues);
+        } else if (issues.length > 0) {
+          level = 'issue';
+        } else if (rec.open) {
+          level = 'pending';
+          let pStr = cfg.pendingText(rec, fMoney);
+          if (dueDate instanceof Date) pStr += `, ${cfg.byWord} ${fDate(dueDate)}`;
+          reasons = [pStr];
+        }
+        if (!level) continue;
+
+        const titleName = rec.name || 'Unnamed';
+        const sub = rec[cfg.subField];
+        out.push({
+          key: `${cfg.kind}_${rec.id}_${rec.row}`,
+          title: sub ? `${titleName} · ${sub}` : titleName,
+          reasons,
+          level,
+          target: { type: 'owed', kind: cfg.kind, id: rec.id, row: rec.row }
+        });
+      }
+      return out;
+    };
+
+    const finish = (entries) => {
+      const sorted = sortEntries(entries);
+      return { level: ssWorst(sorted.map(e => e.level)), count: sorted.length, entries: sorted };
+    };
+
+    /* Loans */
+    try {
+      if (ctx.owed && ctx.owed.hasOwed && Array.isArray(ctx.owed.loans)) {
+        result.loan = finish(owedEntries(ctx.owed.loans, {
+          kind: 'loan', dateField: 'due', dateWord: 'return date', byWord: 'return by', subField: 'item',
+          issues: rec => {
+            const a = [];
+            if (!rec.loaned) a.push('No loan amount');
+            if (rec.open && !rec.due) a.push('No return date');
+            if (rec.repaid > rec.loaned) a.push('Repaid is more than the amount loaned');
+            return a;
+          },
+          pendingText: (rec, money) => `owes ${money(rec.owed)}`
+        }));
+      }
+    } catch (e) {}
+
+    /* Deposits */
+    try {
+      if (ctx.owed && ctx.owed.hasOwed && Array.isArray(ctx.owed.deps)) {
+        result.dep = finish(owedEntries(ctx.owed.deps, {
+          kind: 'dep', dateField: 'pickup', dateWord: 'pickup date', byWord: 'pick up by', subField: 'device',
+          issues: rec => {
+            const a = [];
+            if (!rec.total) a.push('No total price');
+            if (rec.open && !rec.pickup) a.push('No pickup date');
+            if (rec.paid > rec.total) a.push('Deposit paid is more than the total');
+            return a;
+          },
+          pendingText: (rec, money) => `${money(rec.balance)} still to pay`
+        }));
+      }
+    } catch (e) {}
+
+    const dupEntries = (counts, prefix, where) => {
+      const out = [];
+      for (const rId of Object.keys(counts)) {
+        if (counts[rId] > 1) {
+          out.push({
+            key: `${prefix}_dup_${rId}`,
+            title: `Duplicate Row ID ${rId}`,
+            reasons: [`Used by ${counts[rId]} rows in the ${where} tab`],
+            level: 'issue',
+            target: { type: 'view', view: 'data' }
+          });
+        }
+      }
+      return out;
+    };
+
+    const items = Array.isArray(ctx.items) ? ctx.items : [];
+
+    /* Bought PC */
+    try {
+      const entries = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (!item || item.kind !== 'PC') continue;
+        const issues = [];
+        if (item.buyPrice == null) issues.push('No purchase price, so profit cannot be worked out');
+        if (!item.buyDate) issues.push('No purchase date');
+        if (item.name === 'Unnamed') issues.push('No PC model');
+        if (issues.length) {
+          entries.push({
+            key: `bpc_${item.id}`,
+            title: item.row ? `${item.name} · row ${item.row}` : item.name,
+            reasons: issues,
+            level: 'issue',
+            target: { type: 'item', id: item.id }
+          });
+        }
+      }
+      result.bpc = finish(entries.concat(dupEntries(bpcDupCounts, 'bpc', 'Bought PC')));
+    } catch (e) {}
+
+    /* Sold phone */
+    try {
+      const entries = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (!item || item.kind !== 'Phone' || item.sold !== true) continue;
+        const issues = [];
+        if (item.sellPrice == null) issues.push('No sale price');
+        if (!item.sellDate) issues.push('No sale date');
+        if (item.sellDate && item.buyDate && item.sellDate < item.buyDate) issues.push('Sale date is before the purchase date');
+        if (item.buyPrice == null) issues.push('No purchase price, so profit cannot be worked out');
+        if (issues.length) {
+          entries.push({
+            key: `sphone_${item.id}`,
+            title: item.name,
+            reasons: issues,
+            level: 'issue',
+            target: { type: 'item', id: item.id }
+          });
+        }
+      }
+      result.sphone = finish(entries.concat(dupEntries(sphoneDupCounts, 'sphone', 'Sold phone')));
+    } catch (e) {}
+
+    return result;
+  } catch (e) {
+    return mkEmpty();
+  }
+}
+/* ===== STATUS SIGNALS ENGINE END ===== */
 const VIEWS={home:vHome,spending:vSpending,reselling:vReselling,inventory:vInventory,investing:vInvesting,data:vData,owed:vOwed};
 const SUBS={spending:'Where your money goes',reselling:'What your flips earn',inventory:'Devices waiting to sell',investing:'Your portfolios',data:'Sources, sync and quality',owed:'Loans and deposits'};
 
