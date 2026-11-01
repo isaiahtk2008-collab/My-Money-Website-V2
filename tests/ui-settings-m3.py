@@ -32,7 +32,7 @@ with sync_playwright() as p:
     page.click('.logo[data-sec=open]')
     page.wait_for_selector('.m3-scope')
     check('Card count', page.locator('.m3-card').count() == 6)
-    check('Card titles', page.locator('.m3-card-title').all_inner_texts() == ['Google Account Connection', 'Local Security', 'In-App Reminders', 'Status colours on the Log menu', 'Hover effects', 'Sheet Sync Connection'])
+    check('Card titles', page.locator('.m3-card-title').all_inner_texts() == ['Google Account Connection', 'Local Security', 'In-App Reminders', 'Status colours on the Log menu', 'Appearance', 'Sheet Sync Connection'])
     check('Border radius', page.evaluate("getComputedStyle(document.querySelector('.m3-card')).borderRadius") == '16px')
     selectors = ['[data-sec=signout]', '#sec-u', '#sec-n1', '#sec-n2', '[data-sec=save]', '#notif-on', '#notif-day', '#notif-time', '[data-notif=test]', '[data-sec=sheet]', '[data-sec-root]']
     for selector in selectors:
