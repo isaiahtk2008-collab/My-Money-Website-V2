@@ -1,4 +1,5 @@
 // Run with: node tests/menu-status.test.mjs
+// Also covers draftState (fresh vs 24h-old drafts) and syncUrgency (failed or day-old queued entries).
 // Loads the REAL menuStatus (and the owed helpers it uses) out of index.html, then checks the "Log an entry" status rules:
 // loans and deposits are pending or overdue by their date, purchase/sale tabs flag a missing price or a repeated Row ID,
 // Expenses flags a blank or repeated Row ID only when the sheet has that column, spare rows and missing tabs are ignored,
@@ -35,8 +36,8 @@ const src = [
   ...['nf0', 'nf2', 'mny', 'DAY', 'sod', 'diffD', 'num', 'owedStr'].map(constLine),
   pdSrc,
   'const TODAY=sod(new Date(2026,9,31));',
-  fnBlock('owedModel'), fnBlock('owedDue'), fnBlock('menuStatus'),
-  'this.menuStatus=menuStatus;'
+  fnBlock('owedModel'), fnBlock('owedDue'), fnBlock('menuStatus'), fnBlock('draftState'), fnBlock('syncUrgency'),
+  'this.menuStatus=menuStatus;this.draftState=draftState;this.syncUrgency=syncUrgency;'
 ].join('\n');
 const ctx = vm.createContext({ Intl, Math, Date, Object, Array, String, Number, Boolean, JSON });
 vm.runInContext(src, ctx);
@@ -152,6 +153,43 @@ test('garbage input never throws', () => {
     assert.doesNotThrow(() => ms(g));
     assert.equal(typeof ms(g), 'object');
   }
+});
+
+const H = 3600 * 1000, NOW = 1_800_000_000_000;
+const dsj = (d, n = NOW) => JSON.parse(JSON.stringify(ctx.draftState(d, n)));
+const suj = (q, n = NOW) => JSON.parse(JSON.stringify(ctx.syncUrgency(q, n)));
+
+test('draftState: no draft, empty draft and a draft with no values are null', () => {
+  assert.equal(dsj(null), null); assert.equal(dsj(undefined), null); assert.equal(dsj({}), null); assert.equal(dsj({ ts: NOW }), null);
+});
+test('draftState: fresh until exactly 24 hours, then stale', () => {
+  assert.equal(dsj({ v: { a: 1 }, ts: NOW - 1000 }), 'fresh');
+  assert.equal(dsj({ v: { a: 1 }, ts: NOW - 24 * H + 1 }), 'fresh');
+  assert.equal(dsj({ v: { a: 1 }, ts: NOW - 24 * H }), 'stale');
+  assert.equal(dsj({ v: { a: 1 }, ts: NOW - 90 * H }), 'stale');
+});
+test('draftState: a missing or invalid timestamp is fresh, never stale', () => {
+  for (const ts of [undefined, null, 'x', NaN, Infinity]) assert.equal(dsj({ v: { a: 1 }, ts }), 'fresh');
+});
+
+test('syncUrgency: empty and junk queues are calm and never throw', () => {
+  for (const q of [undefined, null, 5, 'x', {}, [], [null, 3, 'a']]) { const r = suj(q); assert.equal(r.urgent, false); assert.equal(r.n, 0); }
+});
+test('syncUrgency: recent entries wait calmly', () => {
+  const r = suj([{ ts: NOW - 2 * H }, { ts: NOW - 1000 }]);
+  assert.deepEqual(r, { n: 2, failed: 0, stale: 0, urgent: false });
+});
+test('syncUrgency: a failed entry is urgent straight away', () => {
+  const r = suj([{ ts: NOW, err: 'Script needs updating' }, { ts: NOW }]);
+  assert.equal(r.urgent, true); assert.equal(r.failed, 1); assert.equal(r.n, 2);
+});
+test('syncUrgency: an entry waiting 24 hours or more is urgent', () => {
+  assert.equal(suj([{ ts: NOW - 24 * H }]).urgent, true);
+  assert.equal(suj([{ ts: NOW - 24 * H + 1 }]).urgent, false);
+  assert.equal(suj([{}]).urgent, false, 'no timestamp is never treated as stale');
+});
+test('syncUrgency: an empty err string is not a failure', () => {
+  assert.equal(suj([{ ts: NOW, err: '' }]).failed, 0);
 });
 
 console.log(`\n${passed} passed`);

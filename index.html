@@ -443,7 +443,7 @@
 :root{
   --bg:#f4f5f8; --surface:#ffffff; --surface2:#eceff4; --ink:#161a22; --muted:#596273; --faint:#8791a1; --line:#e1e5ec;
   --accent:#1f6feb; --accent-ink:#ffffff; --accent-soft:#e6efff;
-  --good:#12784a; --good-soft:#e1f4ea; --warn:#9a5300; --warn-soft:#fcefd9; --bad:#bf3326; --bad-soft:#fde7e4;
+  --good:#12784a; --good-soft:#e1f4ea; --warn:#9a5300; --warn-soft:#fcefd9; --bad:#bf3326; --bad-soft:#fde7e4; --draft:#6d4fd1; --draft-soft:#efe9fc;
   --shadow:0 1px 2px rgba(22,26,34,.06),0 6px 20px rgba(22,26,34,.05);
   --c1:#2f6fe4; --c2:#d97200; --c3:#0c9482; --c4:#8a55d6; --c5:#d03c84; --c6:#76871a; --c7:#1798c7; --c8:#b04e38;
   --font:'Plus Jakarta Sans',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
@@ -452,13 +452,13 @@
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --bg:#0e1116; --surface:#161a21; --surface2:#1f242d; --ink:#e9ecf1; --muted:#a2abb9; --faint:#7b8595; --line:#2a303b;
   --accent:#7fb0ff; --accent-ink:#0b1220; --accent-soft:#16294a;
-  --good:#5fd19a; --good-soft:#123120; --warn:#f0b35a; --warn-soft:#35270f; --bad:#ff8f84; --bad-soft:#3b1b18;
+  --good:#5fd19a; --good-soft:#123120; --warn:#f0b35a; --warn-soft:#35270f; --bad:#ff8f84; --bad-soft:#3b1b18; --draft:#b39dfa; --draft-soft:#2a2150;
   --shadow:0 1px 2px rgba(0,0,0,.45);
   --c1:#7fb0ff; --c2:#f5a54a; --c3:#4fd1b8; --c4:#c3a0f5; --c5:#f08ab9; --c6:#c2d255; --c7:#6cc8ec; --c8:#e69a85; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#0e1116; --surface:#161a21; --surface2:#1f242d; --ink:#e9ecf1; --muted:#a2abb9; --faint:#7b8595; --line:#2a303b;
   --accent:#7fb0ff; --accent-ink:#0b1220; --accent-soft:#16294a;
-  --good:#5fd19a; --good-soft:#123120; --warn:#f0b35a; --warn-soft:#35270f; --bad:#ff8f84; --bad-soft:#3b1b18;
+  --good:#5fd19a; --good-soft:#123120; --warn:#f0b35a; --warn-soft:#35270f; --bad:#ff8f84; --bad-soft:#3b1b18; --draft:#b39dfa; --draft-soft:#2a2150;
   --shadow:0 1px 2px rgba(0,0,0,.45);
   --c1:#7fb0ff; --c2:#f5a54a; --c3:#4fd1b8; --c4:#c3a0f5; --c5:#f08ab9; --c6:#c2d255; --c7:#6cc8ec; --c8:#e69a85; color-scheme:dark}
 *{box-sizing:border-box}
@@ -666,6 +666,15 @@ button.li:hover{background:var(--surface2);border-radius:10px}
 @keyframes urgent-icon-glow{0%,100%{filter:drop-shadow(0 0 4px color-mix(in srgb,var(--bad) 55%,transparent))}50%{filter:drop-shadow(0 0 8px color-mix(in srgb,var(--bad) 70%,transparent))}}
 .nav.urgent span:not(.nbadge){color:var(--bad)}
 .chip.bad.glow-urgent{border-radius:inherit}
+.glow-draft{--glow:var(--draft);box-shadow:0 0 8px 1px color-mix(in srgb,var(--glow) 40%,transparent);animation:urgent-glow 2.4s ease-in-out infinite}
+.lg-gh+.list .li .ic{position:relative}
+.lg-gh+.list .li .ic[data-dr]{color:var(--draft);background:color-mix(in srgb,var(--draft) 12%,transparent);border:1px dashed color-mix(in srgb,var(--draft) 60%,transparent)}
+.lg-gh+.list .li .ic[data-dr="stale"]{--glow:var(--draft);box-shadow:0 0 8px 1px color-mix(in srgb,var(--glow) 40%,transparent);animation:urgent-glow 2.4s ease-in-out infinite}
+.st-badge.draft{border-radius:6px;background:var(--draft);color:var(--surface);padding:0 3px}
+.lg-gh+.list .li .ic .st-badge.draft svg{width:10px;height:10px;display:block}
+.pill.draft{background:var(--draft-soft);color:var(--draft)}
+.pill.draft.glow-draft{border-radius:999px}
+.btn.glow-draft{border-radius:inherit}
 .li .tx{flex:1;min-width:0}
 .li .tx b{font-weight:600;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .li .tx span{color:var(--muted);font-size:12.5px}
@@ -3101,6 +3110,35 @@ function menuStatus(raw, today = TODAY) {
   }
 }
 
+/* ---------- Draft age and sync urgency (pure: no storage, no DOM) ----------
+   A saved draft is 'fresh' (calm violet) until it has sat for 24 hours, then 'stale' (it glows).
+   A queued entry that failed to send, or has waited 24 hours, makes the sync status urgent (red glow). */
+function draftState(d, now = Date.now()) {
+  if (!d || !d.v) return null;
+  if (typeof d.ts === 'number' && Number.isFinite(d.ts) && (now - d.ts >= 24 * 3600 * 1000)) {
+    return 'stale';
+  }
+  return 'fresh';
+}
+
+function syncUrgency(q, now = Date.now()) {
+  let n = 0, failed = 0, stale = 0;
+  if (Array.isArray(q)) {
+    for (const x of q) {
+      if (x && typeof x === 'object') {
+        n++;
+        if (typeof x.err === 'string' && x.err !== '') {
+          failed++;
+        }
+        if (typeof x.ts === 'number' && Number.isFinite(x.ts) && (now - x.ts >= 24 * 3600 * 1000)) {
+          stale++;
+        }
+      }
+    }
+  }
+  return { n, failed, stale, urgent: failed > 0 || stale > 0 };
+}
+
 /* Shared by both kinds: amount parsing and date checking. Returns {error} or the parsed values. */
 function owedParse(amountText, dateText, amountMsg, dateMsg) {
   const a = owedStr(amountText);
@@ -3743,13 +3781,14 @@ const qn=()=>J('lg.q',[]).length;
 
 function menuScreen(){
   const url=LS.get('lgUrl'),q=qn();
-  const status=url?(q?`<button class="chip-b" data-lg="settings"><i class="dot" style="background:var(--warn)"></i>${q} waiting to send</button>`:`<button class="chip-b" data-lg="settings"><i class="dot" style="background:var(--good)"></i>Connected to your sheet</button>`)
-    :`<button class="chip-b" data-lg="settings"><i class="dot" style="background:var(--warn)"></i>Not connected: saving on this device${q?' ('+q+')':''}</button>`;
+  const su=syncUrgency(J('lg.q',[]));
+  const status=url?(q?`<button class="${su.urgent?'chip-b glow-urgent':'chip-b'}" data-lg="settings"><i class="dot" style="background:var(--${su.urgent?'bad':'warn'})"></i>${q} waiting to send${su.urgent?' · '+(su.failed?su.failed+' failed':'over a day'):''}</button>`:`<button class="chip-b" data-lg="settings"><i class="dot" style="background:var(--good)"></i>Connected to your sheet</button>`)
+    :`<button class="${su.urgent?'chip-b glow-urgent':'chip-b'}" data-lg="settings"><i class="dot" style="background:var(--${su.urgent?'bad':'warn'})"></i>Not connected: saving on this device${q?' ('+q+')':''}</button>`;
   /* order: Money (expense + investment), Buying, Selling, then the Tools section (margin calculator) at the bottom.
      Dot colours follow each form's position in FORMS so they stay the same as before the reorder. */
   const st=menuStatus(store.base||store.raw)||{};
-  const groups=['Money','Buying','Selling'].map(g=>`<h4 class="lg-gh">${g}</h4><div class="list">${FORMS.filter(f=>f.g===g).map(f=>{const n=FORMS.indexOf(f)+1;const d=J('lg.d.'+f.id,null);const info=st[f.id];const stAttr=info?` data-st="${info.status}"`:'';const stWord=info?(info.status==='pending'?'open':info.status==='issue'?'issue(s)':'overdue'):'';const hit=info?`<button type="button" class="st-hit" data-lg="stoggle" data-id="${f.id}" aria-expanded="false" aria-controls="st-${f.id}" aria-label="${E(f.t)}: ${info.count} ${stWord}. Show details"><span class="st-badge ${info.status}">${info.count>99?'99+':info.count}</span></button>`:'';const panel=info?`<div class="st-panel" id="st-${f.id}" role="region" aria-label="${E(f.t)} details" hidden><div class="st-head"><span>${info.count} ${info.status==='issue'?(info.count===1?'issue':'issues'):'open'}</span><span class="pill ${info.status==='pending'?'warn':'bad'}">${info.status==='pending'?'Pending':info.status==='issue'?'Issue':'Overdue'}</span></div>${(info.items||[]).map(it=>`<button type="button" class="st-item" data-lg="stgo" data-view="${it.view}"><span>${E(it.text)}</span><span aria-hidden="true">→</span></button>`).join('')}${info.count>(info.items||[]).length?`<div class="st-more">+${info.count-info.items.length} more</div>`:''}</div>`:'';
-    return `<div class="st-wrap"><div class="st-row"><button class="li" data-lg="open" data-id="${f.id}"><span class="ic"${stAttr}>${FORM_ICO[f.id]||'<i class="dot" style="background:var(--c'+n+')"></i>'}</span><span class="tx"><b>${E(f.t)}</b><span>${E(f.s)}</span></span>${d&&d.v?'<span class="pill warn">Draft</span>':''}${chev()}</button>${hit}</div>${panel}</div>`}).join('')}</div>`).join('');
+  const groups=['Money','Buying','Selling'].map(g=>`<h4 class="lg-gh">${g}</h4><div class="list">${FORMS.filter(f=>f.g===g).map(f=>{const n=FORMS.indexOf(f)+1;const d=J('lg.d.'+f.id,null);const info=st[f.id];const dr=draftState(d);const drAttr=(dr&&!info)?` data-dr="${dr}"`:'';const drBadge=(dr&&!info)?'<span class="st-badge draft" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1L19 8l-3-3L5 16z"/></svg></span>':'';const stAttr=info?` data-st="${info.status}"`:'';const stWord=info?(info.status==='pending'?'open':info.status==='issue'?'issue(s)':'overdue'):'';const hit=info?`<button type="button" class="st-hit" data-lg="stoggle" data-id="${f.id}" aria-expanded="false" aria-controls="st-${f.id}" aria-label="${E(f.t)}: ${info.count} ${stWord}. Show details"><span class="st-badge ${info.status}">${info.count>99?'99+':info.count}</span></button>`:'';const panel=info?`<div class="st-panel" id="st-${f.id}" role="region" aria-label="${E(f.t)} details" hidden><div class="st-head"><span>${info.count} ${info.status==='issue'?(info.count===1?'issue':'issues'):'open'}</span><span class="pill ${info.status==='pending'?'warn':'bad'}">${info.status==='pending'?'Pending':info.status==='issue'?'Issue':'Overdue'}</span></div>${(info.items||[]).map(it=>`<button type="button" class="st-item" data-lg="stgo" data-view="${it.view}"><span>${E(it.text)}</span><span aria-hidden="true">→</span></button>`).join('')}${info.count>(info.items||[]).length?`<div class="st-more">+${info.count-info.items.length} more</div>`:''}</div>`:'';
+    return `<div class="st-wrap"><div class="st-row"><button class="li" data-lg="open" data-id="${f.id}"><span class="ic"${stAttr}${drAttr}>${FORM_ICO[f.id]||'<i class="dot" style="background:var(--c'+n+')"></i>'}${drBadge}</span><span class="tx"><b>${E(f.t)}</b><span>${E(f.s)}</span></span>${dr?`<span class="pill draft${dr==='stale'?' glow-draft':''}">${dr==='stale'?'Draft · waiting':'Draft'}</span>`:''}${chev()}</button>${hit}</div>${panel}</div>`}).join('')}</div>`).join('');
   return `<div class="lg-top"><div><h2>Log an entry</h2><p>Goes straight to your sheet</p></div><div class="lg-r"><button class="ibtn" data-lg="settings" aria-label="Sheet connection and queue">${ICO.cfg}</button>${xbtn()}</div></div>${status}${groups}<h4 class="lg-gh">Tools</h4><div class="list"><button class="li" data-lg="calc"><span class="tx"><b>Margin calculator</b><span>Work out a listing price from cost and target profit</span></span>${chev()}</button></div><div style="height:24px"></div>`;
 }
 
@@ -4075,6 +4114,58 @@ document.addEventListener('keydown',e=>{
   if(e.key==='n'){e.preventDefault();show(menuScreen())}
 });
 
+/* ---------- Unsaved-edit glow on "Save changes" (UI only: never submits, never writes anything) ---------- */
+(function(){
+  try {
+    const snaps = new WeakMap();
+
+    function getSig(form) {
+      const els = Array.from(form.elements).filter(el =>
+        el.tagName && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName) && el.type !== 'button' && el.type !== 'submit'
+      );
+      return JSON.stringify(els.map(el => (el.type === 'checkbox' || el.type === 'radio') ? el.checked : el.value));
+    }
+
+    function getSubmitBtn(form) {
+      return form.querySelector('.ed-actions button[type="submit"]');
+    }
+
+    document.addEventListener('focusin', function(e) {
+      const form = e.target && e.target.closest && e.target.closest('form');
+      if (!form) return;
+      const btn = getSubmitBtn(form);
+      if (!btn) return;
+      if (!snaps.has(form)) {
+        snaps.set(form, getSig(form));
+      }
+    }, true);
+
+    function checkDirty(e) {
+      const form = e.target && e.target.closest && e.target.closest('form');
+      if (!form) return;
+      const btn = getSubmitBtn(form);
+      if (!btn) return;
+      if (!snaps.has(form)) return;
+      const dirty = getSig(form) !== snaps.get(form);
+      btn.classList.toggle('glow-draft', dirty);
+      btn.setAttribute('data-dirty', dirty ? 'true' : 'false');
+    }
+
+    document.addEventListener('input', checkDirty);
+    document.addEventListener('change', checkDirty);
+
+    document.addEventListener('submit', function(e) {
+      const form = e.target && e.target.closest && e.target.closest('form');
+      if (!form) return;
+      const btn = getSubmitBtn(form);
+      if (btn) {
+        btn.classList.remove('glow-draft');
+        btn.setAttribute('data-dirty', 'false');
+      }
+    });
+  } catch (err) {}
+})();
+
 /* ---------- Sync status pill (header) ---------- */
 function updatePill(){
   const p=$('#syncpill');if(!p)return;const url=LS.get('lgUrl'),n=qn(),off=navigator.onLine===false;
@@ -4082,6 +4173,13 @@ function updatePill(){
   if(!url){dot='var(--warn)';txt=n?`Not connected · ${n} saved`:'Not connected';tip='Tap to connect your sheet'}
   else if(n){dot='var(--warn)';txt=off?`Offline · ${n} waiting`:`${n} waiting to send`;tip=off?'Will send when you are back online':'Tap to send now'}
   else if(off){dot='var(--warn)';txt='Offline';tip='Entries will wait on this device'}
+  const su=syncUrgency(J('lg.q',[]));
+  if(su.urgent){
+    dot='var(--bad)';
+    if(n>0 && url){ txt += ` · ${su.failed?su.failed+' failed':'over a day'}`; }
+    tip=su.failed?'Some entries failed to send. Tap to review':'Waiting more than a day. Tap to review';
+  }
+  p.classList.toggle('glow-urgent',su.urgent);
   p.innerHTML=`<i class="dot" style="background:${dot}"></i>${esc(txt)}`;p.title=tip;p.setAttribute('aria-label',txt+'. '+tip);
 }
 
