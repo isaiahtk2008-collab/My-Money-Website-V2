@@ -3608,6 +3608,77 @@ function ssInitEvents() {
 }
 ssInitEvents();
 /* ===== STATUS SIGNALS POPOVER END ===== */
+/* ===== STATUS SIGNALS SETTINGS START ===== */
+/* The settings card for the Log menu signals. Saves only the three display settings, on this device, through ssSavePrefs. Never touches the sheet. */
+function ssSettingsHtml() {
+  const p = ssLoadPrefs();
+  const g = (typeof p.graceDays === 'number' && !isNaN(p.graceDays)) ? p.graceDays : 0;
+  const mode = p.openMode === 'filtered' ? 'filtered' : 'direct';
+  const hover = p.hover !== false;
+  return '<section class="m3-card" id="ss-card">' +
+    '<div class="m3-card-head"><span class="m3-icon" aria-hidden="true">palette</span><div>' +
+    '<div class="m3-card-title">Status colours on the Log menu</div>' +
+    '<div class="m3-card-sub">Yellow = open, red = needs fixing, blinking red = overdue</div></div></div>' +
+    '<div class="lg-f" style="margin-top:12px;"><label class="lg-l" for="ss-grace">Count as overdue after this many days past the return date</label>' +
+    '<input type="number" id="ss-grace" class="lg-set" min="0" max="365" step="1" inputmode="numeric" value="' + esc(g) + '">' +
+    '<small class="hint">0 means any time after the return date. Applies to loans and deposit pickups.</small></div>' +
+    '<div class="lg-f" style="margin-top:12px;"><div class="lg-l">When I click an item in the list</div>' +
+    '<div class="lg-chips" role="group" aria-label="When I click an item">' +
+    '<button type="button" class="chip-b" data-ssset="mode" data-v="direct" aria-pressed="' + (mode === 'direct') + '">Open the record</button>' +
+    '<button type="button" class="chip-b" data-ssset="mode" data-v="filtered" aria-pressed="' + (mode === 'filtered') + '">Show a filtered list</button></div>' +
+    '<small class="hint">Open the record jumps straight to it. Filtered list takes you to the list screen filtered to that name.</small></div>' +
+    '<div class="lg-f" style="margin-top:12px;"><div class="lg-l">Preview the list when I hover over a flagged icon (computers only)</div>' +
+    '<div class="lg-chips" role="group" aria-label="Preview the list when I hover over a flagged icon">' +
+    '<button type="button" class="chip-b" data-ssset="hover" data-v="1" aria-pressed="' + hover + '">On</button>' +
+    '<button type="button" class="chip-b" data-ssset="hover" data-v="0" aria-pressed="' + (!hover) + '">Off</button></div></div>' +
+    '<p class="lg-st" id="ss-st" role="status"></p></section>';
+}
+
+function ssSetStatus(msg, type) {
+  const st = document.getElementById('ss-st');
+  if (!st) return;
+  st.textContent = msg;
+  st.className = 'lg-st' + (type ? ' ' + type : '');
+}
+
+window.__mmStatusSettingsHtml = ssSettingsHtml;
+
+if (!window.__ssSetBound) {
+  window.__ssSetBound = true;
+
+  document.addEventListener('change', function (e) {
+    const input = e.target;
+    if (!input || input.id !== 'ss-grace' || !input.closest('#ss-card')) return;
+    const cur = ssLoadPrefs();
+    const valStr = String(input.value).trim();
+    const num = Number(valStr);
+    if (valStr === '' || isNaN(num) || !Number.isInteger(num) || num < 0 || num > 365) {
+      ssSetStatus('Enter a whole number from 0 to 365', 'bad');
+      input.value = cur.graceDays;
+      return;
+    }
+    cur.graceDays = num;
+    ssSavePrefs(cur);
+    ssSetStatus('Saved', 'good');
+  });
+
+  document.addEventListener('click', function (e) {
+    const btn = e.target && e.target.closest ? e.target.closest('[data-ssset]') : null;
+    if (!btn || !btn.closest('#ss-card')) return;
+    const setting = btn.getAttribute('data-ssset'), val = btn.getAttribute('data-v');
+    const cur = ssLoadPrefs();
+    if (setting === 'mode') cur.openMode = val === 'filtered' ? 'filtered' : 'direct';
+    else if (setting === 'hover') cur.hover = val === '1';
+    else return;
+    ssSavePrefs(cur);
+    const group = btn.closest('.lg-chips');
+    if (group) group.querySelectorAll('[data-ssset="' + setting + '"]').forEach(function (c) {
+      c.setAttribute('aria-pressed', c.getAttribute('data-v') === val ? 'true' : 'false');
+    });
+    ssSetStatus('Saved', 'good');
+  });
+}
+/* ===== STATUS SIGNALS SETTINGS END ===== */
 const VIEWS={home:vHome,spending:vSpending,reselling:vReselling,inventory:vInventory,investing:vInvesting,data:vData,owed:vOwed};
 const SUBS={spending:'Where your money goes',reselling:'What your flips earn',inventory:'Devices waiting to sell',investing:'Your portfolios',data:'Sources, sync and quality',owed:'Loans and deposits'};
 
@@ -4475,6 +4546,7 @@ function secHtml(){
   ${pw}
 </section>
 ${typeof window.__mmNotifSettingsHtml==='function'?window.__mmNotifSettingsHtml():''}
+${typeof window.__mmStatusSettingsHtml==='function'?window.__mmStatusSettingsHtml():''}
 <section class="m3-card">
   <div class="m3-card-head"><span class="m3-icon" aria-hidden="true">sync</span><div><div class="m3-card-title">Sheet Sync Connection</div><div class="m3-card-sub">Google Sheet and waiting entries</div></div></div>
   <div class="m3-row"><div>${sheetChip}<small style="display:block;margin-top:6px">Connection link, test and send queue</small></div><button class="btn sec" data-sec="sheet">Open</button></div>
