@@ -187,6 +187,8 @@ function makeEnv(stored = {}, throwing = false) {
     },
     localStorage: lStore,
     console,
+    redraws: 0,
+    render() { sandbox.redraws++; },
   };
   sandbox.window = sandbox;
 
@@ -232,6 +234,7 @@ function mkCard() {
 
   const dirBtns = ['bottom', 'top', 'left', 'right', 'all'].map((d) => makeBtn('data-hfx-dir', d));
   const colBtns = ['theme', 'blue', 'green', 'purple', 'orange', 'white'].map((c) => makeBtn('data-hfx-col', c));
+  const accBtns = ['blue', 'green', 'purple', 'orange', 'rose', 'teal'].map((a) => makeBtn('data-hfx-acc', a));
   const resetBtn = makeBtn('data-hfx-reset', '1');
   slider.closest = (sel) => (sel === '#hfx-card' ? card : null);
 
@@ -245,10 +248,11 @@ function mkCard() {
     querySelectorAll(sel) {
       if (sel === 'button[data-hfx-dir]') return dirBtns;
       if (sel === 'button[data-hfx-col]') return colBtns;
+      if (sel === 'button[data-hfx-acc]') return accBtns;
       return [];
     },
   };
-  return { card, slider, out, st, dirBtns, colBtns, resetBtn };
+  return { card, slider, out, st, dirBtns, colBtns, accBtns, resetBtn };
 }
 
 function clickBtn(env, btn) {
@@ -268,12 +272,12 @@ function slide(env, c, value) {
   });
 }
 
-const pick = (c, kind, v) => c[kind === 'dir' ? 'dirBtns' : 'colBtns'].find((b) => b.getAttribute('data-hfx-' + kind) === v);
+const pick = (c, kind, v) => c[{ dir: 'dirBtns', col: 'colBtns', acc: 'accBtns' }[kind]].find((b) => b.getAttribute('data-hfx-' + kind) === v);
 
 test('script: defaults are strength 55, bottom, match theme, and the effect is on', () => {
   const env = makeEnv({});
   assert.equal(env.cls.has('mm-fx-off'), false);
-  assert.deepEqual(stateOf(env), { s: 55, dir: 'bottom', col: 'theme' });
+  assert.deepEqual(stateOf(env), { s: 55, dir: 'bottom', col: 'theme', acc: 'blue' });
   assert.equal(env.styles.get('--hfx-s'), '55');
   assert.equal(env.attrs.get('data-hfx-dir'), 'bottom');
   assert.equal(env.attrs.get('data-hfx-col'), 'theme');
@@ -306,7 +310,7 @@ test('script: garbage in storage falls back to the defaults (or clamps)', () => 
 test('script: blocked storage never throws and stays on with the defaults', () => {
   let env;
   assert.doesNotThrow(() => { env = makeEnv(null, true); });
-  assert.deepEqual(stateOf(env), { s: 55, dir: 'bottom', col: 'theme' });
+  assert.deepEqual(stateOf(env), { s: 55, dir: 'bottom', col: 'theme', acc: 'blue' });
   assert.equal(env.cls.has('mm-fx-off'), false);
   assert.match(env.sandbox.window.__mmHoverFxSettingsHtml(), /id="hfx-card"/);
   // changing things still works for this visit even though nothing can be saved
@@ -394,7 +398,7 @@ test('script: Reset to default restores exactly the original look and forgets th
   clickBtn(env, pick(c, 'dir', 'all'));
   clickBtn(env, pick(c, 'col', 'white'));
   clickBtn(env, c.resetBtn);
-  assert.deepEqual(stateOf(env), { s: 55, dir: 'bottom', col: 'theme' });
+  assert.deepEqual(stateOf(env), { s: 55, dir: 'bottom', col: 'theme', acc: 'blue' });
   assert.equal(env.cls.has('mm-fx-off'), false);
   assert.equal(env.styles.get('--hfx-s'), '55');
   assert.equal(env.attrs.get('data-hfx-dir'), 'bottom');
@@ -411,7 +415,7 @@ test('script: Reset to default restores exactly the original look and forgets th
   clickBtn(env, c.resetBtn);
   assert.equal(env.cls.has('mm-fx-off'), false);
   // and a reload after Reset starts from the defaults
-  assert.deepEqual(stateOf(makeEnv(Object.fromEntries(env.store))), { s: 55, dir: 'bottom', col: 'theme' });
+  assert.deepEqual(stateOf(makeEnv(Object.fromEntries(env.store))), { s: 55, dir: 'bottom', col: 'theme', acc: 'blue' });
 });
 
 test('script: choices survive a reload (including strength 0)', () => {
@@ -421,7 +425,7 @@ test('script: choices survive a reload (including strength 0)', () => {
   clickBtn(env, pick(c, 'dir', 'top'));
   clickBtn(env, pick(c, 'col', 'green'));
   const env2 = makeEnv(Object.fromEntries(env.store));
-  assert.deepEqual(stateOf(env2), { s: 35, dir: 'top', col: 'green' });
+  assert.deepEqual(stateOf(env2), { s: 35, dir: 'top', col: 'green', acc: 'blue' });
   assert.equal(env2.styles.get('--hfx-s'), '35');
   assert.equal(env2.attrs.get('data-hfx-dir'), 'top');
   assert.equal(env2.attrs.get('data-hfx-col'), 'green');
@@ -429,7 +433,7 @@ test('script: choices survive a reload (including strength 0)', () => {
   slide(env2, c, 0);
   const env3 = makeEnv(Object.fromEntries(env2.store));
   assert.equal(env3.cls.has('mm-fx-off'), true);
-  assert.deepEqual(stateOf(env3), { s: 0, dir: 'top', col: 'green' });
+  assert.deepEqual(stateOf(env3), { s: 0, dir: 'top', col: 'green', acc: 'blue' });
 });
 
 test('script: clicks and inputs elsewhere are ignored without throwing', () => {
@@ -444,5 +448,102 @@ test('script: clicks and inputs elsewhere are ignored without throwing', () => {
     inputH({ target: null });
     inputH({});
   });
-  assert.deepEqual(stateOf(env), { s: 55, dir: 'bottom', col: 'theme' });
+  assert.deepEqual(stateOf(env), { s: 55, dir: 'bottom', col: 'theme', acc: 'blue' });
+});
+
+// ---- app accent color (the script part; the colors themselves are checked in accent-colors.test.mjs) ----
+test('script: the accent defaults to blue (the original) and is set on <html>', () => {
+  const env = makeEnv({});
+  assert.equal(stateOf(env).acc, 'blue');
+  assert.equal(env.attrs.get('data-accent'), 'blue');
+  assert.equal(env.sandbox.redraws, 0, 'nothing should be redrawn just by loading');
+});
+
+test('script: a saved accent is loaded, garbage falls back to blue', () => {
+  for (const a of ['blue', 'green', 'purple', 'orange', 'rose', 'teal']) {
+    const env = makeEnv({ 'mm.hfx.acc': a });
+    assert.equal(stateOf(env).acc, a);
+    assert.equal(env.attrs.get('data-accent'), a);
+  }
+  for (const bad of ['pink', '', 'GREEN', 'green ', '<b>']) assert.equal(stateOf(makeEnv({ 'mm.hfx.acc': bad })).acc, 'blue', JSON.stringify(bad));
+});
+
+test('script: the card has one accent chip per preset with only the current one pressed', () => {
+  const h = makeEnv({ 'mm.hfx.acc': 'rose' }).sandbox.window.__mmHoverFxSettingsHtml();
+  assert.equal((h.match(/data-hfx-acc="/g) || []).length, 6);
+  assert.match(h, /data-hfx-acc="rose" aria-pressed="true"/);
+  assert.equal((h.match(/data-hfx-acc="[^"]+" aria-pressed="true"/g) || []).length, 1);
+  assert.match(h, /App accent color/);
+  assert.match(makeEnv({}).sandbox.window.__mmHoverFxSettingsHtml(), /data-hfx-acc="blue" aria-pressed="true"/);
+});
+
+test('script: every accent preset applies, saves, highlights only itself and redraws the charts', () => {
+  for (const a of ['blue', 'green', 'purple', 'orange', 'rose', 'teal']) {
+    const env = makeEnv({});
+    const c = mkCard();
+    clickBtn(env, pick(c, 'acc', a));
+    assert.equal(env.attrs.get('data-accent'), a);
+    assert.equal(env.store.get('mm.hfx.acc'), a);
+    assert.equal(stateOf(env).acc, a);
+    assert.deepEqual(c.accBtns.filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.getAttribute('data-hfx-acc')), [a]);
+    assert.equal(c.st.textContent, 'Saved');
+    assert.equal(env.sandbox.redraws, 1, 'the charts read their colors when drawn, so they must be redrawn');
+  }
+});
+
+test('script: glow changes never trigger a redraw, accent changes always do', () => {
+  const env = makeEnv({});
+  const c = mkCard();
+  slide(env, c, 80);
+  clickBtn(env, pick(c, 'dir', 'top'));
+  clickBtn(env, pick(c, 'col', 'green'));
+  assert.equal(env.sandbox.redraws, 0);
+  clickBtn(env, pick(c, 'acc', 'teal'));
+  assert.equal(env.sandbox.redraws, 1);
+});
+
+test('script: Reset brings back blue, forgets the accent, and redraws only when the accent changed', () => {
+  const env = makeEnv({});
+  const c = mkCard();
+  clickBtn(env, c.resetBtn);
+  assert.equal(env.sandbox.redraws, 0, 'Reset with the original accent needs no redraw');
+  clickBtn(env, pick(c, 'acc', 'purple'));
+  slide(env, c, 90);
+  assert.equal(env.sandbox.redraws, 1);
+  clickBtn(env, c.resetBtn);
+  assert.equal(stateOf(env).acc, 'blue');
+  assert.equal(env.attrs.get('data-accent'), 'blue');
+  assert.equal(env.store.has('mm.hfx.acc'), false);
+  assert.equal(pick(c, 'acc', 'blue').getAttribute('aria-pressed'), 'true');
+  assert.equal(env.sandbox.redraws, 2);
+  assert.equal(stateOf(makeEnv(Object.fromEntries(env.store))).acc, 'blue');
+});
+
+test('script: the accent survives a reload together with the glow choices', () => {
+  const env = makeEnv({});
+  const c = mkCard();
+  clickBtn(env, pick(c, 'acc', 'orange'));
+  slide(env, c, 20);
+  clickBtn(env, pick(c, 'dir', 'left'));
+  const env2 = makeEnv(Object.fromEntries(env.store));
+  assert.deepEqual(stateOf(env2), { s: 20, dir: 'left', col: 'theme', acc: 'orange' });
+  assert.equal(env2.attrs.get('data-accent'), 'orange');
+});
+
+test('script: blocked storage with the accent never throws', () => {
+  const env = makeEnv(null, true);
+  const c = mkCard();
+  assert.doesNotThrow(() => { clickBtn(env, pick(c, 'acc', 'green')); clickBtn(env, c.resetBtn); });
+  assert.equal(stateOf(env).acc, 'blue');
+});
+
+test('script: a page without render() (or one that throws) never breaks the choice', () => {
+  const env = makeEnv({});
+  const c = mkCard();
+  env.sandbox.render = () => { throw new Error('boom'); };
+  assert.doesNotThrow(() => clickBtn(env, pick(c, 'acc', 'green')));
+  assert.equal(stateOf(env).acc, 'green');
+  delete env.sandbox.render;
+  assert.doesNotThrow(() => clickBtn(env, pick(c, 'acc', 'rose')));
+  assert.equal(stateOf(env).acc, 'rose');
 });
