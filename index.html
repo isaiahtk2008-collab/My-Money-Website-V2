@@ -1022,6 +1022,96 @@ button.card.kpi:hover{transform:translateY(-1px)}
 @media (prefers-reduced-motion:reduce){button.nav,.card,.ibtn{transition:none}button.card.kpi:hover{transform:none}}
 @media (forced-colors:active){.card,.ibtn,.chip,button.nav[aria-current="page"]{border:1px solid CanvasText}}
 </style>
+<style id="mm-hover-fx">
+/* HOVER EFFECTS: things you can click enlarge a little and get a soft under-glow while the pointer is on them.
+   Computers only (hover + fine pointer). Off switch: class "mm-fx-off" on <html>, set from Security & Settings > "Hover effects".
+   Additive only: this block adds transform, box-shadow/filter and transition on :hover and nothing else. Full-width rows get a gentler
+   enlarge so they never overflow their panel; text boxes only glow (no resize while typing); table rows glow only.
+   Never touched: the modal backdrop, SVG chart slices (.dh-seg), disabled things, the dragging nav button, tooltips, warning icons.
+   First draft by Gemini, reviewed and tightened by Claude. */
+@media (hover:hover) and (pointer:fine){
+html:not(.mm-fx-off){--hfx-glow:0 6px 16px -4px color-mix(in srgb,var(--accent) 55%,transparent);--hfx-glow-s:0 4px 12px -4px color-mix(in srgb,var(--accent) 45%,transparent);--hfx-drop:drop-shadow(0 6px 8px color-mix(in srgb,var(--accent) 45%,transparent))}
+/* smooth in and out (each element's own colour transitions are repeated so none are lost) */
+html:not(.mm-fx-off) :is(.btn,.chip-b,.seg button,.dh-chip,button.dh-stat,button.bar,button.ins,button.li,button.iss-btn,.ss-it,.ss-pop-x,summary,select,button.logo,.navreset,.lg-fab,button.nav,.ibtn,button[data-act],button[data-lg],button[data-sec],button[data-ss],[role="button"],[role="tab"],input[type="checkbox"],input[type="radio"],label:has(>input[type="checkbox"]),label:has(>input[type="radio"])):not(.card):not(:disabled):not([aria-disabled="true"]):not(.dragging){transition:transform .16s ease,box-shadow .16s ease,filter .16s ease,background-color .15s ease,border-color .15s ease}
+html:not(.mm-fx-off) :is(input[type="text"],input[type="search"],input[type="password"],input[type="email"],input[type="number"],input[type="date"],input[type="time"],input[type="tel"],input[type="url"],textarea):not(:disabled){transition:box-shadow .16s ease,border-color .15s ease}
+/* compact controls: buttons, chips, pills, tabs, checkboxes */
+html:not(.mm-fx-off) :is(.btn,.chip-b,.seg button,.dh-chip,button.logo,.navreset,.ss-pop-x,button[data-act],button[data-lg],button[data-sec],button[data-ss],[role="button"],[role="tab"],input[type="checkbox"],input[type="radio"],label:has(>input[type="checkbox"]),label:has(>input[type="radio"])):not(:disabled):not([aria-disabled="true"]):not(.dragging):not(.nav):not(.ibtn):not(.lg-fab):not(.card):not(.bar):not(.ins):not(.li):not(.iss-btn):not(.dh-stat):hover{--k:1.04;transform:scale(calc(1 + (var(--k) - 1) * var(--hfx-m,1)));box-shadow:var(--hfx-glow)}
+html:not(.mm-fx-off) .seg button[aria-pressed="true"]:not(:disabled):hover{box-shadow:var(--shadow),var(--hfx-glow)}
+/* full-width rows, list items, drop-downs: gentler enlarge so nothing spills out of its panel */
+html:not(.mm-fx-off) :is(button.bar,button.ins,button.li,button.iss-btn,.ss-it,summary,select):not(:disabled):not([aria-disabled="true"]):hover{--k:1.015;transform:scale(calc(1 + (var(--k) - 1) * var(--hfx-m,1)));box-shadow:var(--hfx-glow-s)}
+/* round icon buttons */
+html:not(.mm-fx-off) .ibtn:not(:disabled):not([aria-disabled="true"]):hover{--k:1.08;transform:scale(calc(1 + (var(--k) - 1) * var(--hfx-m,1)));box-shadow:var(--hfx-glow)}
+/* left menu buttons (the page you are on keeps its thin outline) */
+html:not(.mm-fx-off) nav.rail#rail button.nav:not(.dragging):not(:disabled):hover{--k:1.05;transform:scale(calc(1 + (var(--k) - 1) * var(--hfx-m,1)));box-shadow:var(--hfx-glow)}
+html:not(.mm-fx-off) nav.rail#rail button.nav[aria-current="page"]:not(.dragging):not(:disabled):hover{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 35%,transparent),var(--hfx-glow)}
+/* big KPI cards: keeps their small lift and resting shadow */
+html:not(.mm-fx-off) button.card.kpi:not(:disabled):not([aria-disabled="true"]):hover{--k:1.02;transform:translateY(calc(-1px * var(--hfx-m,1))) scale(calc(1 + (var(--k) - 1) * var(--hfx-m,1)));box-shadow:var(--card-shadow),var(--hfx-glow)}
+/* dashboard stat tiles keep their inset outline, so they glow with a drop shadow instead */
+html:not(.mm-fx-off) button.dh-stat:not(:disabled):hover{--k:1.03;transform:scale(calc(1 + (var(--k) - 1) * var(--hfx-m,1)));filter:var(--hfx-drop)}
+/* floating Log button keeps its own shadow and lift */
+html:not(.mm-fx-off) .lg-fab:not(:disabled):hover{--k:1.06;transform:translateY(calc(-2px * var(--hfx-m,1))) scale(calc(1 + (var(--k) - 1) * var(--hfx-m,1)));filter:var(--hfx-drop)}
+/* text boxes only glow, they never resize while you type */
+html:not(.mm-fx-off) :is(input[type="text"],input[type="search"],input[type="password"],input[type="email"],input[type="number"],input[type="date"],input[type="time"],input[type="tel"],input[type="url"],textarea):not(:disabled):hover{box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
+/* clickable table rows only glow along their edges */
+html:not(.mm-fx-off) tbody tr:is([data-act],[tabindex],[role="button"]):hover td{box-shadow:inset 0 1px 0 0 color-mix(in srgb,var(--accent) 40%,transparent),inset 0 -1px 0 0 color-mix(in srgb,var(--accent) 40%,transparent)}
+}
+/* reduced motion: keep the glow, drop the enlarge and the lift */
+@media (hover:hover) and (pointer:fine) and (prefers-reduced-motion:reduce){html:not(.mm-fx-off){--hfx-m:0}}
+</style>
+<script id="mm-hover-fx-js">
+/* Hover effects switch. Saves on this device only (localStorage "mm.hoverfx": "0" = off, anything else = on). Never touches the sheet.
+   Adds/removes class "mm-fx-off" on <html> and supplies the settings card the Security & Settings panel shows. Fully wrapped so it can never break the page. */
+(function () {
+  try {
+    var KEY = 'mm.hoverfx';
+    var OFF_CLS = 'mm-fx-off';
+    var isOff = false;
+    try { isOff = localStorage.getItem(KEY) === '0'; } catch (_) {}
+    if (isOff) { document.documentElement.classList.add(OFF_CLS); }
+    else { document.documentElement.classList.remove(OFF_CLS); }
+
+    window.__mmHoverFxSettingsHtml = function () {
+      var currentOff = false;
+      try { currentOff = localStorage.getItem(KEY) === '0'; }
+      catch (_) { currentOff = document.documentElement.classList.contains(OFF_CLS); }
+      var onPressed = currentOff ? 'false' : 'true';
+      var offPressed = currentOff ? 'true' : 'false';
+      return '<section class="m3-card" id="hfx-card">' +
+        '<div class="m3-card-head"><span class="m3-icon" aria-hidden="true">touch_app</span><div><div class="m3-card-title">Hover effects</div><div class="m3-card-sub">Enlarge and glow when you point at something</div></div></div>' +
+        '<div class="lg-f" style="margin-top:12px;"><div class="lg-l">Enlarge and glow on hover (computers only)</div>' +
+        '<div class="lg-chips" role="group" aria-label="Hover effects">' +
+        '<button type="button" class="chip-b" data-hfx="1" aria-pressed="' + onPressed + '">On</button>' +
+        '<button type="button" class="chip-b" data-hfx="0" aria-pressed="' + offPressed + '">Off</button></div>' +
+        '<small class="hint">Adds a gentle zoom and a soft glow to buttons, chips and cards. Off turns it off everywhere on this device.</small></div>' +
+        '<p class="lg-st" id="hfx-st" role="status"></p></section>';
+    };
+
+    if (!window.__mmHfxBound) {
+      window.__mmHfxBound = true;
+      document.addEventListener('click', function (e) {
+        try {
+          var btn = e.target && e.target.closest ? e.target.closest('#hfx-card button[data-hfx]') : null;
+          if (!btn) return;
+          var val = btn.getAttribute('data-hfx');
+          var turnOff = val === '0';
+          if (turnOff) { document.documentElement.classList.add(OFF_CLS); }
+          else { document.documentElement.classList.remove(OFF_CLS); }
+          try { localStorage.setItem(KEY, turnOff ? '0' : '1'); } catch (_) {}
+          var card = btn.closest('#hfx-card');
+          if (card) {
+            var buttons = card.querySelectorAll('button[data-hfx]');
+            for (var i = 0; i < buttons.length; i++) {
+              buttons[i].setAttribute('aria-pressed', buttons[i].getAttribute('data-hfx') === val ? 'true' : 'false');
+            }
+            var st = card.querySelector('#hfx-st');
+            if (st) { st.className = 'lg-st good'; st.textContent = 'Saved'; }
+          }
+        } catch (_) {}
+      });
+    }
+  } catch (_) {}
+})();
+</script>
 <div class="app" id="app">
   <nav class="rail" id="rail" aria-label="Main"></nav>
   <div class="main">
@@ -4730,6 +4820,7 @@ function secHtml(){
 </section>
 ${typeof window.__mmNotifSettingsHtml==='function'?window.__mmNotifSettingsHtml():''}
 ${typeof window.__mmStatusSettingsHtml==='function'?window.__mmStatusSettingsHtml():''}
+${typeof window.__mmHoverFxSettingsHtml==='function'?window.__mmHoverFxSettingsHtml():''}
 <section class="m3-card">
   <div class="m3-card-head"><span class="m3-icon" aria-hidden="true">sync</span><div><div class="m3-card-title">Sheet Sync Connection</div><div class="m3-card-sub">Google Sheet and waiting entries</div></div></div>
   <div class="m3-row"><div>${sheetChip}<small style="display:block;margin-top:6px">Connection link, test and send queue</small></div><button class="btn sec" data-sec="sheet">Open</button></div>
