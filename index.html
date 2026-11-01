@@ -50,6 +50,90 @@
 .lg-q b{display:block;font-size:13.5px}.lg-q small{color:var(--muted);font-size:12px}.lg-q small.e{color:var(--bad)}
 .lg-ol{margin:8px 0 0;padding-left:20px;color:var(--muted);font-size:13px;display:flex;flex-direction:column;gap:6px}
 .lg-st{font-size:12.5px;font-weight:600;margin-top:8px}.lg-st.good{color:var(--good)}.lg-st.bad{color:var(--bad)}
+/* ===== STATUS SIGNALS CSS START ===== */
+:root {
+  --ss-yellow: #854d0e;
+  --ss-yellow-soft: #fef9c3;
+  --ss-yellow-solid: #facc15;
+  --ss-yellow-ink: #422006;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ss-yellow: #fde047;
+    --ss-yellow-soft: #422006;
+  }
+}
+:root[data-theme="dark"] {
+  --ss-yellow: #fde047;
+  --ss-yellow-soft: #422006;
+}
+
+/* Flagged Row States */
+.li.ss .ic { position: relative; cursor: pointer; transition: filter 0.15s ease; }
+.li.ss .ic:hover { filter: brightness(1.08); }
+.li.ss .ic:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+/* Level Themes for Icons: yellow = mild, red = heavier, blinking red = extra heavy */
+.li.ss-pending .ic { background: var(--ss-yellow-soft); color: var(--ss-yellow); }
+.li.ss-issue .ic { background: var(--bad-soft); color: var(--bad); }
+.li.ss-overdue .ic {
+  background: var(--bad-soft);
+  color: var(--bad);
+  box-shadow: 0 0 0 2px var(--bad), 0 0 8px var(--bad);
+  animation: ss-blink 1.4s ease-in-out infinite;
+}
+@keyframes ss-blink {
+  0%, 100% { box-shadow: 0 0 0 2px var(--bad), 0 0 4px var(--bad); opacity: 1; }
+  50% { box-shadow: 0 0 0 2px var(--bad), 0 0 12px var(--bad); opacity: 0.85; }
+}
+
+/* Count badges: a different shape per level so colour is never the only signal */
+.ss-b {
+  position: absolute; top: -4px; right: -4px; height: 16px; min-width: 16px; padding: 0 4px;
+  font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; box-sizing: border-box;
+  outline: 2px solid var(--surface); font-style: normal; display: inline-flex; align-items: center;
+  justify-content: center; z-index: 1;
+}
+.ss-b-pending { border-radius: 9999px; background: var(--ss-yellow-solid); color: var(--ss-yellow-ink); }
+.ss-b-issue { border-radius: 9999px; background: var(--bad); color: #fff; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.8); }
+.ss-b-overdue { border-radius: 5px; background: var(--bad); color: #fff; min-width: 18px; }
+
+/* Popover panel (sits right under the row) */
+.ss-pop {
+  position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  padding: 10px; margin: 4px 0 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); animation: ss-pop-in 120ms ease-out;
+}
+.ss-pop.ss-preview { box-shadow: 0 2px 8px rgba(0,0,0,0.08); pointer-events: auto; }
+@keyframes ss-pop-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .ss-pop { animation: none !important; } }
+.ss-pop::before {
+  content: ""; position: absolute; top: -6px; left: 14px; width: 10px; height: 10px; background: var(--surface);
+  border-left: 1px solid var(--line); border-top: 1px solid var(--line); transform: rotate(45deg);
+}
+.ss-pop-h {
+  display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 6px; padding: 0 4px;
+}
+.ss-pop-x { background: transparent; border: none; color: var(--muted); cursor: pointer; padding: 2px 6px; line-height: 1; border-radius: 4px; }
+.ss-pop-x:hover { color: var(--text); background: var(--surface2); }
+.ss-pop-bdy { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.ss-it {
+  display: flex; align-items: flex-start; gap: 8px; width: 100%; text-align: left; background: transparent; border: none;
+  border-radius: 8px; padding: 8px; cursor: pointer; box-sizing: border-box; color: var(--text);
+}
+.ss-it:hover, .ss-it:focus-visible { background: var(--surface2); outline: none; }
+.ss-it.ss-hover { background: var(--surface2); }
+.ss-it.ss-hover:has(.ss-dot-pending) { border-left: 3px solid var(--ss-yellow); }
+.ss-it.ss-hover:has(.ss-dot-issue) { border-left: 3px solid var(--bad); }
+.ss-it.ss-hover:has(.ss-dot-overdue) { border-left: 3px solid var(--bad); }
+.ss-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 4px; flex: none; }
+.ss-dot-pending { background: var(--ss-yellow-solid); }
+.ss-dot-issue { background: var(--bad); }
+.ss-dot-overdue { background: var(--bad); }
+.ss-it-m { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.ss-it-t { font-size: 13px; font-weight: 700; line-height: 1.2; }
+.ss-it-r { font-size: 12px; color: var(--muted); line-height: 1.3; word-break: break-word; }
+/* ===== STATUS SIGNALS CSS END ===== */
 </style></head><body>
 <!-- Auth Modal Overlay: Google OAuth 2.0 OR local username/password -->
 <style>
@@ -3331,6 +3415,199 @@ function ssBuild(ctx) {
   }
 }
 /* ===== STATUS SIGNALS ENGINE END ===== */
+/* ===== STATUS SIGNALS VIEW START ===== */
+/* Read-only. Builds the live summaries and the per-row look. Never writes anything. */
+function ssSummaries() {
+  const empty = () => ({
+    loan: { level: null, count: 0, entries: [] }, dep: { level: null, count: 0, entries: [] },
+    bpc: { level: null, count: 0, entries: [] }, sphone: { level: null, count: 0, entries: [] }
+  });
+  try {
+    const rawData = store.base || store.raw || {};
+    return ssBuild({
+      items: (store.D && Array.isArray(store.D.items)) ? store.D.items : [],
+      owed: owedModel(rawData),
+      raw: rawData,
+      today: TODAY,
+      prefs: ssLoadPrefs(),
+      fmt: { mny: mny, fdy: fdy }
+    }) || empty();
+  } catch (e) {
+    return empty();
+  }
+}
+
+const SS_FORM_LABEL = { loan: 'Loan out', dep: 'Deposit taken', bpc: 'Bought PC', sphone: 'Sold phone' };
+
+function ssRowDecor(formId, summaries) {
+  const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const none = { cls: '', iconAttrs: '', badge: '' };
+  if (!summaries || !formId || !summaries[formId]) return none;
+  const level = summaries[formId].level;
+  const count = Number(summaries[formId].count) || 0;
+  if (!level || count <= 0) return none;
+  const phrase = level === 'overdue' ? count + ' overdue' : level === 'issue' ? count + ' to fix' : count + ' open';
+  const label = phrase + ' in ' + (SS_FORM_LABEL[formId] || formId) + ', press to see the list';
+  const shown = count > 99 ? '99+' : String(count);
+  return {
+    cls: ' ss ss-' + esc(level),
+    iconAttrs: ' tabindex="0" role="button" data-ss="pop" data-ss-form="' + esc(formId) + '" aria-label="' + esc(label) + '"',
+    badge: '<i class="ss-b ss-b-' + esc(level) + '" aria-hidden="true">' + esc((level === 'overdue' ? '!' : '') + shown) + '</i>'
+  };
+}
+/* ===== STATUS SIGNALS VIEW END ===== */
+/* ===== STATUS SIGNALS POPOVER START ===== */
+/* Read-only. Shows the list under a flagged row and opens a record. Only changes the screen, never the sheet. */
+const ssState = { activeForm: null, pinned: false, timer: null, hideTimer: null, lastIcon: null };
+
+/* True only while a pinned popover is really on screen (the menu can redraw and remove it). */
+function ssPinnedLive() { return !!(ssState.pinned && document.querySelector('.ss-pop')); }
+
+function ssPopHtml(formId, summaries, pinned) {
+  const label = (typeof SS_FORM_LABEL !== 'undefined' && SS_FORM_LABEL[formId]) || formId || '';
+  const sum = (summaries && summaries[formId]) || { count: 0, entries: [] };
+  const count = sum.count || 0;
+  const entries = Array.isArray(sum.entries) ? sum.entries : [];
+  const closeBtn = pinned ? '<button type="button" class="ss-pop-x" data-ss="close" aria-label="Close list">✕</button>' : '';
+  const itemsHtml = entries.map(e => {
+    return '<button type="button" class="ss-it" data-ss="item" data-ss-form="' + esc(formId) + '" data-ss-key="' + esc(e.key || '') + '">'
+      + '<span class="ss-dot ss-dot-' + esc(e.level || 'pending') + '"></span><span class="ss-it-m"><span class="ss-it-t">' + esc(e.title || '')
+      + '</span><span class="ss-it-r">' + esc(Array.isArray(e.reasons) ? e.reasons.join(' · ') : '') + '</span></span></button>';
+  }).join('');
+  return '<div class="ss-pop' + (pinned ? '' : ' ss-preview') + '" role="dialog" aria-label="' + esc(label) + ' status details" data-ss-pop="' + esc(formId) + '">'
+    + '<div class="ss-pop-h"><span>' + esc(label) + ' · ' + esc(count) + '</span>' + closeBtn + '</div><div class="ss-pop-bdy">' + itemsHtml + '</div></div>';
+}
+
+function ssClearTimers() {
+  if (ssState.timer) { clearTimeout(ssState.timer); ssState.timer = null; }
+  if (ssState.hideTimer) { clearTimeout(ssState.hideTimer); ssState.hideTimer = null; }
+}
+
+function ssClosePop(restoreFocus) {
+  ssClearTimers();
+  const existing = document.querySelector('.ss-pop');
+  if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+  const prevIcon = ssState.lastIcon;
+  ssState.activeForm = null; ssState.pinned = false; ssState.lastIcon = null;
+  if (restoreFocus && prevIcon && typeof prevIcon.focus === 'function') { try { prevIcon.focus(); } catch (_) {} }
+}
+
+function ssShowPop(formId, iconEl, pinned, focusFirst) {
+  try {
+    if (ssPinnedLive() && !pinned) return;   /* hover never replaces a pinned list */
+    ssClosePop(false);
+    const li = iconEl ? iconEl.closest('.li') : null;
+    if (!li || !li.parentNode) return;
+    const temp = document.createElement('div');
+    temp.innerHTML = ssPopHtml(formId, ssSummaries(), !!pinned);
+    const popEl = temp.firstElementChild;
+    if (!popEl) return;
+    li.insertAdjacentElement('afterend', popEl);
+    ssState.activeForm = formId; ssState.pinned = !!pinned; ssState.lastIcon = iconEl;
+    if (pinned && focusFirst) { const f = popEl.querySelector('.ss-it'); if (f) { try { f.focus(); } catch (_) {} } }
+  } catch (err) { /* a failed popover must never break the menu */ }
+}
+
+function ssTogglePop(formId, iconEl, focusFirst) {
+  if (ssPinnedLive() && ssState.activeForm === formId) ssClosePop(true);
+  else ssShowPop(formId, iconEl, true, !!focusFirst);
+}
+
+function ssOpenTarget(target, entry, mode) {
+  try {
+    ssClosePop(false);
+    if (!target) return;
+    if (mode === 'filtered') {
+      closeOverlay();
+      go(target.type === 'owed' ? 'owed' : target.type === 'item' ? 'inventory' : (target.view || 'data'));
+      setTimeout(() => {
+        try {
+          if (target.type === 'view') return;
+          const name = String((entry && entry.title) || '').split(' · ')[0].trim();
+          if (!name) return;
+          const inp = Array.from(document.querySelectorAll('input[data-q]')).find(i => i.getClientRects().length > 0);
+          if (inp) { inp.value = name; inp.dispatchEvent(new Event('input', { bubbles: true })); toast('Showing the list for ' + name); }
+        } catch (_) {}
+      }, 60);
+      return;
+    }
+    if (target.type === 'item') {
+      if (store.D && store.D.byId && store.D.byId.has(target.id)) openDetail(target.id);
+      else toast('That record is no longer there. Press Refresh.');
+    } else if (target.type === 'owed') {
+      if (target.id !== undefined && target.id !== null && target.id !== '') owedOpenEdit(target.kind, target.id);
+      else { toast('This entry has no Row ID yet, so it cannot be opened from here. Opening the Owed list instead.'); closeOverlay(); go('owed'); }
+    } else if (target.type === 'view') {
+      closeOverlay(); go(target.view || 'data');
+    }
+  } catch (err) { try { toast('Could not open that entry.'); } catch (_) {} }
+}
+
+function ssInitEvents() {
+  if (window.__ssBound) return;
+  window.__ssBound = true;
+  const near = (e, sel) => (e.target && e.target.closest ? e.target.closest(sel) : null);
+
+  document.addEventListener('click', (e) => {
+    const icon = near(e, '[data-ss="pop"]');
+    if (icon) {
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      ssTogglePop(icon.getAttribute('data-ss-form'), icon, false);
+      return;
+    }
+    const closeBtn = near(e, '[data-ss="close"]');
+    if (closeBtn) { e.preventDefault(); e.stopPropagation(); ssClosePop(true); return; }
+    const itemBtn = near(e, '[data-ss="item"]');
+    if (itemBtn) {
+      e.preventDefault(); e.stopPropagation();
+      const formId = itemBtn.getAttribute('data-ss-form'), key = itemBtn.getAttribute('data-ss-key');
+      const sum = ssSummaries()[formId];
+      const entry = sum && Array.isArray(sum.entries) ? sum.entries.find(x => String(x.key) === String(key)) : null;
+      if (entry) ssOpenTarget(entry.target, entry, ssLoadPrefs().openMode); else ssClosePop(false);
+      return;
+    }
+    if (ssPinnedLive() && !near(e, '.ss-pop')) ssClosePop(false);
+  }, true);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.querySelector('.ss-pop')) {
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      ssClosePop(true);
+      return;
+    }
+    const icon = near(e, '[data-ss="pop"]');
+    if (icon && (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar')) {
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      ssTogglePop(icon.getAttribute('data-ss-form'), icon, true);
+    }
+  }, true);
+
+  document.addEventListener('mouseover', (e) => {
+    const prefs = ssLoadPrefs();
+    if (!prefs.hover || !(window.matchMedia && window.matchMedia('(hover:hover) and (pointer:fine)').matches)) return;
+    if (ssPinnedLive()) return;
+    if (near(e, '.ss-pop')) { if (ssState.hideTimer) { clearTimeout(ssState.hideTimer); ssState.hideTimer = null; } return; }
+    const icon = near(e, '[data-ss="pop"]');
+    if (!icon) return;
+    if (ssState.hideTimer) { clearTimeout(ssState.hideTimer); ssState.hideTimer = null; }
+    const formId = icon.getAttribute('data-ss-form');
+    if (ssState.activeForm === formId && document.querySelector('.ss-pop')) return;
+    if (ssState.timer) clearTimeout(ssState.timer);
+    ssState.timer = setTimeout(() => { ssState.timer = null; ssShowPop(formId, icon, false, false); }, 150);
+  });
+
+  document.addEventListener('mouseout', (e) => {
+    if (ssPinnedLive()) return;
+    if (!near(e, '[data-ss="pop"]') && !near(e, '.ss-pop')) return;
+    const rel = e.relatedTarget;
+    if (rel && rel.closest && (rel.closest('[data-ss="pop"]') || rel.closest('.ss-pop'))) return;
+    if (ssState.timer) { clearTimeout(ssState.timer); ssState.timer = null; }
+    if (ssState.hideTimer) clearTimeout(ssState.hideTimer);
+    ssState.hideTimer = setTimeout(() => { if (!ssPinnedLive()) ssClosePop(false); }, 250);
+  });
+}
+ssInitEvents();
+/* ===== STATUS SIGNALS POPOVER END ===== */
 const VIEWS={home:vHome,spending:vSpending,reselling:vReselling,inventory:vInventory,investing:vInvesting,data:vData,owed:vOwed};
 const SUBS={spending:'Where your money goes',reselling:'What your flips earn',inventory:'Devices waiting to sell',investing:'Your portfolios',data:'Sources, sync and quality',owed:'Loans and deposits'};
 
@@ -3803,13 +4080,13 @@ function show(html){const d=$('#overlay .drawer.lg');
 const qn=()=>J('lg.q',[]).length;
 
 function menuScreen(){
-  const url=LS.get('lgUrl'),q=qn();
+  const url=LS.get('lgUrl'),q=qn(),SS=ssSummaries();
   const status=url?(q?`<button class="chip-b" data-lg="settings"><i class="dot" style="background:var(--warn)"></i>${q} waiting to send</button>`:`<button class="chip-b" data-lg="settings"><i class="dot" style="background:var(--good)"></i>Connected to your sheet</button>`)
     :`<button class="chip-b" data-lg="settings"><i class="dot" style="background:var(--warn)"></i>Not connected: saving on this device${q?' ('+q+')':''}</button>`;
   /* order: Money (expense + investment), Buying, Selling, then the Tools section (margin calculator) at the bottom.
      Dot colours follow each form's position in FORMS so they stay the same as before the reorder. */
-  const groups=['Money','Buying','Selling'].map(g=>`<h4 class="lg-gh">${g}</h4><div class="list">${FORMS.filter(f=>f.g===g).map(f=>{const n=FORMS.indexOf(f)+1;const d=J('lg.d.'+f.id,null);
-    return `<button class="li" data-lg="open" data-id="${f.id}"><span class="ic">${FORM_ICO[f.id]||'<i class="dot" style="background:var(--c'+n+')"></i>'}</span><span class="tx"><b>${E(f.t)}</b><span>${E(f.s)}</span></span>${d&&d.v?'<span class="pill warn">Draft</span>':''}${chev()}</button>`}).join('')}</div>`).join('');
+  const groups=['Money','Buying','Selling'].map(g=>`<h4 class="lg-gh">${g}</h4><div class="list">${FORMS.filter(f=>f.g===g).map(f=>{const n=FORMS.indexOf(f)+1;const d=J('lg.d.'+f.id,null),deco=ssRowDecor(f.id,SS);
+    return `<button class="li${deco.cls}" data-lg="open" data-id="${f.id}"><span class="ic"${deco.iconAttrs}>${FORM_ICO[f.id]||'<i class="dot" style="background:var(--c'+n+')"></i>'}${deco.badge}</span><span class="tx"><b>${E(f.t)}</b><span>${E(f.s)}</span></span>${d&&d.v?'<span class="pill warn">Draft</span>':''}${chev()}</button>`}).join('')}</div>`).join('');
   return `<div class="lg-top"><div><h2>Log an entry</h2><p>Goes straight to your sheet</p></div><div class="lg-r"><button class="ibtn" data-lg="settings" aria-label="Sheet connection and queue">${ICO.cfg}</button>${xbtn()}</div></div>${status}${groups}<h4 class="lg-gh">Tools</h4><div class="list"><button class="li" data-lg="calc"><span class="tx"><b>Margin calculator</b><span>Work out a listing price from cost and target profit</span></span>${chev()}</button></div><div style="height:24px"></div>`;
 }
 
