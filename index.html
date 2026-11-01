@@ -637,6 +637,7 @@ button.ins:hover{outline:1px solid var(--accent)}
 button.li:hover{background:var(--surface2);border-radius:10px}
 .li .ic{width:32px;height:32px;border-radius:10px;background:var(--surface2);display:grid;place-items:center;color:var(--muted);flex:none}
 .li .ic svg{width:16px;height:16px}
+.lg-gh+.list .li .ic svg{width:18px;height:18px}
 .li .tx{flex:1;min-width:0}
 .li .tx b{font-weight:600;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .li .tx span{color:var(--muted);font-size:12.5px}
@@ -3514,6 +3515,20 @@ const ICO={
  plus:'<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
  back:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
  cfg:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>'};
+
+/* Menu icons for the "Log an entry" rows (neutral, inherit the tile colour). Falls back to the old dot if an id is missing. */
+const FORM_ICO={
+  exp:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>',
+  inv:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M22 7l-8.5 8.5-5-5L2 17"/><path d="M16 7h6v6"/></svg>',
+  loan:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="8" cy="12" r="5"/><path d="M8 10v4M15 12h6M18.5 9.5L21 12l-2.5 2.5"/></svg>',
+  dep:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="10" width="9" height="11" rx="2"/><path d="M5.5 10V7a2.5 2.5 0 0 1 5 0v3"/><circle cx="17.5" cy="16" r="4"/><path d="M17.5 14.5v3"/></svg>',
+  bphone:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="4" y="4" width="8" height="16" rx="2"/><path d="M8 17h.01"/><path stroke-width="2" d="M19 3v8m-3-3 3 3 3-3"/></svg>',
+  bpc:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2" y="8" width="12" height="8" rx="1"/><path d="M1 19h14"/><path stroke-width="2" d="M19 3v8m-3-3 3 3 3-3"/></svg>',
+  bacc:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3.5 13v-2a5 5 0 0 1 10 0v2"/><rect x="2" y="13" width="3" height="6" rx="1.5"/><rect x="12" y="13" width="3" height="6" rx="1.5"/><path stroke-width="2" d="M19 3v8m-3-3 3 3 3-3"/></svg>',
+  sphone:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="4" y="4" width="8" height="16" rx="2"/><path d="M8 17h.01"/><path stroke-width="2" d="M16 10l5-5m0 0h-4m4 0v4"/></svg>',
+  spc:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2" y="8" width="12" height="8" rx="1"/><path d="M1 19h14"/><path stroke-width="2" d="M16 10l5-5m0 0h-4m4 0v4"/></svg>',
+  sacc:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3.5 13v-2a5 5 0 0 1 10 0v2"/><rect x="2" y="13" width="3" height="6" rx="1.5"/><rect x="12" y="13" width="3" height="6" rx="1.5"/><path stroke-width="2" d="M16 10l5-5m0 0h-4m4 0v4"/></svg>'
+};
 const chev=()=>(typeof ICON!=='undefined'&&ICON.chev)?ICON.chev.replace('<svg','<svg width="16" height="16"'):'›';
 const xbtn=()=>`<button class="ibtn" data-act="close" aria-label="Close" data-focus>${ICON.x}</button>`;
 function show(html){const d=$('#overlay .drawer.lg');
@@ -3528,7 +3543,7 @@ function menuScreen(){
   /* order: Money (expense + investment), Buying, Selling, then the Tools section (margin calculator) at the bottom.
      Dot colours follow each form's position in FORMS so they stay the same as before the reorder. */
   const groups=['Money','Buying','Selling'].map(g=>`<h4 class="lg-gh">${g}</h4><div class="list">${FORMS.filter(f=>f.g===g).map(f=>{const n=FORMS.indexOf(f)+1;const d=J('lg.d.'+f.id,null);
-    return `<button class="li" data-lg="open" data-id="${f.id}"><span class="ic"><i class="dot" style="background:var(--c${n})"></i></span><span class="tx"><b>${E(f.t)}</b><span>${E(f.s)}</span></span>${d&&d.v?'<span class="pill warn">Draft</span>':''}${chev()}</button>`}).join('')}</div>`).join('');
+    return `<button class="li" data-lg="open" data-id="${f.id}"><span class="ic">${FORM_ICO[f.id]||'<i class="dot" style="background:var(--c'+n+')"></i>'}</span><span class="tx"><b>${E(f.t)}</b><span>${E(f.s)}</span></span>${d&&d.v?'<span class="pill warn">Draft</span>':''}${chev()}</button>`}).join('')}</div>`).join('');
   return `<div class="lg-top"><div><h2>Log an entry</h2><p>Goes straight to your sheet</p></div><div class="lg-r"><button class="ibtn" data-lg="settings" aria-label="Sheet connection and queue">${ICO.cfg}</button>${xbtn()}</div></div>${status}${groups}<h4 class="lg-gh">Tools</h4><div class="list"><button class="li" data-lg="calc"><span class="tx"><b>Margin calculator</b><span>Work out a listing price from cost and target profit</span></span>${chev()}</button></div><div style="height:24px"></div>`;
 }
 
