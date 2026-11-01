@@ -1022,6 +1022,40 @@ button.card.kpi:hover{transform:translateY(-1px)}
 @media (prefers-reduced-motion:reduce){button.nav,.card,.ibtn{transition:none}button.card.kpi:hover{transform:none}}
 @media (forced-colors:active){.card,.ibtn,.chip,button.nav[aria-current="page"]{border:1px solid CanvasText}}
 </style>
+<style id="mm-appearance">
+/* APPEARANCE (glow): the variables the hover effects use, plus the look of the Appearance card in Security & Settings.
+   Nothing here restyles the page by itself; the hover rules in "mm-hover-fx" read these variables.
+   Defaults reproduce the original look exactly: strength 55, direction bottom, color "match theme".
+   JS (mm-hover-fx-js) sets --hfx-s inline on <html> and the data-hfx-dir / data-hfx-col attributes. Saved on this device only.
+   First draft by Gemini, reviewed and tightened by Claude. */
+:root{--hfx-s:55;--hfx-dx:0px;--hfx-dy:6px;--hfx-sp:-4px;--hfx-c:var(--accent);
+  --hfx-f:calc(var(--hfx-s) / 55);
+  --hfx-glow:calc(var(--hfx-dx) * var(--hfx-f)) calc(var(--hfx-dy) * var(--hfx-f)) calc(16px * var(--hfx-f)) calc(var(--hfx-sp) * var(--hfx-f)) color-mix(in srgb,var(--hfx-c) calc(var(--hfx-s) * 1%),transparent);
+  --hfx-glow-s:calc(var(--hfx-dx) * var(--hfx-f) * 2 / 3) calc(var(--hfx-dy) * var(--hfx-f) * 2 / 3) calc(12px * var(--hfx-f)) calc(var(--hfx-sp) * var(--hfx-f)) color-mix(in srgb,var(--hfx-c) calc(var(--hfx-s) * 9 / 11 * 1%),transparent);
+  --hfx-drop:drop-shadow(calc(var(--hfx-dx) * var(--hfx-f)) calc(var(--hfx-dy) * var(--hfx-f)) calc(8px * var(--hfx-f)) color-mix(in srgb,var(--hfx-c) calc(var(--hfx-s) * 9 / 11 * 1%),transparent))}
+/* direction presets (offset of the glow; "all sides" centers it) */
+:root[data-hfx-dir="bottom"]{--hfx-dx:0px;--hfx-dy:6px;--hfx-sp:-4px}
+:root[data-hfx-dir="top"]{--hfx-dx:0px;--hfx-dy:-6px;--hfx-sp:-4px}
+:root[data-hfx-dir="left"]{--hfx-dx:-6px;--hfx-dy:0px;--hfx-sp:-4px}
+:root[data-hfx-dir="right"]{--hfx-dx:6px;--hfx-dy:0px;--hfx-sp:-4px}
+:root[data-hfx-dir="all"]{--hfx-dx:0px;--hfx-dy:0px;--hfx-sp:-2px}
+/* color presets ("match theme" is the default and follows --accent) */
+:root[data-hfx-col="blue"]{--hfx-c:#3b82f6}
+:root[data-hfx-col="green"]{--hfx-c:#22c55e}
+:root[data-hfx-col="purple"]{--hfx-c:#a855f7}
+:root[data-hfx-col="orange"]{--hfx-c:#f97316}
+:root[data-hfx-col="white"]{--hfx-c:#ffffff}
+/* the Appearance card */
+#hfx-card .lg-f{margin-top:14px;margin-bottom:0}
+#hfx-card .lg-chips{margin-top:2px}
+#hfx-card input[type="range"]{display:block;width:100%;margin:4px 0 2px;accent-color:var(--accent)}
+#hfx-card output{display:inline-block;font-weight:700;font-size:13px;font-variant-numeric:tabular-nums;color:var(--ink)}
+#hfx-card .hint{display:block;margin-top:4px}
+.hfx-sw{display:inline-block;flex:none;width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ink) 30%,transparent)}
+.hfx-pv-wrap{display:flex;justify-content:center;padding:22px 12px 20px}
+.hfx-pv{padding:14px 26px;border-radius:14px;background:var(--surface2);border:1px solid var(--line);color:var(--ink);font-weight:700;font-size:13px;box-shadow:var(--hfx-glow)}
+.hfx-actions{display:flex;justify-content:flex-end;margin-top:4px}
+</style>
 <style id="mm-hover-fx">
 /* HOVER EFFECTS: things you can click enlarge a little and get a soft under-glow while the pointer is on them.
    Computers only (hover + fine pointer). Off switch: class "mm-fx-off" on <html>, set from Security & Settings > "Hover effects".
@@ -1030,7 +1064,7 @@ button.card.kpi:hover{transform:translateY(-1px)}
    Never touched: the modal backdrop, SVG chart slices (.dh-seg), disabled things, the dragging nav button, tooltips, warning icons.
    First draft by Gemini, reviewed and tightened by Claude. */
 @media (hover:hover) and (pointer:fine){
-html:not(.mm-fx-off){--hfx-glow:0 6px 16px -4px color-mix(in srgb,var(--accent) 55%,transparent);--hfx-glow-s:0 4px 12px -4px color-mix(in srgb,var(--accent) 45%,transparent);--hfx-drop:drop-shadow(0 6px 8px color-mix(in srgb,var(--accent) 45%,transparent))}
+/* (the glow variables --hfx-glow / --hfx-glow-s / --hfx-drop now live in the "mm-appearance" block above, so the strength, direction and color settings can drive them) */
 /* smooth in and out (each element's own colour transitions are repeated so none are lost) */
 html:not(.mm-fx-off) :is(.btn,.chip-b,.seg button,.dh-chip,button.dh-stat,button.bar,button.ins,button.li,button.iss-btn,.ss-it,.ss-pop-x,summary,select,button.logo,.navreset,.lg-fab,button.nav,.ibtn,button[data-act],button[data-lg],button[data-sec],button[data-ss],[role="button"],[role="tab"],input[type="checkbox"],input[type="radio"],label:has(>input[type="checkbox"]),label:has(>input[type="radio"])):not(.card):not(:disabled):not([aria-disabled="true"]):not(.dragging){transition:transform .16s ease,box-shadow .16s ease,filter .16s ease,background-color .15s ease,border-color .15s ease}
 html:not(.mm-fx-off) :is(input[type="text"],input[type="search"],input[type="password"],input[type="email"],input[type="number"],input[type="date"],input[type="time"],input[type="tel"],input[type="url"],textarea):not(:disabled){transition:box-shadow .16s ease,border-color .15s ease}
@@ -1051,60 +1085,250 @@ html:not(.mm-fx-off) button.dh-stat:not(:disabled):hover{--k:1.03;transform:scal
 /* floating Log button keeps its own shadow and lift */
 html:not(.mm-fx-off) .lg-fab:not(:disabled):hover{--k:1.06;transform:translateY(calc(-2px * var(--hfx-m,1))) scale(calc(1 + (var(--k) - 1) * var(--hfx-m,1)));filter:var(--hfx-drop)}
 /* text boxes only glow, they never resize while you type */
-html:not(.mm-fx-off) :is(input[type="text"],input[type="search"],input[type="password"],input[type="email"],input[type="number"],input[type="date"],input[type="time"],input[type="tel"],input[type="url"],textarea):not(:disabled):hover{box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
+html:not(.mm-fx-off) :is(input[type="text"],input[type="search"],input[type="password"],input[type="email"],input[type="number"],input[type="date"],input[type="time"],input[type="tel"],input[type="url"],textarea):not(:disabled):hover{box-shadow:0 0 0 3px color-mix(in srgb,var(--hfx-c) 22%,transparent)}
 /* clickable table rows only glow along their edges */
-html:not(.mm-fx-off) tbody tr:is([data-act],[tabindex],[role="button"]):hover td{box-shadow:inset 0 1px 0 0 color-mix(in srgb,var(--accent) 40%,transparent),inset 0 -1px 0 0 color-mix(in srgb,var(--accent) 40%,transparent)}
+html:not(.mm-fx-off) tbody tr:is([data-act],[tabindex],[role="button"]):hover td{box-shadow:inset 0 1px 0 0 color-mix(in srgb,var(--hfx-c) 40%,transparent),inset 0 -1px 0 0 color-mix(in srgb,var(--hfx-c) 40%,transparent)}
 }
 /* reduced motion: keep the glow, drop the enlarge and the lift */
 @media (hover:hover) and (pointer:fine) and (prefers-reduced-motion:reduce){html:not(.mm-fx-off){--hfx-m:0}}
 </style>
 <script id="mm-hover-fx-js">
-/* Hover effects switch. Saves on this device only (localStorage "mm.hoverfx": "0" = off, anything else = on). Never touches the sheet.
-   Adds/removes class "mm-fx-off" on <html> and supplies the settings card the Security & Settings panel shows. Fully wrapped so it can never break the page. */
+/* Appearance (glow) settings. Saved on this device only (localStorage), never touches the sheet.
+   Keys: "mm.hfx.s" (glow strength 0-100, 0 = off), "mm.hfx.dir" (bottom|top|left|right|all), "mm.hfx.col" (theme|blue|green|purple|orange|white),
+   and the original "mm.hoverfx" ("0" = off) which is still read and written so an old "Off" choice keeps working.
+   Strength 0 adds class "mm-fx-off" on <html> (the original off switch); otherwise --hfx-s is set inline and data-hfx-dir / data-hfx-col are set
+   so the CSS in "mm-appearance" can draw the glow. Supplies the Appearance card the Security & Settings panel shows.
+   Fully wrapped so it can never break the page. First draft by Gemini, reviewed and tightened by Claude. */
 (function () {
   try {
-    var KEY = 'mm.hoverfx';
-    var OFF_CLS = 'mm-fx-off';
-    var isOff = false;
-    try { isOff = localStorage.getItem(KEY) === '0'; } catch (_) {}
-    if (isOff) { document.documentElement.classList.add(OFF_CLS); }
-    else { document.documentElement.classList.remove(OFF_CLS); }
+    // Default appearance settings (these reproduce the original look exactly)
+    var DEFAULTS = { s: 55, dir: 'bottom', col: 'theme' };
+    var cur = { s: DEFAULTS.s, dir: DEFAULTS.dir, col: DEFAULTS.col };
 
+    // Valid option whitelists (anything else read from storage is ignored)
+    var VALID_DIRS = ['bottom', 'top', 'left', 'right', 'all'];
+    var VALID_COLS = ['theme', 'blue', 'green', 'purple', 'orange', 'white'];
+
+    function inArray(arr, val) {
+      for (var i = 0; i < arr.length; i++) {
+        if (arr[i] === val) return true;
+      }
+      return false;
+    }
+
+    // Load saved choices; blocked or odd storage just leaves the defaults
+    function load() {
+      try {
+        var rawS = localStorage.getItem('mm.hfx.s');
+        if (rawS !== null && /^\d+$/.test(rawS)) {
+          cur.s = Math.max(0, Math.min(100, parseInt(rawS, 10)));
+        } else {
+          var rawLegacy = null;
+          try { rawLegacy = localStorage.getItem('mm.hoverfx'); } catch (_) {}
+          cur.s = rawLegacy === '0' ? 0 : DEFAULTS.s;
+        }
+      } catch (_) {}
+      try {
+        var rawDir = localStorage.getItem('mm.hfx.dir');
+        if (inArray(VALID_DIRS, rawDir)) cur.dir = rawDir;
+      } catch (_) {}
+      try {
+        var rawCol = localStorage.getItem('mm.hfx.col');
+        if (inArray(VALID_COLS, rawCol)) cur.col = rawCol;
+      } catch (_) {}
+    }
+
+    // Push the current choices onto <html> (the CSS reads them)
+    function apply() {
+      try {
+        var doc = document.documentElement;
+        if (!doc) return;
+        if (cur.s === 0) { doc.classList.add('mm-fx-off'); } else { doc.classList.remove('mm-fx-off'); }
+        if (doc.style && typeof doc.style.setProperty === 'function') { doc.style.setProperty('--hfx-s', String(cur.s)); }
+        if (typeof doc.setAttribute === 'function') {
+          doc.setAttribute('data-hfx-dir', cur.dir);
+          doc.setAttribute('data-hfx-col', cur.col);
+        }
+      } catch (_) {}
+    }
+
+    // Each write is separate so one failing never blocks the others
+    function save() {
+      try { localStorage.setItem('mm.hfx.s', String(cur.s)); } catch (_) {}
+      try { localStorage.setItem('mm.hfx.dir', cur.dir); } catch (_) {}
+      try { localStorage.setItem('mm.hfx.col', cur.col); } catch (_) {}
+      try { localStorage.setItem('mm.hoverfx', cur.s === 0 ? '0' : '1'); } catch (_) {}
+    }
+
+    // Reset: back to today's look, and forget the saved choices
+    function resetAll() {
+      cur.s = DEFAULTS.s;
+      cur.dir = DEFAULTS.dir;
+      cur.col = DEFAULTS.col;
+      try { if (localStorage.removeItem) localStorage.removeItem('mm.hfx.s'); } catch (_) {}
+      try { if (localStorage.removeItem) localStorage.removeItem('mm.hfx.dir'); } catch (_) {}
+      try { if (localStorage.removeItem) localStorage.removeItem('mm.hfx.col'); } catch (_) {}
+      try { if (localStorage.removeItem) localStorage.removeItem('mm.hoverfx'); } catch (_) {}
+      apply();
+    }
+
+    // Keep the highlighted chips in step with the current choice
+    function updateChipAria(card) {
+      if (!card || !card.querySelectorAll) return;
+      var dirBtns = card.querySelectorAll('button[data-hfx-dir]');
+      for (var i = 0; i < dirBtns.length; i++) {
+        dirBtns[i].setAttribute('aria-pressed', dirBtns[i].getAttribute('data-hfx-dir') === cur.dir ? 'true' : 'false');
+      }
+      var colBtns = card.querySelectorAll('button[data-hfx-col]');
+      for (var j = 0; j < colBtns.length; j++) {
+        colBtns[j].setAttribute('aria-pressed', colBtns[j].getAttribute('data-hfx-col') === cur.col ? 'true' : 'false');
+      }
+    }
+
+    function setStatus(card, text) {
+      if (!card || !card.querySelector) return;
+      var st = card.querySelector('#hfx-st');
+      if (st) { st.className = 'lg-st good'; st.textContent = text; }
+    }
+
+    load();
+    apply();
+
+    // The card shown in Security & Settings (built from the in-memory choices, so it also works when storage is blocked)
     window.__mmHoverFxSettingsHtml = function () {
-      var currentOff = false;
-      try { currentOff = localStorage.getItem(KEY) === '0'; }
-      catch (_) { currentOff = document.documentElement.classList.contains(OFF_CLS); }
-      var onPressed = currentOff ? 'false' : 'true';
-      var offPressed = currentOff ? 'true' : 'false';
-      return '<section class="m3-card" id="hfx-card">' +
-        '<div class="m3-card-head"><span class="m3-icon" aria-hidden="true">touch_app</span><div><div class="m3-card-title">Hover effects</div><div class="m3-card-sub">Enlarge and glow when you point at something</div></div></div>' +
-        '<div class="lg-f" style="margin-top:12px;"><div class="lg-l">Enlarge and glow on hover (computers only)</div>' +
-        '<div class="lg-chips" role="group" aria-label="Hover effects">' +
-        '<button type="button" class="chip-b" data-hfx="1" aria-pressed="' + onPressed + '">On</button>' +
-        '<button type="button" class="chip-b" data-hfx="0" aria-pressed="' + offPressed + '">Off</button></div>' +
-        '<small class="hint">Adds a gentle zoom and a soft glow to buttons, chips and cards. Off turns it off everywhere on this device.</small></div>' +
-        '<p class="lg-st" id="hfx-st" role="status"></p></section>';
+      try {
+        var html = '';
+        var sValText = cur.s === 0 ? 'Off' : String(cur.s);
+
+        html += '<section class="m3-card" id="hfx-card">';
+        html += '<div class="m3-card-head">';
+        html += '<span class="m3-icon" aria-hidden="true">palette</span>';
+        html += '<div>';
+        html += '<div class="m3-card-title">Appearance</div>';
+        html += '<div class="m3-card-sub">Glow and look of this device. Saved on this device only.</div>';
+        html += '</div></div>';
+
+        html += '<div class="lg-f" style="margin-top:12px;">';
+        html += '<div class="lg-l">Glow strength</div>';
+        html += '<input type="range" id="hfx-s" min="0" max="100" step="1" value="' + cur.s + '" aria-label="Glow strength" aria-valuetext="' + sValText + '">';
+        html += '<output id="hfx-sv" for="hfx-s">' + sValText + '</output>';
+        html += '<small class="hint">0 turns the hover enlarge and glow off. Computers only.</small>';
+        html += '</div>';
+
+        html += '<div class="lg-f">';
+        html += '<div class="lg-l">Glow direction</div>';
+        html += '<div class="lg-chips" role="group" aria-label="Glow direction">';
+        var dirs = [
+          { k: 'bottom', t: 'Bottom' },
+          { k: 'top', t: 'Top' },
+          { k: 'left', t: 'Left' },
+          { k: 'right', t: 'Right' },
+          { k: 'all', t: 'All sides' }
+        ];
+        for (var i = 0; i < dirs.length; i++) {
+          var d = dirs[i];
+          html += '<button type="button" class="chip-b" data-hfx-dir="' + d.k + '" aria-pressed="' + (cur.dir === d.k ? 'true' : 'false') + '">' + d.t + '</button>';
+        }
+        html += '</div></div>';
+
+        html += '<div class="lg-f">';
+        html += '<div class="lg-l">Glow color</div>';
+        html += '<div class="lg-chips" role="group" aria-label="Glow color">';
+        var cols = [
+          { k: 'theme', t: 'Match theme', sw: 'var(--accent)' },
+          { k: 'blue', t: 'Blue', sw: '#3b82f6' },
+          { k: 'green', t: 'Green', sw: '#22c55e' },
+          { k: 'purple', t: 'Purple', sw: '#a855f7' },
+          { k: 'orange', t: 'Orange', sw: '#f97316' },
+          { k: 'white', t: 'White', sw: '#ffffff' }
+        ];
+        for (var j = 0; j < cols.length; j++) {
+          var c = cols[j];
+          html += '<button type="button" class="chip-b" data-hfx-col="' + c.k + '" aria-pressed="' + (cur.col === c.k ? 'true' : 'false') + '">';
+          html += '<i class="hfx-sw" style="background:' + c.sw + '" aria-hidden="true"></i>' + c.t;
+          html += '</button>';
+        }
+        html += '</div></div>';
+
+        // live preview: drawn by CSS from the same variables the real hover effect uses
+        html += '<div class="hfx-pv-wrap"><div id="hfx-pv" class="hfx-pv" aria-hidden="true">Live preview</div></div>';
+
+        html += '<div class="hfx-actions">';
+        html += '<button type="button" class="chip-b" id="hfx-reset" data-hfx-reset="1">Reset to default</button>';
+        html += '</div>';
+
+        html += '<p class="lg-st" id="hfx-st" role="status"></p>';
+        html += '</section>';
+        return html;
+      } catch (_) {
+        return '';
+      }
+    };
+
+    // Read-only view of the current choices (used by the tests)
+    window.__mmHfxState = function () {
+      try { return { s: cur.s, dir: cur.dir, col: cur.col }; }
+      catch (_) { return { s: 55, dir: 'bottom', col: 'theme' }; }
     };
 
     if (!window.__mmHfxBound) {
       window.__mmHfxBound = true;
+
+      // slider
+      document.addEventListener('input', function (e) {
+        try {
+          if (!e || !e.target || e.target.id !== 'hfx-s') return;
+          var val = parseInt(e.target.value, 10);
+          if (isNaN(val)) return;
+          cur.s = Math.max(0, Math.min(100, val));
+          apply();
+          save();
+          var card = e.target.closest ? e.target.closest('#hfx-card') : null;
+          if (card) {
+            var sValText = cur.s === 0 ? 'Off' : String(cur.s);
+            var outEl = card.querySelector ? card.querySelector('#hfx-sv') : null;
+            if (outEl) outEl.textContent = sValText;
+            e.target.setAttribute('aria-valuetext', sValText);
+            setStatus(card, 'Saved');
+          }
+        } catch (_) {}
+      });
+
+      // direction chips, color chips and the Reset button
       document.addEventListener('click', function (e) {
         try {
-          var btn = e.target && e.target.closest ? e.target.closest('#hfx-card button[data-hfx]') : null;
+          var btn = (e.target && e.target.closest) ? e.target.closest('#hfx-card button') : null;
           if (!btn) return;
-          var val = btn.getAttribute('data-hfx');
-          var turnOff = val === '0';
-          if (turnOff) { document.documentElement.classList.add(OFF_CLS); }
-          else { document.documentElement.classList.remove(OFF_CLS); }
-          try { localStorage.setItem(KEY, turnOff ? '0' : '1'); } catch (_) {}
           var card = btn.closest('#hfx-card');
-          if (card) {
-            var buttons = card.querySelectorAll('button[data-hfx]');
-            for (var i = 0; i < buttons.length; i++) {
-              buttons[i].setAttribute('aria-pressed', buttons[i].getAttribute('data-hfx') === val ? 'true' : 'false');
+          var dirAttr = btn.getAttribute('data-hfx-dir');
+          var colAttr = btn.getAttribute('data-hfx-col');
+          var isReset = btn.getAttribute('data-hfx-reset') === '1';
+
+          if (dirAttr && inArray(VALID_DIRS, dirAttr)) {
+            cur.dir = dirAttr;
+            apply();
+            save();
+            updateChipAria(card);
+            setStatus(card, 'Saved');
+          } else if (colAttr && inArray(VALID_COLS, colAttr)) {
+            cur.col = colAttr;
+            apply();
+            save();
+            updateChipAria(card);
+            setStatus(card, 'Saved');
+          } else if (isReset) {
+            resetAll();
+            if (card) {
+              var slider = card.querySelector ? card.querySelector('#hfx-s') : null;
+              if (slider) {
+                slider.value = String(DEFAULTS.s);
+                slider.setAttribute('aria-valuetext', String(DEFAULTS.s));
+              }
+              var outEl = card.querySelector ? card.querySelector('#hfx-sv') : null;
+              if (outEl) outEl.textContent = String(DEFAULTS.s);
+              updateChipAria(card);
+              setStatus(card, 'Reset to default');
             }
-            var st = card.querySelector('#hfx-st');
-            if (st) { st.className = 'lg-st good'; st.textContent = 'Saved'; }
           }
         } catch (_) {}
       });
