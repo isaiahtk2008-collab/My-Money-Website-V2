@@ -1057,6 +1057,8 @@ button.card.kpi:hover{transform:translateY(-1px)}
 .hfx-pv-wrap{gap:12px;align-items:center;flex-wrap:wrap}
 .hfx-pv-btn{display:inline-flex;align-items:center;height:32px;padding:0 14px;border-radius:12px;background:var(--accent);color:var(--accent-ink);font-weight:700;font-size:13px}
 .hfx-pv-pill{display:inline-flex;align-items:center;height:26px;padding:0 12px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:12px}
+.hfx-pv-tile{display:inline-flex;align-items:center;height:32px;padding:0 14px;border-radius:12px;background:var(--surface2);border:1px solid var(--line);color:var(--ink);font-weight:700;font-size:13px}
+.hfx-sw2{display:inline-block;flex:none;width:18px;height:12px;border-radius:4px;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ink) 30%,transparent)}
 .hfx-actions{display:flex;justify-content:flex-end;margin-top:4px}
 </style>
 <style id="mm-accent">
@@ -1079,6 +1081,35 @@ button.card.kpi:hover{transform:translateY(-1px)}
 :root[data-accent="teal"]{--accent:#0a746f;--accent-ink:#ffffff;--accent-soft:#dff4f2;--c1:#0a746f}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"])[data-accent="teal"]{--accent:#4fd1c5;--accent-ink:#06171a;--accent-soft:#10302f;--c1:#4fd1c5}}
 :root[data-theme="dark"][data-accent="teal"]{--accent:#4fd1c5;--accent-ink:#06171a;--accent-soft:#10302f;--c1:#4fd1c5}
+</style>
+<style id="mm-tiles">
+/* TILE COLOR and OUTLINE COLOR presets (Security & Settings > Appearance). "default" is the original look and has no rule here.
+   Tile color sets --surface (cards and tiles) and --surface2 (gray tiles, chips, inputs); outline color sets --line (borders, dividers, chart grid lines).
+   Each tile preset has a light and a dark version. Tests (tests/tile-outline-themes.test.mjs) check that normal text and EVERY accent color stay readable
+   (>= 4.5:1; the original blue keeps its original 4.0 on gray tiles) on every tile color, and that Strong / Match accent outlines are clearly visible.
+   Dark rules are more specific than the light ones on purpose, so they win whenever the site is dark. Saved on this device only. */
+:root[data-tile="cream"]{--surface:#fffdf8;--surface2:#f4efe3}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"])[data-tile="cream"]{--surface:#1c1a16;--surface2:#27231c}}
+:root[data-theme="dark"][data-tile="cream"]{--surface:#1c1a16;--surface2:#27231c}
+:root[data-tile="mint"]{--surface:#f9fefc;--surface2:#e9f5f0}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"])[data-tile="mint"]{--surface:#131b18;--surface2:#1b2723}}
+:root[data-theme="dark"][data-tile="mint"]{--surface:#131b18;--surface2:#1b2723}
+:root[data-tile="lavender"]{--surface:#fdfcff;--surface2:#f0eefa}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"])[data-tile="lavender"]{--surface:#18161f;--surface2:#231f2d}}
+:root[data-theme="dark"][data-tile="lavender"]{--surface:#18161f;--surface2:#231f2d}
+:root[data-tile="sky"]{--surface:#f9fcff;--surface2:#e8f1fa}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"])[data-tile="sky"]{--surface:#131a21;--surface2:#1b2631}}
+:root[data-theme="dark"][data-tile="sky"]{--surface:#131a21;--surface2:#1b2631}
+:root[data-tile="graphite"]{--surface:#fdfdfd;--surface2:#eeeff1}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"])[data-tile="graphite"]{--surface:#1a1a1c;--surface2:#262629}}
+:root[data-theme="dark"][data-tile="graphite"]{--surface:#1a1a1c;--surface2:#262629}
+:root[data-outline="soft"]{--line:#eef0f5}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"])[data-outline="soft"]{--line:#2a303b}}
+:root[data-theme="dark"][data-outline="soft"]{--line:#2a303b}
+:root[data-outline="strong"]{--line:#7d889b}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"])[data-outline="strong"]{--line:#7b8595}}
+:root[data-theme="dark"][data-outline="strong"]{--line:#7b8595}
+:root[data-outline="accent"]{--line:color-mix(in srgb,var(--accent) 70%,var(--surface))}
 </style>
 <style id="mm-hover-fx">
 /* HOVER EFFECTS: things you can click enlarge a little and get a soft under-glow while the pointer is on them.
@@ -1126,13 +1157,15 @@ html:not(.mm-fx-off) tbody tr:is([data-act],[tabindex],[role="button"]):hover td
 (function () {
   try {
     // Default appearance settings (these reproduce the original look exactly)
-    var DEFAULTS = { s: 55, dir: 'bottom', col: 'theme', acc: 'blue' };
-    var cur = { s: DEFAULTS.s, dir: DEFAULTS.dir, col: DEFAULTS.col, acc: DEFAULTS.acc };
+    var DEFAULTS = { s: 55, dir: 'bottom', col: 'theme', acc: 'blue', tile: 'default', out: 'default' };
+    var cur = { s: DEFAULTS.s, dir: DEFAULTS.dir, col: DEFAULTS.col, acc: DEFAULTS.acc, tile: DEFAULTS.tile, out: DEFAULTS.out };
 
     // Valid option whitelists (anything else read from storage is ignored)
     var VALID_DIRS = ['bottom', 'top', 'left', 'right', 'all'];
     var VALID_COLS = ['theme', 'blue', 'green', 'purple', 'orange', 'white'];
     var VALID_ACCS = ['blue', 'green', 'purple', 'orange', 'rose', 'teal'];   // accent color of the whole app (blue = the original)
+    var VALID_TILES = ['default', 'cream', 'mint', 'lavender', 'sky', 'graphite'];   // card / tile colors (default = the original)
+    var VALID_OUTS = ['default', 'soft', 'strong', 'accent'];   // outline colors (default = the original)
 
     function inArray(arr, val) {
       for (var i = 0; i < arr.length; i++) {
@@ -1165,6 +1198,14 @@ html:not(.mm-fx-off) tbody tr:is([data-act],[tabindex],[role="button"]):hover td
         var rawAcc = localStorage.getItem('mm.hfx.acc');
         if (inArray(VALID_ACCS, rawAcc)) cur.acc = rawAcc;
       } catch (_) {}
+      try {
+        var rawTile = localStorage.getItem('mm.hfx.tile');
+        if (inArray(VALID_TILES, rawTile)) cur.tile = rawTile;
+      } catch (_) {}
+      try {
+        var rawOut = localStorage.getItem('mm.hfx.out');
+        if (inArray(VALID_OUTS, rawOut)) cur.out = rawOut;
+      } catch (_) {}
     }
 
     // Push the current choices onto <html> (the CSS reads them)
@@ -1178,6 +1219,8 @@ html:not(.mm-fx-off) tbody tr:is([data-act],[tabindex],[role="button"]):hover td
           doc.setAttribute('data-hfx-dir', cur.dir);
           doc.setAttribute('data-hfx-col', cur.col);
           doc.setAttribute('data-accent', cur.acc);
+          doc.setAttribute('data-tile', cur.tile);
+          doc.setAttribute('data-outline', cur.out);
         }
       } catch (_) {}
     }
@@ -1188,6 +1231,8 @@ html:not(.mm-fx-off) tbody tr:is([data-act],[tabindex],[role="button"]):hover td
       try { localStorage.setItem('mm.hfx.dir', cur.dir); } catch (_) {}
       try { localStorage.setItem('mm.hfx.col', cur.col); } catch (_) {}
       try { localStorage.setItem('mm.hfx.acc', cur.acc); } catch (_) {}
+      try { localStorage.setItem('mm.hfx.tile', cur.tile); } catch (_) {}
+      try { localStorage.setItem('mm.hfx.out', cur.out); } catch (_) {}
       try { localStorage.setItem('mm.hoverfx', cur.s === 0 ? '0' : '1'); } catch (_) {}
     }
 
@@ -1197,10 +1242,14 @@ html:not(.mm-fx-off) tbody tr:is([data-act],[tabindex],[role="button"]):hover td
       cur.dir = DEFAULTS.dir;
       cur.col = DEFAULTS.col;
       cur.acc = DEFAULTS.acc;
+      cur.tile = DEFAULTS.tile;
+      cur.out = DEFAULTS.out;
       try { if (localStorage.removeItem) localStorage.removeItem('mm.hfx.s'); } catch (_) {}
       try { if (localStorage.removeItem) localStorage.removeItem('mm.hfx.dir'); } catch (_) {}
       try { if (localStorage.removeItem) localStorage.removeItem('mm.hfx.col'); } catch (_) {}
       try { if (localStorage.removeItem) localStorage.removeItem('mm.hfx.acc'); } catch (_) {}
+      try { if (localStorage.removeItem) localStorage.removeItem('mm.hfx.tile'); } catch (_) {}
+      try { if (localStorage.removeItem) localStorage.removeItem('mm.hfx.out'); } catch (_) {}
       try { if (localStorage.removeItem) localStorage.removeItem('mm.hoverfx'); } catch (_) {}
       apply();
     }
@@ -1220,9 +1269,17 @@ html:not(.mm-fx-off) tbody tr:is([data-act],[tabindex],[role="button"]):hover td
       for (var k = 0; k < accBtns.length; k++) {
         accBtns[k].setAttribute('aria-pressed', accBtns[k].getAttribute('data-hfx-acc') === cur.acc ? 'true' : 'false');
       }
+      var tileBtns = card.querySelectorAll('button[data-hfx-tile]');
+      for (var t = 0; t < tileBtns.length; t++) {
+        tileBtns[t].setAttribute('aria-pressed', tileBtns[t].getAttribute('data-hfx-tile') === cur.tile ? 'true' : 'false');
+      }
+      var outBtns = card.querySelectorAll('button[data-hfx-out]');
+      for (var o = 0; o < outBtns.length; o++) {
+        outBtns[o].setAttribute('aria-pressed', outBtns[o].getAttribute('data-hfx-out') === cur.out ? 'true' : 'false');
+      }
     }
 
-    // Charts read their colors when they are drawn, so after the accent changes the page is redrawn (the same call the Theme button makes)
+    // Charts read their colors (accent, grid lines) when they are drawn, so after the accent, tile or outline changes the page is redrawn (the same call the Theme button makes)
     function redraw() {
       try { if (typeof render === 'function') render(); } catch (_) {}
     }
@@ -1313,8 +1370,46 @@ html:not(.mm-fx-off) tbody tr:is([data-act],[tabindex],[role="button"]):hover td
         html += '<small class="hint">Recolors buttons, highlights, outlines and the charts on this device.</small>';
         html += '</div>';
 
+        html += '<div class="lg-f">';
+        html += '<div class="lg-l">Tile color</div>';
+        html += '<div class="lg-chips" role="group" aria-label="Tile color">';
+        var tiles = [
+          { k: 'default', t: 'Original', a: '#ffffff', b: '#eceff4' },
+          { k: 'cream', t: 'Cream', a: '#fffdf8', b: '#f4efe3' },
+          { k: 'mint', t: 'Mint', a: '#f9fefc', b: '#e9f5f0' },
+          { k: 'lavender', t: 'Lavender', a: '#fdfcff', b: '#f0eefa' },
+          { k: 'sky', t: 'Sky', a: '#f9fcff', b: '#e8f1fa' },
+          { k: 'graphite', t: 'Graphite', a: '#fdfdfd', b: '#eeeff1' }
+        ];
+        for (var n = 0; n < tiles.length; n++) {
+          var tl = tiles[n];
+          html += '<button type="button" class="chip-b" data-hfx-tile="' + tl.k + '" aria-pressed="' + (cur.tile === tl.k ? 'true' : 'false') + '">';
+          html += '<i class="hfx-sw2" style="background:linear-gradient(90deg,' + tl.a + ' 50%,' + tl.b + ' 50%)" aria-hidden="true"></i>' + tl.t;
+          html += '</button>';
+        }
+        html += '</div>';
+        html += '<small class="hint">The color of cards, tiles and boxes. Light and dark each get their own version.</small>';
+        html += '</div>';
+
+        html += '<div class="lg-f">';
+        html += '<div class="lg-l">Outline color</div>';
+        html += '<div class="lg-chips" role="group" aria-label="Outline color">';
+        var outs = [
+          { k: 'default', t: 'Original' },
+          { k: 'soft', t: 'Soft' },
+          { k: 'strong', t: 'Strong' },
+          { k: 'accent', t: 'Match accent' }
+        ];
+        for (var q = 0; q < outs.length; q++) {
+          var ou = outs[q];
+          html += '<button type="button" class="chip-b" data-hfx-out="' + ou.k + '" aria-pressed="' + (cur.out === ou.k ? 'true' : 'false') + '">' + ou.t + '</button>';
+        }
+        html += '</div>';
+        html += '<small class="hint">The thin lines around cards, boxes and chart grids.</small>';
+        html += '</div>';
+
         // live preview: drawn by CSS from the same variables the real hover effect uses
-        html += '<div class="hfx-pv-wrap"><div id="hfx-pv" class="hfx-pv" aria-hidden="true">Live preview</div><span class="hfx-pv-btn" aria-hidden="true">Button</span><span class="hfx-pv-pill" aria-hidden="true">Highlight</span></div>';
+        html += '<div class="hfx-pv-wrap"><div id="hfx-pv" class="hfx-pv" aria-hidden="true">Live preview</div><span class="hfx-pv-btn" aria-hidden="true">Button</span><span class="hfx-pv-pill" aria-hidden="true">Highlight</span><span class="hfx-pv-tile" aria-hidden="true">Tile</span></div>';
 
         html += '<div class="hfx-actions">';
         html += '<button type="button" class="chip-b" id="hfx-reset" data-hfx-reset="1">Reset to default</button>';
@@ -1330,8 +1425,8 @@ html:not(.mm-fx-off) tbody tr:is([data-act],[tabindex],[role="button"]):hover td
 
     // Read-only view of the current choices (used by the tests)
     window.__mmHfxState = function () {
-      try { return { s: cur.s, dir: cur.dir, col: cur.col, acc: cur.acc }; }
-      catch (_) { return { s: 55, dir: 'bottom', col: 'theme', acc: 'blue' }; }
+      try { return { s: cur.s, dir: cur.dir, col: cur.col, acc: cur.acc, tile: cur.tile, out: cur.out }; }
+      catch (_) { return { s: 55, dir: 'bottom', col: 'theme', acc: 'blue', tile: 'default', out: 'default' }; }
     };
 
     if (!window.__mmHfxBound) {
@@ -1366,6 +1461,8 @@ html:not(.mm-fx-off) tbody tr:is([data-act],[tabindex],[role="button"]):hover td
           var dirAttr = btn.getAttribute('data-hfx-dir');
           var colAttr = btn.getAttribute('data-hfx-col');
           var accAttr = btn.getAttribute('data-hfx-acc');
+          var tileAttr = btn.getAttribute('data-hfx-tile');
+          var outAttr = btn.getAttribute('data-hfx-out');
           var isReset = btn.getAttribute('data-hfx-reset') === '1';
 
           if (dirAttr && inArray(VALID_DIRS, dirAttr)) {
@@ -1387,8 +1484,22 @@ html:not(.mm-fx-off) tbody tr:is([data-act],[tabindex],[role="button"]):hover td
             updateChipAria(card);
             setStatus(card, 'Saved');
             redraw();
+          } else if (tileAttr && inArray(VALID_TILES, tileAttr)) {
+            cur.tile = tileAttr;
+            apply();
+            save();
+            updateChipAria(card);
+            setStatus(card, 'Saved');
+            redraw();
+          } else if (outAttr && inArray(VALID_OUTS, outAttr)) {
+            cur.out = outAttr;
+            apply();
+            save();
+            updateChipAria(card);
+            setStatus(card, 'Saved');
+            redraw();
           } else if (isReset) {
-            var accBefore = cur.acc;
+            var lookBefore = cur.acc + '|' + cur.tile + '|' + cur.out;
             resetAll();
             if (card) {
               var slider = card.querySelector ? card.querySelector('#hfx-s') : null;
@@ -1401,7 +1512,7 @@ html:not(.mm-fx-off) tbody tr:is([data-act],[tabindex],[role="button"]):hover td
               updateChipAria(card);
               setStatus(card, 'Reset to default');
             }
-            if (accBefore !== cur.acc) redraw();
+            if (lookBefore !== cur.acc + '|' + cur.tile + '|' + cur.out) redraw();
           }
         } catch (_) {}
       });

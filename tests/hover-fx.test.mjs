@@ -235,6 +235,8 @@ function mkCard() {
   const dirBtns = ['bottom', 'top', 'left', 'right', 'all'].map((d) => makeBtn('data-hfx-dir', d));
   const colBtns = ['theme', 'blue', 'green', 'purple', 'orange', 'white'].map((c) => makeBtn('data-hfx-col', c));
   const accBtns = ['blue', 'green', 'purple', 'orange', 'rose', 'teal'].map((a) => makeBtn('data-hfx-acc', a));
+  const tileBtns = ['default', 'cream', 'mint', 'lavender', 'sky', 'graphite'].map((t) => makeBtn('data-hfx-tile', t));
+  const outBtns = ['default', 'soft', 'strong', 'accent'].map((o) => makeBtn('data-hfx-out', o));
   const resetBtn = makeBtn('data-hfx-reset', '1');
   slider.closest = (sel) => (sel === '#hfx-card' ? card : null);
 
@@ -249,10 +251,12 @@ function mkCard() {
       if (sel === 'button[data-hfx-dir]') return dirBtns;
       if (sel === 'button[data-hfx-col]') return colBtns;
       if (sel === 'button[data-hfx-acc]') return accBtns;
+      if (sel === 'button[data-hfx-tile]') return tileBtns;
+      if (sel === 'button[data-hfx-out]') return outBtns;
       return [];
     },
   };
-  return { card, slider, out, st, dirBtns, colBtns, accBtns, resetBtn };
+  return { card, slider, out, st, dirBtns, colBtns, accBtns, tileBtns, outBtns, resetBtn };
 }
 
 function clickBtn(env, btn) {
@@ -272,12 +276,12 @@ function slide(env, c, value) {
   });
 }
 
-const pick = (c, kind, v) => c[{ dir: 'dirBtns', col: 'colBtns', acc: 'accBtns' }[kind]].find((b) => b.getAttribute('data-hfx-' + kind) === v);
+const pick = (c, kind, v) => c[{ dir: 'dirBtns', col: 'colBtns', acc: 'accBtns', tile: 'tileBtns', out: 'outBtns' }[kind]].find((b) => b.getAttribute('data-hfx-' + kind) === v);
 
 test('script: defaults are strength 55, bottom, match theme, and the effect is on', () => {
   const env = makeEnv({});
   assert.equal(env.cls.has('mm-fx-off'), false);
-  assert.deepEqual(stateOf(env), { s: 55, dir: 'bottom', col: 'theme', acc: 'blue' });
+  assert.deepEqual(stateOf(env), { s: 55, dir: 'bottom', col: 'theme', acc: 'blue', tile: 'default', out: 'default' });
   assert.equal(env.styles.get('--hfx-s'), '55');
   assert.equal(env.attrs.get('data-hfx-dir'), 'bottom');
   assert.equal(env.attrs.get('data-hfx-col'), 'theme');
@@ -310,7 +314,7 @@ test('script: garbage in storage falls back to the defaults (or clamps)', () => 
 test('script: blocked storage never throws and stays on with the defaults', () => {
   let env;
   assert.doesNotThrow(() => { env = makeEnv(null, true); });
-  assert.deepEqual(stateOf(env), { s: 55, dir: 'bottom', col: 'theme', acc: 'blue' });
+  assert.deepEqual(stateOf(env), { s: 55, dir: 'bottom', col: 'theme', acc: 'blue', tile: 'default', out: 'default' });
   assert.equal(env.cls.has('mm-fx-off'), false);
   assert.match(env.sandbox.window.__mmHoverFxSettingsHtml(), /id="hfx-card"/);
   // changing things still works for this visit even though nothing can be saved
@@ -398,7 +402,7 @@ test('script: Reset to default restores exactly the original look and forgets th
   clickBtn(env, pick(c, 'dir', 'all'));
   clickBtn(env, pick(c, 'col', 'white'));
   clickBtn(env, c.resetBtn);
-  assert.deepEqual(stateOf(env), { s: 55, dir: 'bottom', col: 'theme', acc: 'blue' });
+  assert.deepEqual(stateOf(env), { s: 55, dir: 'bottom', col: 'theme', acc: 'blue', tile: 'default', out: 'default' });
   assert.equal(env.cls.has('mm-fx-off'), false);
   assert.equal(env.styles.get('--hfx-s'), '55');
   assert.equal(env.attrs.get('data-hfx-dir'), 'bottom');
@@ -415,7 +419,7 @@ test('script: Reset to default restores exactly the original look and forgets th
   clickBtn(env, c.resetBtn);
   assert.equal(env.cls.has('mm-fx-off'), false);
   // and a reload after Reset starts from the defaults
-  assert.deepEqual(stateOf(makeEnv(Object.fromEntries(env.store))), { s: 55, dir: 'bottom', col: 'theme', acc: 'blue' });
+  assert.deepEqual(stateOf(makeEnv(Object.fromEntries(env.store))), { s: 55, dir: 'bottom', col: 'theme', acc: 'blue', tile: 'default', out: 'default' });
 });
 
 test('script: choices survive a reload (including strength 0)', () => {
@@ -425,7 +429,7 @@ test('script: choices survive a reload (including strength 0)', () => {
   clickBtn(env, pick(c, 'dir', 'top'));
   clickBtn(env, pick(c, 'col', 'green'));
   const env2 = makeEnv(Object.fromEntries(env.store));
-  assert.deepEqual(stateOf(env2), { s: 35, dir: 'top', col: 'green', acc: 'blue' });
+  assert.deepEqual(stateOf(env2), { s: 35, dir: 'top', col: 'green', acc: 'blue', tile: 'default', out: 'default' });
   assert.equal(env2.styles.get('--hfx-s'), '35');
   assert.equal(env2.attrs.get('data-hfx-dir'), 'top');
   assert.equal(env2.attrs.get('data-hfx-col'), 'green');
@@ -433,7 +437,7 @@ test('script: choices survive a reload (including strength 0)', () => {
   slide(env2, c, 0);
   const env3 = makeEnv(Object.fromEntries(env2.store));
   assert.equal(env3.cls.has('mm-fx-off'), true);
-  assert.deepEqual(stateOf(env3), { s: 0, dir: 'top', col: 'green', acc: 'blue' });
+  assert.deepEqual(stateOf(env3), { s: 0, dir: 'top', col: 'green', acc: 'blue', tile: 'default', out: 'default' });
 });
 
 test('script: clicks and inputs elsewhere are ignored without throwing', () => {
@@ -448,7 +452,7 @@ test('script: clicks and inputs elsewhere are ignored without throwing', () => {
     inputH({ target: null });
     inputH({});
   });
-  assert.deepEqual(stateOf(env), { s: 55, dir: 'bottom', col: 'theme', acc: 'blue' });
+  assert.deepEqual(stateOf(env), { s: 55, dir: 'bottom', col: 'theme', acc: 'blue', tile: 'default', out: 'default' });
 });
 
 // ---- app accent color (the script part; the colors themselves are checked in accent-colors.test.mjs) ----
@@ -526,7 +530,7 @@ test('script: the accent survives a reload together with the glow choices', () =
   slide(env, c, 20);
   clickBtn(env, pick(c, 'dir', 'left'));
   const env2 = makeEnv(Object.fromEntries(env.store));
-  assert.deepEqual(stateOf(env2), { s: 20, dir: 'left', col: 'theme', acc: 'orange' });
+  assert.deepEqual(stateOf(env2), { s: 20, dir: 'left', col: 'theme', acc: 'orange', tile: 'default', out: 'default' });
   assert.equal(env2.attrs.get('data-accent'), 'orange');
 });
 
@@ -546,4 +550,136 @@ test('script: a page without render() (or one that throws) never breaks the choi
   delete env.sandbox.render;
   assert.doesNotThrow(() => clickBtn(env, pick(c, 'acc', 'rose')));
   assert.equal(stateOf(env).acc, 'rose');
+});
+
+// ---- tile color and outline color (the script part; the colors themselves are checked in tile-outline-themes.test.mjs) ----
+// (Drafted by Gemini, reviewed and corrected by Claude.)
+const TILES_ALL = ['default', 'cream', 'mint', 'lavender', 'sky', 'graphite'];
+const OUTS_ALL = ['default', 'soft', 'strong', 'accent'];
+const ORIGINAL = { s: 55, dir: 'bottom', col: 'theme', acc: 'blue', tile: 'default', out: 'default' };
+
+test('script: tile and outline default to the original and nothing is redrawn at load', () => {
+  const env = makeEnv({});
+  assert.equal(env.attrs.get('data-tile'), 'default');
+  assert.equal(env.attrs.get('data-outline'), 'default');
+  assert.equal(env.sandbox.redraws, 0);
+  assert.deepEqual(stateOf(env), ORIGINAL);
+});
+
+test('script: a saved tile and outline are loaded, garbage falls back to the original', () => {
+  const saved = makeEnv({ 'mm.hfx.tile': 'mint', 'mm.hfx.out': 'strong' });
+  assert.equal(saved.attrs.get('data-tile'), 'mint');
+  assert.equal(saved.attrs.get('data-outline'), 'strong');
+  assert.deepEqual(stateOf(saved), { ...ORIGINAL, tile: 'mint', out: 'strong' });
+  for (const bad of ['pink', '', 'GREEN', '<b>', 'mint ', 'accent']) {
+    const env = makeEnv({ 'mm.hfx.tile': bad, 'mm.hfx.out': bad });
+    // 'accent' is a valid outline but not a valid tile, and 'mint ' has a space: each key is checked against its own list
+    assert.equal(stateOf(env).tile, 'default', 'tile ' + JSON.stringify(bad));
+    assert.equal(stateOf(env).out, bad === 'accent' ? 'accent' : 'default', 'outline ' + JSON.stringify(bad));
+  }
+});
+
+test('script: the card has 6 tile chips and 4 outline chips with only the current ones pressed', () => {
+  const h = makeEnv({ 'mm.hfx.tile': 'lavender', 'mm.hfx.out': 'soft' }).sandbox.window.__mmHoverFxSettingsHtml();
+  assert.match(h, /Tile color/);
+  assert.match(h, /Outline color/);
+  assert.equal((h.match(/data-hfx-tile="/g) || []).length, 6);
+  assert.equal((h.match(/data-hfx-out="/g) || []).length, 4);
+  assert.match(h, /data-hfx-tile="lavender" aria-pressed="true"/);
+  assert.match(h, /data-hfx-out="soft" aria-pressed="true"/);
+  assert.equal((h.match(/data-hfx-tile="[^"]+" aria-pressed="true"/g) || []).length, 1);
+  assert.equal((h.match(/data-hfx-out="[^"]+" aria-pressed="true"/g) || []).length, 1);
+  const d = makeEnv({}).sandbox.window.__mmHoverFxSettingsHtml();
+  assert.match(d, /data-hfx-tile="default" aria-pressed="true"/);
+  assert.match(d, /data-hfx-out="default" aria-pressed="true"/);
+});
+
+test('script: every tile preset applies, saves, highlights only itself and redraws once', () => {
+  for (const t of TILES_ALL) {
+    const env = makeEnv({});
+    const c = mkCard();
+    const btn = pick(c, 'tile', t);
+    clickBtn(env, btn);
+    assert.equal(env.attrs.get('data-tile'), t);
+    assert.equal(env.store.get('mm.hfx.tile'), t);
+    assert.equal(stateOf(env).tile, t);
+    assert.equal(env.sandbox.redraws, 1);
+    assert.equal(c.st.textContent, 'Saved');
+    assert.deepEqual(c.tileBtns.filter((b) => b.getAttribute('aria-pressed') === 'true'), [btn]);
+  }
+});
+
+test('script: every outline preset applies, saves, highlights only itself and redraws once', () => {
+  for (const o of OUTS_ALL) {
+    const env = makeEnv({});
+    const c = mkCard();
+    const btn = pick(c, 'out', o);
+    clickBtn(env, btn);
+    assert.equal(env.attrs.get('data-outline'), o);
+    assert.equal(env.store.get('mm.hfx.out'), o);
+    assert.equal(stateOf(env).out, o);
+    assert.equal(env.sandbox.redraws, 1);
+    assert.equal(c.st.textContent, 'Saved');
+    assert.deepEqual(c.outBtns.filter((b) => b.getAttribute('aria-pressed') === 'true'), [btn]);
+  }
+});
+
+test('script: glow changes never redraw, accent / tile / outline changes always do', () => {
+  const env = makeEnv({});
+  const c = mkCard();
+  slide(env, c, 80);
+  clickBtn(env, pick(c, 'dir', 'right'));
+  clickBtn(env, pick(c, 'col', 'orange'));
+  assert.equal(env.sandbox.redraws, 0);
+  clickBtn(env, pick(c, 'acc', 'teal'));
+  assert.equal(env.sandbox.redraws, 1);
+  clickBtn(env, pick(c, 'tile', 'sky'));
+  assert.equal(env.sandbox.redraws, 2);
+  clickBtn(env, pick(c, 'out', 'accent'));
+  assert.equal(env.sandbox.redraws, 3);
+});
+
+test('script: Reset redraws once if the tile or outline changed, forgets every key, and does not redraw when nothing changed', () => {
+  const env = makeEnv({});
+  const c = mkCard();
+  clickBtn(env, pick(c, 'tile', 'graphite'));
+  clickBtn(env, pick(c, 'out', 'strong'));
+  const before = env.sandbox.redraws;
+  clickBtn(env, c.resetBtn);
+  assert.equal(env.sandbox.redraws, before + 1);
+  assert.deepEqual(stateOf(env), ORIGINAL);
+  assert.equal(env.attrs.get('data-tile'), 'default');
+  assert.equal(env.attrs.get('data-outline'), 'default');
+  assert.equal(env.store.size, 0, 'every saved key should be forgotten: ' + [...env.store.keys()]);
+  assert.equal(pick(c, 'tile', 'default').getAttribute('aria-pressed'), 'true');
+  assert.equal(pick(c, 'out', 'default').getAttribute('aria-pressed'), 'true');
+  const quiet = makeEnv({});
+  clickBtn(quiet, mkCard().resetBtn);
+  assert.equal(quiet.sandbox.redraws, 0);
+});
+
+test('script: tile and outline survive a reload together with the accent and the glow', () => {
+  const env = makeEnv({});
+  const c = mkCard();
+  slide(env, c, 40);
+  clickBtn(env, pick(c, 'dir', 'left'));
+  clickBtn(env, pick(c, 'col', 'purple'));
+  clickBtn(env, pick(c, 'acc', 'rose'));
+  clickBtn(env, pick(c, 'tile', 'cream'));
+  clickBtn(env, pick(c, 'out', 'soft'));
+  const env2 = makeEnv(Object.fromEntries(env.store));
+  assert.deepEqual(stateOf(env2), { s: 40, dir: 'left', col: 'purple', acc: 'rose', tile: 'cream', out: 'soft' });
+  assert.equal(env2.attrs.get('data-tile'), 'cream');
+  assert.equal(env2.attrs.get('data-outline'), 'soft');
+  assert.equal(env2.attrs.get('data-accent'), 'rose');
+});
+
+test('script: blocked storage never throws for tile and outline clicks or Reset', () => {
+  const env = makeEnv(null, true);
+  const c = mkCard();
+  assert.doesNotThrow(() => { clickBtn(env, pick(c, 'tile', 'mint')); clickBtn(env, pick(c, 'out', 'strong')); });
+  assert.equal(stateOf(env).tile, 'mint');
+  assert.equal(stateOf(env).out, 'strong');
+  assert.doesNotThrow(() => clickBtn(env, c.resetBtn));
+  assert.deepEqual(stateOf(env), ORIGINAL);
 });
