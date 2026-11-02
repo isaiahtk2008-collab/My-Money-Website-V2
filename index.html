@@ -1700,7 +1700,7 @@ function normalize(raw){
       clicks:num(r['Clicks on Listing']),notes:def.notes(r)||r['Notes (Sold)']||r['Sale Notes']||null,specs:{},row:rowN,sheet};
     Object.assign(it,tradeFields(r,it.buyPrice));
     if(def.kind==='Phone'){it.specs={Color:r['Color'],Storage:r['Storage (GB)'],'Original box':r['Original Box'],Case:r['Case'],Charger:r['Charger'],IMEI:r['IMEI']}}
-    if(def.kind==='PC'){const ram=canonRam(r['RAM']);if(r['RAM']&&ram!==String(r['RAM']).trim())flag('fixed',sheet,rowN,'RAM',`RAM "${String(r['RAM']).trim()}" was standardised to ${ram}`,'Use values like 16GB');
+    if(def.kind==='PC'){it.serial=typeof pcSerialOf==='function'?pcSerialOf(r):null;const ram=canonRam(r['RAM']);if(r['RAM']&&ram!==String(r['RAM']).trim())flag('fixed',sheet,rowN,'RAM',`RAM "${String(r['RAM']).trim()}" was standardised to ${ram}`,'Use values like 16GB');
       it.specs={Color:r['Color'],RAM:ram,CPU:r['CPU (and specs)'],GPU:[r['GPU 1 (and specs)'],r['GPU 2 (and specs)']].filter(Boolean).join(' + '),Storage:r['Storage (SSD, HDD or NVME)'],Screen:r['Screen Size / Hertz'],'Original charger':r['Original Charger']}}
     if(def.kind==='Accessory'){const t=String(r['Item Type']||'').trim();const tt=TYPE_MAP[t.toLowerCase()]||t;if(tt!==t)flag('fixed',sheet,rowN,'Item Type',`Type "${t}" was corrected to "${tt}"`,'Fix the spelling');
       it.type=tt;it.specs={Type:tt,Color:r['Color'],Specs:r['Specs'],Connection:r['Connection Type'],Included:r['Included Accessories']}}
@@ -1799,11 +1799,15 @@ function matchDeviceRows(item, raw) {
   const normLab = s => String(s == null ? '' : s).replace(/\s+/g, ' ').trim().toLowerCase();
   const rawSer = item.serial != null ? item.serial : (item.specs && (item.specs.IMEI != null ? item.specs.IMEI : item.specs['Serial Number']));
   const ser = normSer(rawSer);
-  if (!ser) return fail;
   const isPhone = item.kind === 'Phone';
+  /* A PC with no serial on the item falls back to the 6-character key at the end of its label, e.g. "... [6F5AF0]".
+     Exactly ONE purchase serial may end with that key, otherwise it fails. Phones never use this. */
+  const keyM = (!ser && !isPhone) ? String(item.label == null ? '' : item.label).match(/\[([A-Za-z0-9]{6})\]\s*$/) : null;
+  const tail = keyM ? keyM[1].toUpperCase() : '';
+  if (!ser && !tail) return fail;
   const bTab = raw[isPhone ? 'BoughtPhones' : 'BoughtPCs'];
   if (!bTab || !Array.isArray(bTab.rows)) return fail;
-  const bMatches = bTab.rows.filter(r => { const s = normSer(get(r, 'Serial Number')); return s && s === ser; });
+  const bMatches = bTab.rows.filter(r => { const s = normSer(get(r, 'Serial Number')); return s && (ser ? s === ser : s.endsWith(tail)); });
   if (bMatches.length !== 1) return fail;
   const pRow = bMatches[0];
   const purchase = {tab: bTab.sheet || (isPhone ? 'Form Responses - Bought' : 'Form Responses - PCs'), rowId: rowId(pRow), row: pRow};
@@ -1820,6 +1824,78 @@ function matchDeviceRows(item, raw) {
     sale = {tab: sTab.sheet || (isPhone ? 'Form Responses - Sold' : 'Form Responses - Sold PCs'), rowId: rowId(sRow), row: sRow};
   }
   return {purchase, sale, ok: true};
+}
+
+/* Pure: the serial of a PC from its inventory row. The PCs tab header is "Serial Number:" (with a colon), so headers are compared
+   with everything except letters and digits removed. Returns the trimmed text or null. */
+function pcSerialOf(r) {
+  if (!r || typeof r !== 'object') return null;
+  for (const k of Object.keys(r)) {
+    if (String(k).toLowerCase().replace(/[^a-z0-9]/g, '') === 'serialnumber') {
+      const v = r[k];
+      if (v == null) return null;
+      const s = String(v).trim();
+      return s || null;
+    }
+  }
+  return null;
+}
+
+/* Pure (never writes, never throws): runs matchDeviceRows over every device and says WHY each one that fails does.
+   okCount = matched with every Row ID present; noIdCount = matched but a row has no Row ID yet (the backfill fixes that);
+   everything else is listed in problems with a reason code and a plain-English detail. */
+function matchAudit(items, raw) {
+  const result = {total: 0, okCount: 0, noIdCount: 0, problems: []};
+  if (!Array.isArray(items)) return result;
+  const clean = s => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const get = (r, h) => { if (!r || typeof r !== 'object') return undefined; const t = clean(h); for (const k of Object.keys(r)) if (clean(k) === t) return r[k]; };
+  const normSer = s => String(s == null ? '' : s).replace(/\s+/g, '').toUpperCase();
+  const normLab = s => String(s == null ? '' : s).replace(/\s+/g, ' ').trim().toLowerCase();
+  const idOf = r => { if (!r || typeof r !== 'object') return null; if (r.rowId != null && String(r.rowId).trim()) return String(r.rowId).trim(); const v = get(r, 'Row ID'); if (v == null) return null; const s = String(v).trim(); return s || null; };
+  const hasTabs = !!(raw && typeof raw === 'object' && raw.BoughtPhones && Array.isArray(raw.BoughtPhones.rows) && raw.BoughtPCs && Array.isArray(raw.BoughtPCs.rows) && raw.SoldPhones && Array.isArray(raw.SoldPhones.rows) && raw.SoldPCs && Array.isArray(raw.SoldPCs.rows));
+  for (const item of items) {
+    if (!item || typeof item !== 'object') continue;
+    result.total++;
+    const base = {id: item.id != null ? item.id : null, name: item.name || item.label || '', kind: item.kind || ''};
+    let res;
+    try { res = matchDeviceRows(item, raw); } catch (e) { res = {purchase: null, sale: null, ok: false}; }
+    if (res && res.ok) {
+      const pId = idOf(res.purchase);
+      const sId = res.sale ? idOf(res.sale) : null;
+      if (pId && (!res.sale || sId)) result.okCount++;
+      else { result.noIdCount++; result.problems.push(Object.assign({}, base, {reason: 'noid', detail: 'Matched to its sheet row, but that row has no Row ID yet. Fill missing IDs fixes this.'})); }
+      continue;
+    }
+    let reason = 'other', detail = 'Could not match this item to its sheet row.';
+    if (!hasTabs) {
+      reason = 'no-script-tabs'; detail = 'Your Apps Script is older and does not send the purchase and sale tabs. Re-deploy the newest script.';
+    } else if (item.kind === 'Accessory') {
+      reason = 'no-key'; detail = 'Accessories match on type, name, price, date and seller together. One of those is missing, or two rows look identical.';
+    } else if (item.kind === 'Phone' || item.kind === 'PC') {
+      const isPhone = item.kind === 'Phone';
+      const rawSer = item.serial != null ? item.serial : (item.specs && (item.specs.IMEI != null ? item.specs.IMEI : item.specs['Serial Number']));
+      const ser = normSer(rawSer);
+      const km = (!ser && !isPhone) ? String(item.label == null ? '' : item.label).match(/\[([A-Za-z0-9]{6})\]\s*$/) : null;
+      const tail = km ? km[1].toUpperCase() : '';
+      if (!ser && !tail) {
+        reason = 'no-serial'; detail = 'No serial number or IMEI is recorded for this device.';
+      } else {
+        const bTab = raw[isPhone ? 'BoughtPhones' : 'BoughtPCs'];
+        const bm = bTab.rows.filter(r => { const s = normSer(get(r, 'Serial Number')); return s && (ser ? s === ser : s.endsWith(tail)); });
+        if (bm.length === 0) { reason = 'no-purchase-row'; detail = 'No purchase row has this serial number.'; }
+        else if (bm.length > 1) { reason = 'several-purchase-rows'; detail = 'Two or more purchase rows share this serial number, so it is unsafe to pick one.'; }
+        else if (item.sold === true) {
+          const lab = normLab(item.label);
+          const sTab = raw[isPhone ? 'SoldPhones' : 'SoldPCs'];
+          const sm = lab ? sTab.rows.filter(r => normLab(get(r, isPhone ? 'Device Label' : 'Device')) === lab) : [];
+          if (sm.length === 0) { reason = 'no-sale-row'; detail = 'Marked as sold, but no sale row has this exact device label.'; }
+          else if (sm.length > 1) { reason = 'several-sale-rows'; detail = 'Two or more sale rows have this device label, so it is unsafe to pick one.'; }
+        }
+      }
+    }
+    result.problems.push(Object.assign({}, base, {reason, detail}));
+  }
+  return result;
 }
 
 /* ================= STORE ================= */
@@ -2196,6 +2272,42 @@ async function fillMissingIds(){
     rowShowErr(e);
   }finally{
     rowSetBusy(false);
+  }
+}
+/* "Check matching" (toolbar, beside Refresh): reports which devices can be matched to their sheet rows and why the rest cannot.
+   Read-only. The only thing it can trigger is the existing Fill missing IDs action; unmatched rows are never edited or deleted. */
+function matchCheckHtml(a){
+  const total=a.total||0,ok=a.okCount||0,noId=a.noIdCount||0,probs=a.problems||[];
+  const cant=probs.filter(p=>p.reason!=='noid').length;
+  const title=(!probs.length)?`All ${esc(total)} devices match`:`${esc(probs.length)} of ${esc(total)} devices need attention`;
+  const labels={'noid':'Missing Row ID','no-script-tabs':'Script needs updating','no-serial':'No serial number','no-purchase-row':'Purchase row not found','several-purchase-rows':'Several purchase rows share a serial','no-sale-row':'Sale row not found','several-sale-rows':'Several sale rows share a label','no-key':'Accessory details missing or duplicated','other':'Other'};
+  const grouped={};
+  probs.forEach(p=>{const r=p.reason||'other';(grouped[r]=grouped[r]||[]).push(p)});
+  const listHtml=Object.keys(grouped).length?`<div style="max-height:40vh;overflow-y:auto;margin:12px 0;padding-right:4px">${Object.keys(grouped).map(r=>`<div><h4 style="margin:10px 0 4px;font-size:.9em">${esc(labels[r]||r)} (${esc(grouped[r].length)})</h4><ul style="margin:0;padding-left:18px;font-size:.85em">${grouped[r].map(p=>`<li><strong>${esc(p.name||'Device')}</strong>${p.detail?`: ${esc(p.detail)}`:''}</li>`).join('')}</ul></div>`).join('')}</div>`:'';
+  const fillBtn=noId>0?`<button type="button" class="btn" data-act="idfill">Fill missing IDs</button>`:'';
+  return `<div class="palbox" style="padding:20px" role="dialog" aria-modal="true" aria-label="Check matching">
+    <div class="dh"><h2>${title}</h2><button type="button" class="ibtn" data-act="close" aria-label="Close">${ICON.x}</button></div>
+    <p class="hint" style="margin:8px 0">Matched: ${esc(ok)} · Missing Row ID: ${esc(noId)} · Can't match: ${esc(cant)}</p>
+    ${listHtml}
+    <p class="hint" style="color:var(--muted)">Rows that can't be matched safely are never edited or deleted from the site. Fix those in your Google Sheet (for example fill in the Serial Number or remove a duplicate), then press Check again.</p>
+    <div class="ed-actions">${fillBtn}<button type="button" class="btn sec" data-act="matchrefix">Check again</button><button type="button" class="btn sec" data-act="close" data-focus>Close</button></div></div>`;
+}
+function openMatchCheck(){
+  try{
+    openOverlay(matchCheckHtml(matchAudit((store.D&&store.D.items)||[],store.base||store.raw)),'pal');
+  }catch(e){
+    openOverlay(`<div class="palbox" style="padding:20px" role="dialog" aria-modal="true" aria-label="Check matching">
+      <div class="dh"><h2>Couldn't run the check</h2><button type="button" class="ibtn" data-act="close" aria-label="Close">${ICON.x}</button></div>
+      <p class="hint">Nothing was changed. ${esc((e&&e.message)||e)}</p>
+      <div class="ed-actions"><button type="button" class="btn sec" data-act="close" data-focus>Close</button></div></div>`,'pal');
+  }
+}
+async function matchRecheck(){
+  try{
+    if(store.source&&store.source.kind==='google')await store.load(store.source);
+    openMatchCheck();
+  }catch(e){
+    toast('Could not re-read your sheet. Nothing was changed.');
   }
 }
 /* Keep every screen in step straight away: patch the copy of the sheet the page holds, then quietly re-read the live sheet. */
@@ -4365,6 +4477,7 @@ function setupTop(){
   $('#tools').innerHTML=`<button class="ibtn search" data-act="palette" aria-label="Search">${ICON.search}<span>Search</span><kbd>⌘K</kbd></button>
     <button class="ibtn" data-act="theme" aria-label="Theme: ${S.theme}" title="Theme: ${S.theme}">${ICON[S.theme==='dark'?'moon':S.theme==='light'?'sun':'auto']}</button>
     <button class="ibtn" data-act="privacy" aria-pressed="${S.privacy}" aria-label="Hide amounts" title="Hide amounts (P)">${S.privacy?ICON.eyeoff:ICON.eye}</button>
+    <button class="ibtn" data-act="matchfix" aria-label="Check matching" title="Check that every device matches its sheet row"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg></button>
     <button class="ibtn" data-act="refresh" aria-label="Refresh data" title="Refresh data (R)">${ICON.refresh}</button>
     <button class="ibtn" data-act="help" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">${ICON.kbd}</button>`;
   const rb=$('#rangebar');
@@ -4439,6 +4552,8 @@ document.addEventListener('click',e=>{
     case 'rowdelgo':deleteRowGo(d.id);break;
     case 'rowedit':openRowEdit(d.id);break;
     case 'idfill':fillMissingIds();break;
+    case 'matchfix':openMatchCheck();break;
+    case 'matchrefix':matchRecheck();break;
     case 'devedit':openDeviceEdit(d.id);break;
     case 'devdel':openDeviceSaleDelete(d.id);break;
     case 'devdelgo':deleteDeviceSaleGo(d.id);break;
