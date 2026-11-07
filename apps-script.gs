@@ -79,6 +79,110 @@ function authOk_(token) {
   return sessionOk_(token);
 }
 
+/* ---------- GUEST LINKS (read-only, time-limited, you choose how much they see) ----------
+   You create a guest key from the website ($ menu > Guest access). Only the SHA-256 hash of the key is stored (Script properties, key mm.guests),
+   together with when it ends and which preset it uses. A guest key can ONLY read, and only what its preset allows. It can never write,
+   edit, delete, change settings, or make/revoke guest links. To end every guest link at once, run revokeAllGuests() from the editor. */
+const GUESTS_KEY = 'mm.guests';
+const MAX_GUESTS = 20;                                         // live (not yet ended) guest links at one time
+const GUEST_MINUTES = [30, 60, 360, 720, 1440, 2880, 10080];   // 30 min, 1 h, 6 h, 12 h, 24 h, 48 h, 7 days. Nothing else is accepted.
+// Tabs a preset hides come back with the same headers and NO rows. Masked columns show (hidden) instead of the value.
+const GUEST_HIDE_TABS = ['Expenses', 'Investments', 'Owed'];
+const GUEST_MASK_COLS = ['Sold To', 'Sold to', 'Bought From', 'Found By', 'Bought By', 'Sale By', 'IMEI', 'Device Label', 'Notes', 'Notes (Bought)', 'Notes (Sold)', 'Sale Notes', 'Establishment'];
+const GUEST_PRESETS = {
+  all:      { name: 'Everything (read-only)', hideTabs: [], maskCols: [] },
+  business: { name: 'Business only (no expenses, investments or owed)', hideTabs: GUEST_HIDE_TABS, maskCols: [] },
+  sales:    { name: 'Sales and stock without personal details', hideTabs: GUEST_HIDE_TABS, maskCols: GUEST_MASK_COLS }
+};
+const gnorm_ = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+function loadGuests_() {
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty(GUESTS_KEY);
+    const o = raw ? JSON.parse(raw) : {};
+    return o && typeof o === 'object' && !Array.isArray(o) ? o : {};
+  } catch (err) { return {}; }
+}
+function saveGuests_(o) {
+  PropertiesService.getScriptProperties().setProperty(GUESTS_KEY, JSON.stringify(o));
+}
+function pruneGuests_(all, now) {
+  Object.keys(all).forEach(h => { const g = all[h]; if (!g || typeof g !== 'object' || !(g.exp > now)) delete all[h]; });
+  return all;
+}
+// What kind of key is this? { ok:true, preset, exp } for a live guest key, { ok:false, expired:true } for one that has run out, else { ok:false }.
+function guestLookup_(token) {
+  token = typeof token === 'string' ? token : '';
+  if (!token) return { ok: false };
+  const g = loadGuests_()[sha256_(token)];
+  if (!g || typeof g !== 'object') return { ok: false };
+  if (!(typeof g.exp === 'number' && g.exp > Date.now())) return { ok: false, expired: true };
+  return { ok: true, preset: GUEST_PRESETS[g.preset] ? g.preset : 'sales', exp: g.exp };   // an unknown preset fails closed to the strictest one
+}
+// Makes a guest key. Returns { ok:true, key, id, exp, preset } (the key is shown ONCE and cannot be recovered) or { ok:false, error }.
+function createGuest_(minutes, preset, label) {
+  minutes = Number(minutes);
+  if (GUEST_MINUTES.indexOf(minutes) < 0) return { ok: false, error: 'bad duration' };
+  preset = String(preset || '');
+  if (!Object.prototype.hasOwnProperty.call(GUEST_PRESETS, preset)) return { ok: false, error: 'bad preset' };
+  const now = Date.now();
+  const all = pruneGuests_(loadGuests_(), now);
+  if (Object.keys(all).length >= MAX_GUESTS) return { ok: false, error: 'too many guest links (' + MAX_GUESTS + '); revoke one first' };
+  const key = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
+  const hash = sha256_(key);
+  const exp = now + minutes * 60000;
+  all[hash] = { exp: exp, preset: preset, label: String(label || '').slice(0, 40), created: now };
+  saveGuests_(all);
+  return { ok: true, key: key, id: hash.slice(0, 10), exp: exp, preset: preset };
+}
+// The owner's list: never includes keys or hashes, only a short id to revoke by.
+function listGuests_() {
+  const now = Date.now();
+  const all = pruneGuests_(loadGuests_(), now);
+  saveGuests_(all);
+  const out = Object.keys(all).map(h => ({ id: h.slice(0, 10), exp: all[h].exp, preset: GUEST_PRESETS[all[h].preset] ? all[h].preset : 'sales', label: all[h].label || '', created: all[h].created || 0 }));
+  out.sort((a, b) => a.exp - b.exp);
+  return { ok: true, guests: out, now: now };
+}
+function revokeGuest_(id, all) {
+  const cur = loadGuests_();
+  let n = 0;
+  if (all === true || id === 'all') { n = Object.keys(cur).length; saveGuests_({}); return { ok: true, revoked: n }; }
+  id = String(id || '');
+  if (!/^[0-9a-f]{10}$/.test(id)) return { ok: false, error: 'bad id' };
+  Object.keys(cur).forEach(h => { if (h.slice(0, 10) === id) { delete cur[h]; n++; } });
+  saveGuests_(cur);
+  return { ok: true, revoked: n };
+}
+function revokeAllGuests() { saveGuests_({}); }
+// Fallback if the website is not handy: run createGuestLink from the Apps Script editor, then read the key from View > Logs.
+// Link = https://<your site>/#guest=<script id>~<key>~<ends at, ms>  (the website's Guest access card builds it for you).
+function createGuestLink(minutes, preset) {
+  const r = createGuest_(minutes || 60, preset || 'business', 'editor');
+  console.log(JSON.stringify(r));
+  return r;
+}
+// Applies a preset to what readAll() returned. Hidden tabs keep their headers but lose every row; masked columns lose their values.
+function filterForGuest_(tabs, presetKey) {
+  const p = GUEST_PRESETS[presetKey] || GUEST_PRESETS.sales;
+  const mask = {}; p.maskCols.forEach(c => { mask[gnorm_(c)] = true; });
+  const out = {};
+  Object.keys(tabs).forEach(key => {
+    const t = tabs[key];
+    if (p.hideTabs.indexOf(key) >= 0) { out[key] = Object.assign({}, t, { rows: [] }); return; }
+    const hid = (t.headers || []).filter(h => h && mask[gnorm_(h)]);
+    if (!hid.length) { out[key] = t; return; }
+    out[key] = Object.assign({}, t, {
+      rows: t.rows.map(r => {
+        const o = Object.assign({}, r);
+        hid.forEach(h => { if (o[h] !== null && o[h] !== undefined && o[h] !== '') o[h] = '(hidden)'; });
+        return o;
+      })
+    });
+  });
+  return out;
+}
+
 // Asks Google whether this sign-in credential is real, for THIS app and THIS email. (Google calls this endpoint "for debugging";
 // that is fine for one person signing in now and then. A busier app would check Google's public keys instead.)
 function login_(credential) {
@@ -397,12 +501,20 @@ function writeSettings_(ss, items) {
 // A plain GET only ever answers the harmless status ping below. It never returns sheet data and never needs a token, so it
 // cannot leak anything. Reading, checking and settings are POST requests that must carry a valid token (see doPost).
 function doGet(e) {
-  return json({ ok: true, service: 'my-money-entry', version: 3, read: true, edit: true, backfill: true, trade: true, settings: true, settingsSecret: !!SECRET, auth: 'session' });
+  return json({ ok: true, service: 'my-money-entry', version: 3, read: true, edit: true, backfill: true, trade: true, settings: true, settingsSecret: !!SECRET, auth: 'session', guests: true });
 }
 
 // The read-type answers. Only doPost calls this, and only after authOk_ passed.
-function readReply_(body) {
+// guest = null for the owner, or { preset, exp } for a guest key (doPost only ever lets a guest reach plain "read").
+function readReply_(body, guest) {
   try {
+    if (guest) {
+      if (body.action !== 'read') return { ok: false, error: 'view-only' };   // belt and braces: settings and check are never shown to guests
+      const gtabs = filterForGuest_(readAll(), guest.preset);
+      const greply = { ok: true, version: 3, at: new Date().toISOString(), tabs: gtabs, guest: { preset: guest.preset, exp: guest.exp } };
+      if (body.flat === '1' || body.flat === 1 || body.flat === true) greply.data = flatten(gtabs);
+      return greply;
+    }
     if (body.action === 'settings_get') {
       return { ok: true, version: 3, secretSet: !!SECRET, settings: readSettings_(SpreadsheetApp.getActiveSpreadsheet()) };
     }
@@ -865,11 +977,23 @@ function doPost(e) {
     // Signing in is the only request that needs no token: it carries a Google sign-in, which login_ checks with Google.
     if (body.action === 'login') return json(login_(body.credential));
 
-    // Everything else needs a live session token. An empty or missing token is refused (an unset SECRET never means "open").
-    if (!authOk_(body.secret)) return json({ ok: false, error: 'auth' });
+    // Everything else needs a live session token or a live guest key. An empty or missing token is refused (an unset SECRET never means "open").
+    if (!authOk_(body.secret)) {
+      const g = guestLookup_(body.secret);
+      if (!g.ok) return json(g.expired ? { ok: false, error: 'auth', reason: 'guest-expired' } : { ok: false, error: 'auth' });
+      // A guest can ONLY read. Everything else is refused with "view-only" (not "auth", so the website does not sign them out).
+      // This return comes before every path that writes, edits, deletes or changes settings, so a guest key can never reach them.
+      if (body.action === 'read') return json(readReply_(body, g));
+      return json({ ok: false, error: 'view-only' });
+    }
 
     if (body.action === 'logout') { endSession_(body.secret); return json({ ok: true }); }
-    if (body.action === 'read' || body.action === 'check' || body.action === 'settings_get') return json(readReply_(body));
+    if (body.action === 'read' || body.action === 'check' || body.action === 'settings_get') return json(readReply_(body, null));
+
+    // Guest links: owner only (a guest key never gets past the block above).
+    if (body.action === 'guest_create') return json(createGuest_(body.minutes, body.preset, body.label));
+    if (body.action === 'guest_list') return json(listGuests_());
+    if (body.action === 'guest_revoke') return json(revokeGuest_(body.id, body.all));
 
     // Edit or delete one existing row (handled before anything that could add a row)
     if (body.action === 'edit' || body.action === 'delete') {
