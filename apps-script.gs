@@ -82,24 +82,25 @@ function authOk_(token) {
 // Asks Google whether this sign-in credential is real, for THIS app and THIS email. (Google calls this endpoint "for debugging";
 // that is fine for one person signing in now and then. A busier app would check Google's public keys instead.)
 function login_(credential) {
-  const bad = { ok: false, error: 'auth' };
+  // Every refusal says WHY in "reason" (a short code, never anything secret) so a failed sign-in can be fixed instead of guessed at.
+  const no = why => ({ ok: false, error: 'auth', reason: String(why).slice(0, 90) });
   credential = String(credential || '');
-  if (credential.length > 4096 || !/^[\w-]+\.[\w-]+\.[\w-]+$/.test(credential)) return bad;   // not even shaped like a sign-in token: do not bother Google
+  if (credential.length > 4096 || !/^[\w-]+\.[\w-]+\.[\w-]+$/.test(credential)) return no('shape');   // not even shaped like a sign-in token: do not bother Google
   let info;
   try {
     const res = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(credential), { muteHttpExceptions: true });
-    if (res.getResponseCode() !== 200) return bad;
+    if (res.getResponseCode() !== 200) return no('google-http-' + res.getResponseCode());
     info = JSON.parse(res.getContentText());
-  } catch (err) { return bad; }
-  if (!info || typeof info !== 'object') return bad;
+  } catch (err) { return no('fetch: ' + String(err && err.message || err)); }
+  if (!info || typeof info !== 'object') return no('google-reply');
   const iss = String(info.iss || '');
   const email = String(info.email || '').trim().toLowerCase();
   const exp = Number(info.exp) * 1000;
-  if (iss !== 'accounts.google.com' && iss !== 'https://accounts.google.com') return bad;
-  if (info.aud !== GOOGLE_CLIENT_ID) return bad;
-  if (String(info.email_verified) !== 'true') return bad;
-  if (!email || email !== String(ALLOWED_EMAIL).trim().toLowerCase()) return bad;
-  if (!(exp > Date.now())) return bad;
+  if (iss !== 'accounts.google.com' && iss !== 'https://accounts.google.com') return no('issuer');
+  if (info.aud !== GOOGLE_CLIENT_ID) return no('client-id-mismatch');
+  if (String(info.email_verified) !== 'true') return no('email-not-verified');
+  if (!email || email !== String(ALLOWED_EMAIL).trim().toLowerCase()) return no('email-mismatch');
+  if (!(exp > Date.now())) return no('expired');
   const s = newSession_();
   return { ok: true, token: s.token, expires: s.expires };
 }

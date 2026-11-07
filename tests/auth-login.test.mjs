@@ -143,3 +143,28 @@ test('the optional SECRET word works as a token only when it is set', () => {
   assert.equal(post(c2, { action: 'read', secret: 'abc124' }).error, 'auth');
   assert.equal(post(c2, { action: 'read', secret: '' }).error, 'auth');
 });
+
+test('every refusal says why, with a short code and nothing secret', () => {
+  const cases = [
+    [{ info: good({ email: 'other@example.com' }) }, 'email-mismatch'],
+    [{ info: good({ aud: 'evil.apps.googleusercontent.com' }) }, 'client-id-mismatch'],
+    [{ info: good({ email_verified: 'false' }) }, 'email-not-verified'],
+    [{ info: good({ iss: 'https://evil.example.com' }) }, 'issuer'],
+    [{ info: good({ exp: String(Math.floor(Date.now() / 1000) - 10) }) }, 'expired'],
+    [{ reply: { code: 400, body: {} } }, 'google-http-400'],
+    [{ reply: { code: 200, body: 'junk' } }, 'google-reply']
+  ];
+  for (const [google, reason] of cases) {
+    const r = post(make({ google }), { action: 'login', credential: CRED });
+    assert.equal(r.ok, false); assert.equal(r.error, 'auth'); assert.equal(r.reason, reason);
+    assert.equal(r.token, undefined);
+  }
+  assert.equal(post(make({ google: { info: good() } }), { action: 'login', credential: 'nope' }).reason, 'shape');
+});
+
+test('a missing permission to call Google shows up as a fetch reason, not a silent failure', () => {
+  const c = make({ google: { info: good() } });
+  c.UrlFetchApp.fetch = () => { throw new Error('Authorization is required to perform that action.'); };
+  const r = post(c, { action: 'login', credential: CRED });
+  assert.equal(r.ok, false); assert.match(r.reason, /^fetch: Authorization is required/);
+});
