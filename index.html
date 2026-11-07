@@ -778,7 +778,9 @@
           else if (why === 'expired') hint = 'That sign-in had already expired. Try again.';
           else if (said === 'auth' && !why) hint = 'The script answered but gave no reason, so it is the version before the reasons were added. Paste the newest script and redeploy as a New version.';
           else hint = 'Check the script and redeploy it.';
-          showError('Google accepted you, but your sheet script refused this sign-in. Script said: "' + said + '"' + (why ? ' (' + why + ')' : '') + '. ' + hint);
+          var idm = (url.match(/\/macros\/s\/([^\/?#]+)/) || [])[1] || '';
+          var where = idm ? ' This app is calling the script link that starts with ' + idm.slice(0, 22) + ' (it must be the deployment you updated).' : '';
+          showError('Google accepted you, but your sheet script refused this sign-in. Script said: "' + said + '"' + (why ? ' (' + why + ')' : '') + '. ' + hint + where);
         }
       })
       .catch(function() { showError('Could not reach your sheet script. Check your connection and try again.'); });
