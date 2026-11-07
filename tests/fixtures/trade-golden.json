@@ -1,0 +1,66 @@
+{
+ "_note": "Captured from the ORIGINAL index.html (commit cd5e1af) before the Trade work. plain = normalize()+inventoryStats() on sample rows with no trade columns; calc = calcUpdate() innerHTML for inputs (100,25,0,0), (250,30,13,15), (blank cost).",
+ "plain": {
+  "items": [
+   {
+    "name": "iPhone 11",
+    "kind": "Phone",
+    "sold": true,
+    "buyPrice": 300,
+    "sellPrice": 420,
+    "profit": 120,
+    "roi": 0.4,
+    "days": 9
+   },
+   {
+    "name": "Galaxy S21",
+    "kind": "Phone",
+    "sold": true,
+    "buyPrice": 400,
+    "sellPrice": 600,
+    "profit": 200,
+    "roi": 0.5,
+    "days": 16
+   },
+   {
+    "name": "Pixel 6",
+    "kind": "Phone",
+    "sold": false,
+    "buyPrice": 250,
+    "sellPrice": null,
+    "profit": null,
+    "roi": null,
+    "days": null
+   },
+   {
+    "name": "Dell Optiplex",
+    "kind": "PC",
+    "sold": false,
+    "buyPrice": 120,
+    "sellPrice": null,
+    "profit": null,
+    "roi": null,
+    "days": null
+   },
+   {
+    "name": "Apple AirPods",
+    "kind": "Accessory",
+    "sold": true,
+    "buyPrice": 80,
+    "sellPrice": 110,
+    "profit": 30,
+    "roi": 0.375,
+    "days": null
+   }
+  ],
+  "expensesTotal": 50,
+  "stockCost": 370,
+  "stockCount": 2,
+  "issues": 2
+ },
+ "calc": [
+  "<div>List at <b style=\"font-size:20px\"><span class=\"amt\">$125</span></b></div>\n   <div>Break-even price: <span class=\"amt\">$100</span></div>\n   <div>Net profit at that price: <b class=\"pos\">+$25</b> · Markup 25% · Margin 20%</div>",
+  "<div>List at <b style=\"font-size:20px\"><span class=\"amt\">$396</span></b></div>\n   <div>Break-even price: <span class=\"amt\">$304.60</span></div>\n   <div>Net profit at that price: <b class=\"pos\">+$79.52</b> · Markup 30% · Margin 20%</div>",
+  "Enter what you paid and a target to see the price."
+ ]
+}

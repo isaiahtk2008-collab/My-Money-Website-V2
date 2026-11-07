@@ -1,0 +1,5 @@
+node_modules/
+
+# real keys and private copies of the script: never commit
+*.PRIVATE.gs
+*.private.gs
