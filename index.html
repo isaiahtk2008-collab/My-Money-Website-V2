@@ -768,7 +768,11 @@
           markAuthenticated('google');
           location.reload();   /* start fresh so every screen loads with the new key */
         } else {
-          showError('Google accepted you, but your sheet script refused this sign-in. Check GOOGLE_CLIENT_ID and ALLOWED_EMAIL at the top of the script, then redeploy it.');
+          var said = j && typeof j.error === 'string' ? j.error.slice(0, 80) : 'no reply';
+          var hint = /^tab not allowed|^unknown|^bad/i.test(said) || !j || j.error === undefined
+            ? 'The link saved in this app is answered by an OLD version of your script. Update the same deployment to a New version (Deploy > Manage deployments > pencil > New version).'
+            : (said === 'auth' ? 'The new script is answering but turned this sign-in down. Check GOOGLE_CLIENT_ID and ALLOWED_EMAIL at the top of the script, and that you clicked Allow when Google asked for permission.' : 'Check the script and redeploy it.');
+          showError('Google accepted you, but your sheet script refused this sign-in. Script said: "' + said + '". ' + hint);
         }
       })
       .catch(function() { showError('Could not reach your sheet script. Check your connection and try again.'); });
