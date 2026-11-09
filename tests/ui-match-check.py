@@ -61,7 +61,7 @@ def run(p):
     page.route(URL + '*', script)
     page.add_init_script("try{sessionStorage.setItem('user_authenticated','true');sessionStorage.setItem('mm.auth.method','local')}catch(e){}")
     page.add_init_script("window.Chart=function(){return{destroy(){},update(){},resize(){}}};window.Chart.register=function(){};window.Chart.defaults={font:{},plugins:{legend:{labels:{}}}};")
-    page.goto(PAGE.as_uri())
+    page.goto(PAGE.as_uri() + '?demo=1')
     page.wait_for_function("typeof store!=='undefined' && store.D && store.D.expenses.length>3")
     page.evaluate(f"LS.set('lgUrl','{URL}')")
     page.evaluate("""(d)=>{const base=store.base||store.raw;const tab=(n,rows)=>({sheet:n,headers:[],rows});

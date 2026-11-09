@@ -27,7 +27,7 @@ with sync_playwright() as p:
     page.on('console', lambda m: errors.append(m.text) if m.type == 'error' and 'Failed to load resource' not in m.text and 'tailwind is not defined' not in m.text else None)
     page.route('**/*', lambda r: r.continue_() if r.request.url.startswith('file:') else r.abort())
     page.add_init_script(INIT_AUTH); page.add_init_script(INIT_CHART)
-    page.goto(PAGE.as_uri()); page.wait_for_function(READY)
+    page.goto(PAGE.as_uri() + '?demo=1'); page.wait_for_function(READY)
     page.click('.logo[data-sec=open]'); page.wait_for_selector('#hfx-card')
 
     # ---- glow slider moved into Fine tuning ----

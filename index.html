@@ -2691,7 +2691,12 @@ function normalize(raw){
 /* ----- Data sources: anything that returns the raw shape plugs in here ----- */
 const TABS={Expenses:'Expenses',Phones:'Master Inventory',PCs:'PCs',Accessories:'PnA',Investments:'Investment Tracking Sheet'};
 const EXTRA_TABS={BoughtPhones:'Form Responses - Bought',BoughtPCs:'Form Responses - PCs',BoughtAccess:'Bought Access - Form',SoldPhones:'Form Responses - Sold',SoldPCs:'Form Responses - Sold PCs',SoldAccess:'Sold Access - Form',Owed:'Owed'};
-const EmbeddedSource={name:'Demo data',kind:'embedded',async load(){return MM_RAW}};
+/* No data loaded yet: the same tabs and headers as the demo snapshot but with zero rows, so every tile, chart and table starts at zero.
+   Nothing here touches your sheet. Add ?demo=1 to the page link to look at the old made-up demo numbers instead. */
+const EMPTY_RAW=(function(){const e={};Object.keys(MM_RAW).forEach(function(k){const t=MM_RAW[k];e[k]={sheet:t.sheet,headers:t.headers.slice(),rows:[]}});return e})();
+const SHOW_DEMO=/[?&]demo=1(&|$)/.test(location.search);
+const embeddedRaw=()=>SHOW_DEMO?MM_RAW:EMPTY_RAW;
+const EmbeddedSource={name:SHOW_DEMO?'Demo data':'No data yet',kind:'embedded',async load(){return embeddedRaw()}};
 /* Reads through your Apps Script link first (works even if the sheet is private), then falls back to the public sheet feed. */
 /* Called when the script says our session key is not valid any more. Safe to call from anywhere. */
 function mmAuthFail(){try{if(window.mmAuth&&window.mmAuth.expired)window.mmAuth.expired()}catch(e){}}
@@ -3049,8 +3054,11 @@ function mkChart(id,cfg,summary){
   if(typeof Chart==='undefined'){el.parentElement.innerHTML='<div class="empty">Charts could not load. Check your connection and reload.</div>';return}
   Chart.defaults.font.family="'Plus Jakarta Sans',system-ui,sans-serif";
   if(summary)el.setAttribute('aria-label',summary);el.setAttribute('role','img');
+  /* Nothing to plot (no data yet, or nothing in this range): give the axis a real $0 to $100 scale so the chart shows zeros, not a squashed 0 to 1 box. */
+  try{if(chartIsEmpty(cfg)){const y=cfg.options&&cfg.options.scales&&cfg.options.scales.y;if(y&&y.max==null&&y.suggestedMax==null)y.suggestedMax=100}}catch(e){}
   CH.push(new Chart(el,cfg));
 }
+function chartIsEmpty(cfg){const ds=(cfg&&cfg.data&&cfg.data.datasets)||[];return !ds.some(d=>(d.data||[]).some(v=>{const n=v&&typeof v==='object'?v.y:v;return typeof n==='number'&&isFinite(n)&&n!==0}))}
 const chartBox=(id,tall)=>`<div class="chartbox ${tall?'tall':''}"><canvas id="${id}"></canvas></div>`;
 
 /* ----- Money in/out chart helpers (pure, unit-tested) ----- */
@@ -4461,7 +4469,7 @@ function vSpending(){
     ${kpi({label:'Total spent',val:M(ss.total),delta:dlt(ss.total,ss.prevTotal),inverse:true,spark:ss.cur,sub:'vs previous',tip:'Sum of purchases in the range. Refunds are excluded.'})}
     ${kpi({label:'Daily average',val:M(ss.perDay),delta:dlt(ss.perDay,ss.prevTotal/R.len),inverse:true,sub:'per day',tip:'Total ÷ number of days in the range, including days with no spending.'})}
     ${kpi({label:'Purchases',val:String(ss.count),delta:dlt(ss.count,ss.prevCount),inverse:true,sub:'transactions',tip:'Number of expense rows in the range.'})}
-    ${ss.biggest?kpi({label:'Biggest purchase',val:M(ss.biggest.amount),sub:esc(ss.biggest.item.length>26?ss.biggest.item.slice(0,25)+'…':ss.biggest.item),act:'open',v:ss.biggest.id,tip:'Click to see the details.'}):''}
+    ${ss.biggest?kpi({label:'Biggest purchase',val:M(ss.biggest.amount),sub:esc(ss.biggest.item.length>26?ss.biggest.item.slice(0,25)+'…':ss.biggest.item),act:'open',v:ss.biggest.id,tip:'Click to see the details.'}):(ss.count===0?kpi({label:'Biggest purchase',val:M(0),sub:'no purchases yet',tip:'Shows your largest single purchase once there is one.'}):'')}
     ${ss.refunds.length?kpi({label:'Refunds',val:M(ss.refundTotal),sub:plural(ss.refunds.length,'return'),tip:'Negative amounts in your sheet. They are not subtracted from spending.'}):''}
   </div>
   ${burnCard()}
@@ -4516,10 +4524,10 @@ function vReselling(){
   <div class="grid g6">
     ${kpi({label:'Profit',val:SM(rs.profit),delta:dlt(rs.profit,rs.prevProfit),spark:rs.spark,sub:plural(rs.sold.length,'sale'),tip:'Sale price − purchase price, summed over items sold in the range.'})}
     ${kpi({label:'Revenue',val:M(rs.revenue),delta:dlt(rs.revenue,rs.prevRevenue),sub:'sales total',tip:'Total sale prices in the range.'})}
-    ${kpi({label:'Average ROI',val:pct(rs.roi),delta:dlt(rs.roi,rs.prevRoi),sub:'per flip',tip:'Profit ÷ purchase price, averaged per item.'})}
-    ${kpi({label:'Days to sell',val:rs.days==null?'—':Math.round(rs.days)+' days',delta:dlt(rs.days,rs.prevDays),inverse:true,sub:'average',tip:'Days from purchase date to sale date. Shorter is better, so a drop shows in green.'})}
-    ${kpi({label:'Sell-through',val:pct(rs.sellThrough),sub:'all-time, sold ÷ bought',tip:'Share of everything you ever bought that has sold. Not limited to the date range.'})}
-    ${kpi({label:'Win rate',val:pct(rs.win),sub:'sales with profit',tip:'Share of sales in the range that made money.'})}
+    ${kpi({label:'Average ROI',val:rs.sold.length?pct(rs.roi):'0%',delta:dlt(rs.roi,rs.prevRoi),sub:'per flip',tip:'Profit ÷ purchase price, averaged per item.'})}
+    ${kpi({label:'Days to sell',val:rs.days==null?(rs.sold.length?'—':'0 days'):Math.round(rs.days)+' days',delta:dlt(rs.days,rs.prevDays),inverse:true,sub:'average',tip:'Days from purchase date to sale date. Shorter is better, so a drop shows in green.'})}
+    ${kpi({label:'Sell-through',val:rs.sellThrough==null?'0%':pct(rs.sellThrough),sub:'all-time, sold ÷ bought',tip:'Share of everything you ever bought that has sold. Not limited to the date range.'})}
+    ${kpi({label:'Win rate',val:rs.sold.length?pct(rs.win):'0%',sub:'sales with profit',tip:'Share of sales in the range that made money.'})}
   </div>
   <div class="grid g2">
     ${card('Cumulative profit',chartBox('cum'),'<span class="hint">Each point is one sale</span>')}
@@ -4545,12 +4553,15 @@ function vReselling(){
       {k:'profit',h:'Profit',num:true,cell:r=>r.profit==null?'—':`<b class="${r.profit>=0?'pos':'neg'}">${SM(r.profit)}</b>`},{k:'roi',h:'ROI',num:true,cell:r=>pct(r.roi)},{k:'days',h:'Days',num:true,val:r=>r.sold?r.days:r.age,cell:r=>(r.sold?r.days:r.age)??'—'},{k:'buyer',h:'Buyer',cell:r=>esc(r.buyer||'—')},{k:'seller',h:'Bought from',cell:r=>esc(r.seller||'—')}],
     sumKey:r=>r.profit,sumLabel:'profit'}).replace('<div data-tbl="items">',`<div class="activef" style="margin-bottom:8px;display:flex;gap:8px;flex-wrap:wrap">${seg('rstat',[['All','All'],['Sold','Sold'],['Stock','In stock']],stl)}${seg('rtrade',[['All','All deals'],['Trade','Trades only']],S.rtrade)}</div><div data-tbl="items">`))}`;
   return {html,mount(){
-    const lab=rs.cum.map(p=>fd(p.x));
-    mkChart('cum',{type:'line',data:{labels:lab,datasets:[{label:'Profit',data:rs.cum.map(p=>p.y),borderColor:cv('--c3'),backgroundColor:cv('--c3'),fill:false,tension:.25,pointRadius:rs.cum.length>60?0:2,borderWidth:2.5}]},options:baseOpts({xTicks:7})},`Cumulative profit reaches ${mny(rs.profit)} across ${rs.sold.length} sales.`);
+    const noSales=!rs.cum.length;   /* no sales: draw a flat $0 line across the range instead of an empty box */
+    const lab=noSales?[fd(R.start),fd(R.end)]:rs.cum.map(p=>fd(p.x));
+    mkChart('cum',{type:'line',data:{labels:lab,datasets:[{label:'Profit',data:noSales?[0,0]:rs.cum.map(p=>p.y),borderColor:cv('--c3'),backgroundColor:cv('--c3'),fill:false,tension:.25,pointRadius:rs.cum.length>60?0:2,borderWidth:2.5}]},options:baseOpts({xTicks:7})},`Cumulative profit reaches ${mny(rs.profit)} across ${rs.sold.length} sales.`);
     mkChart('perm',{type:'bar',data:{labels:rs.months.map(b=>b.label),datasets:[{label:'Profit',data:rs.perM,backgroundColor:rs.perM.map(v=>v>=0?cv('--c3'):cv('--c8')),borderRadius:6}]},options:baseOpts()},'Profit per month.');
     const o=baseOpts();o.interaction={mode:'nearest',intersect:true};o.scales.x={type:'linear',title:{display:true,text:'Days held',color:cv('--muted')},grid:{display:false},ticks:{color:cv('--muted')},border:{display:false}};
     o.plugins.tooltip.callbacks={label:c=>`${c.raw.n}: ${c.raw.x} days, ${sgn(c.raw.y)}`};
-    mkChart('scat',{type:'scatter',data:{datasets:[{data:rs.sold.filter(i=>i.days!=null).map(i=>({x:i.days,y:i.profit,n:i.name})),backgroundColor:cv('--c1')+'cc',pointRadius:5,pointHoverRadius:7}]},options:o},'Scatter of days held against profit for each sale.');
+    const pts=rs.sold.filter(i=>i.days!=null).map(i=>({x:i.days,y:i.profit,n:i.name}));
+    if(!pts.length){pts.push({x:0,y:0,n:'No sales yet'});o.scales.x.min=0;o.scales.x.suggestedMax=10}   /* no sales: one zero point on a 0 to 10 day axis */
+    mkChart('scat',{type:'scatter',data:{datasets:[{data:pts,backgroundColor:cv('--c1')+'cc',pointRadius:5,pointHoverRadius:7}]},options:o},'Scatter of days held against profit for each sale.');
   }};
 }
 function flipList(a){return `<div class="list">${a.map(i=>`<button class="li" data-act="open" data-id="${i.id}"><span class="tx"><b>${esc(i.name)}</b><span>${fdy(i.sellDate)}${i.days!=null?' · '+plural(i.days,'day'):''}</span></span><span class="rt ${i.profit>=0?'pos':'neg'}">${SM(i.profit)}</span></button>`).join('')}</div>`}
@@ -4569,7 +4580,7 @@ function vInventory(){
   const html=`<div class="grid g4">
     ${kpi({label:'Cash tied up',val:M(st.cash),sub:st.tradeValue>0?'cash you paid for unsold items':'what you paid for unsold items',tip:st.tradeValue>0?'Real cash paid for everything still in stock. Trade-in value is not counted as cash.':'Sum of purchase prices for everything still in stock.'})}
     ${kpi({label:'Items in stock',val:String(st.stock.length),sub:['Phone','PC','Accessory'].map(k=>st.stock.filter(i=>i.kind===k).length+' '+kindWord(k).toLowerCase()).join(' · ')})}
-    ${kpi({label:'Average age',val:st.avgAge==null?'—':Math.round(st.avgAge)+' days',sub:'since you bought them',tip:'Days from purchase date to today.'})}
+    ${kpi({label:'Average age',val:st.avgAge==null?(st.stock.length?'—':'0 days'):Math.round(st.avgAge)+' days',sub:'since you bought them',tip:'Days from purchase date to today.'})}
   </div>
   ${tradeLines(st.cash,st.tradeValue)}
   ${card('How long things have been sitting',`<div class="bars">${st.buckets.map((b,i)=>`<button class="bar" data-act="bucket" data-v="${i}" aria-pressed="${S.bucket===i}"><span class="nm">${b.l}</span><span class="tr"><i style="width:${st.stock.length?Math.max(b.items.length?4:0,b.items.length/st.stock.length*100):0}%;background:${i>=3?'var(--bad)':i===2?'var(--warn)':'var(--good)'}"></i></span><span class="nv">${plural(b.items.length,'item')}<small>${M(sum(b.items,x=>x.cashSpent!=null?x.cashSpent:x.buyPrice))}</small></span></button>`).join('')}</div>`,sel?`<button class="chip-b" data-act="bucket" data-v="${S.bucket}" aria-pressed="true">${sel.l}${ICON.x.replace('<svg','<svg class="x"')}</button>`:'<span class="hint">Click a row to filter the list</span>')}
@@ -4586,7 +4597,7 @@ function vInvesting(){
   const html=`<div class="grid g4">
     ${kpi({label:'Total value',val:M(iv.total),spark:ts.map(x=>x.v),sub:'latest logged values',tip:'Sum of the most recent value logged for each portfolio.'})}
     ${kpi({label:'Money added',val:M(iv.contrib),sub:'all-time deposits',tip:'Sum of "Amount Added / Subtracted" across all entries, including the opening deposit.'})}
-    ${kpi({label:'Gain',val:SM(iv.gain),sub:pct(iv.ret,1)+' return',tip:'Total value − money added.'})}
+    ${kpi({label:'Gain',val:SM(iv.gain),sub:(iv.ret==null&&!D.investments.length?'0%':pct(iv.ret,1))+' return',tip:'Total value − money added.'})}
     ${kpi({label:'Last logged',val:iv.updated?rel(iv.updated):'—',sub:iv.updated?fdy(iv.updated):'',tip:'Values are only as fresh as your most recent entry.'})}
   </div>
   <div class="grid g3">${iv.P.map(p=>`<div class="card kpi"><span class="lab"><i class="dot" style="background:${catColor(p.name)}"></i>${esc(p.name)}</span><span class="val">${M(p.value)}</span><span class="foot"><span><span class="chip ${p.gain==null?'':p.gain>=0?'good':'bad'}">${p.gain==null?'—':SM(p.gain)}</span> <span class="sub">${p.ret!=null?pct(p.ret,1):''} on ${M(p.contrib)} added</span></span>${spark(p.series.map(s=>s.y))}</span><span class="sub">Last entry ${p.updated?rel(p.updated):'—'}</span></div>`).join('')}</div>
@@ -4594,8 +4605,11 @@ function vInvesting(){
   ${card('Journal',`<div class="tl">${[...D.investments].reverse().filter(v=>v.notes||v.value!=null).slice(0,14).map(v=>`<div class="e"><time>${fd(v.date)}</time><i style="background:${catColor(v.portfolio)}"></i><div><p><b>${esc(v.portfolio)}</b>${v.value!=null?' · '+M(v.value):''}${v.flow?` · <span class="pos">+${M(v.flow)}</span>`:''}${v.pct!=null?` · ${pct(v.pct,1)} all-time`:''}</p>${v.notes?`<small>${esc(v.notes)}</small>`:''}</div></div>`).join('')}</div>`)}`;
   return {html,mount(){
     const dates=[...new Set(D.investments.filter(e=>e.value!=null).map(e=>dkey(e.date)))].sort();
-    const ds=iv.P.filter(p=>!S.off[p.name]).map(p=>{const m=new Map(p.series.map(s=>[dkey(s.x),s.y]));return{label:p.name,data:dates.map(d=>m.has(d)?m.get(d):null),borderColor:catColor(p.name).replace(/var\((--c\d)\)/,(_,v)=>cv(v)),backgroundColor:catColor(p.name).replace(/var\((--c\d)\)/,(_,v)=>cv(v)),spanGaps:true,tension:.25,pointRadius:3,borderWidth:2.5}});
-    mkChart('invChart',{type:'line',data:{labels:dates.map(d=>fd(pd(d))),datasets:ds},options:baseOpts({legend:false})},'Portfolio values over time.');
+    let ds=iv.P.filter(p=>!S.off[p.name]).map(p=>{const m=new Map(p.series.map(s=>[dkey(s.x),s.y]));return{label:p.name,data:dates.map(d=>m.has(d)?m.get(d):null),borderColor:catColor(p.name).replace(/var\((--c\d)\)/,(_,v)=>cv(v)),backgroundColor:catColor(p.name).replace(/var\((--c\d)\)/,(_,v)=>cv(v)),spanGaps:true,tension:.25,pointRadius:3,borderWidth:2.5}});
+    let labels=dates.map(d=>fd(pd(d)));
+    /* nothing logged yet: draw a flat $0 line over the last 30 days instead of an empty box */
+    if(!dates.length){labels=[fd(addD(TODAY,-30)),fd(TODAY)];ds=[{label:'Total value',data:[0,0],borderColor:cv('--c1'),backgroundColor:cv('--c1'),tension:.25,pointRadius:3,borderWidth:2.5}]}
+    mkChart('invChart',{type:'line',data:{labels:labels,datasets:ds},options:baseOpts({legend:false})},'Portfolio values over time.');
   }};
 }
 
@@ -5801,7 +5815,7 @@ matchMedia('(prefers-color-scheme:dark)').addEventListener&&matchMedia('(prefers
     S.theme=LS.get('theme')||'auto';S.privacy=LS.get('privacy')==='1';S.range=LS.get('range')||'90d';if(!RANGES.some(r=>r[0]===S.range))S.range='90d';
     applyTheme();document.body.classList.toggle('privacy',S.privacy);
     const h=location.hash.slice(1);if(VIEW_NAMES.includes(h))S.view=h;
-    store.set(MM_RAW,EmbeddedSource);
+    store.set(embeddedRaw(),EmbeddedSource);
     const sid=LS.get('sheetId');if(sid||LS.get('lgUrl'))store.load(GoogleSheetSource(sid||'')).catch(()=>toast('Could not reach your Google Sheet. Showing the saved snapshot.'));
     setInterval(()=>{if(store.source.kind==='google'&&!document.hidden)store.load(store.source).catch(()=>{})},300000);
   }catch(err){

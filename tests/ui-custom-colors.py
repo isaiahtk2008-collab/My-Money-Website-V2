@@ -27,7 +27,7 @@ def new_page(b, scheme='light', width=1100, init=None):
     page.route('**/*', lambda r: r.continue_() if r.request.url.startswith('file:') else r.abort())
     page.add_init_script(INIT_AUTH); page.add_init_script(INIT_CHART)
     if init: page.add_init_script(init)
-    page.goto(PAGE.as_uri()); page.wait_for_function(READY)
+    page.goto(PAGE.as_uri() + '?demo=1'); page.wait_for_function(READY)
     return ctx, page, errors
 
 def open_panel(page):
@@ -118,7 +118,7 @@ with sync_playwright() as p:
     check('C: refusal explains why', 'contrast' in status(page) or 'hard to read' in status(page), status(page))
 
     # D: persistence
-    page.goto(PAGE.as_uri()); page.wait_for_function(READY)
+    page.goto(PAGE.as_uri() + '?demo=1'); page.wait_for_function(READY)
     check('D: reload keeps accent', inline_var(page, '--accent') == '#8e24aa')
     check('D: reload keeps outline', inline_var(page, '--line') == '#e53935')
     check('D: reload keeps glow', inline_var(page, '--hfx-c') == '#43a047')
