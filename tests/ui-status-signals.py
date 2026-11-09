@@ -59,7 +59,7 @@ def run(mode_holder, p, width=1100, height=800):
     page.add_init_script("try{sessionStorage.setItem('user_authenticated','true');sessionStorage.setItem('mm.auth.method','local')}catch(e){}")
     page.add_init_script("try{localStorage.setItem('mm.setfold',JSON.stringify(['Google Account Connection','Local Security','In-App Reminders','Status colours on the Log menu','Appearance','Minimize / maximize buttons','Sheet Sync Connection']))}catch(e){}")   # settings sections start folded; open them for this test
     page.add_init_script("window.Chart=function(){return{destroy(){},update(){},resize(){}}};window.Chart.register=function(){};window.Chart.defaults={font:{},plugins:{legend:{labels:{}}}};")
-    page.goto(PAGE.as_uri())
+    page.goto(PAGE.as_uri() + '?demo=1')
     page.wait_for_function("typeof store!=='undefined' && store.D && store.D.expenses.length>3")
     page.evaluate(f"LS.set('lgUrl','{URL}')")
     return b, page, errors, posts

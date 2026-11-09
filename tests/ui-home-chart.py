@@ -37,7 +37,7 @@ def boot(p, width=1100, height=800, recorder=RECORDER):
     page.route('**/*', lambda r: r.continue_() if r.request.url.startswith('file:') else r.abort())
     page.add_init_script("try{sessionStorage.setItem('user_authenticated','true');sessionStorage.setItem('mm.auth.method','local')}catch(e){}")
     page.add_init_script(recorder)
-    page.goto(PAGE.as_uri())
+    page.goto(PAGE.as_uri() + '?demo=1')
     page.wait_for_function("typeof store!=='undefined' && store.D && store.D.expenses.length>3")
     page.evaluate("go('home')")
     page.wait_for_selector('#homeChart')

@@ -24,7 +24,7 @@ def open_page(p, w, h, touch=False):
     page.route('**/*', lambda r: r.continue_() if r.request.url.startswith('file:') else r.abort())
     page.add_init_script("try{sessionStorage.setItem('user_authenticated','true');sessionStorage.setItem('mm.auth.method','local')}catch(e){}")
     page.add_init_script("window.Chart=function(){return{destroy(){},update(){},resize(){}}};window.Chart.register=function(){};window.Chart.defaults={font:{},plugins:{legend:{labels:{}}}};")
-    page.goto(PAGE.as_uri())
+    page.goto(PAGE.as_uri() + '?demo=1')
     page.wait_for_function("typeof store!=='undefined' && store.D && store.D.expenses.length>3")
     return b, ctx, page, errors
 

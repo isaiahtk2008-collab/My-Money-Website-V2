@@ -39,12 +39,12 @@ def boot(p):
     page.route('**/*', lambda r: r.continue_() if r.request.url.startswith('file:') else r.abort())
     page.add_init_script(INIT_AUTH)
     page.add_init_script(INIT_CHART)
-    page.goto(PAGE.as_uri())
+    page.goto(PAGE.as_uri() + '?demo=1')
     page.wait_for_function(READY)
     return b, page, errors
 
 def load(page):
-    page.goto(PAGE.as_uri())
+    page.goto(PAGE.as_uri() + '?demo=1')
     page.wait_for_function(READY)
 
 def hover_state(page, selector):
@@ -329,7 +329,7 @@ with sync_playwright() as p:
     ctx_leg.add_init_script(INIT_CHART)
     pl = ctx_leg.new_page()
     pl.route('**/*', lambda r: r.continue_() if r.request.url.startswith('file:') else r.abort())
-    pl.goto(PAGE.as_uri())
+    pl.goto(PAGE.as_uri() + '?demo=1')
     pl.wait_for_function(READY)
     check('Old Off choice: effect is off', pl.evaluate("document.documentElement.classList.contains('mm-fx-off')"))
     check('Old Off choice: menu button does not enlarge', scale_of(hover_state(pl, NAV)['t']) == 1.0)
@@ -381,7 +381,7 @@ with sync_playwright() as p:
     page2.route('**/*', lambda r: r.continue_() if r.request.url.startswith('file:') else r.abort())
     page2.add_init_script(INIT_AUTH)
     page2.add_init_script(INIT_CHART)
-    page2.goto(PAGE.as_uri())
+    page2.goto(PAGE.as_uri() + '?demo=1')
     page2.wait_for_function(READY)
     touch_rule = page2.evaluate("matchMedia('(hover:hover) and (pointer:fine)').matches")
     check('Touch emulation does not match the hover media query', touch_rule is False)

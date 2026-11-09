@@ -25,7 +25,7 @@ def boot(b, width=1100, init=''):
     page.route('**/*', lambda r: r.continue_() if r.request.url.startswith('file:') else r.abort())
     page.add_init_script(INIT_AUTH); page.add_init_script(INIT_CHART)
     if init: page.add_init_script(init)
-    page.goto(PAGE.as_uri()); page.wait_for_function(READY)
+    page.goto(PAGE.as_uri() + '?demo=1'); page.wait_for_function(READY)
     return ctx, page, errors
 
 def open_panel(page):

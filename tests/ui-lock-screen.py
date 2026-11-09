@@ -50,7 +50,7 @@ with sync_playwright() as p:
 
     # 1. sheet linked, NO session key on this device -> the lock refuses, with a clear message
     ctx, page, _ = new_page(b)
-    page.goto(PAGE.as_uri()); page.wait_for_timeout(800)
+    page.goto(PAGE.as_uri() + '?demo=1'); page.wait_for_timeout(800)
     check('S1: secure page so hashing works', page.evaluate("window.mmAuth.canHash()"))
     check('S1: credentials saved', set_creds(page))
     page.evaluate(f"localStorage.setItem('mm.lgUrl','{URL}')")
@@ -62,7 +62,7 @@ with sync_playwright() as p:
 
     # 2. sheet linked WITH a session key -> unlocks
     ctx, page, reads = new_page(b)
-    page.goto(PAGE.as_uri()); page.wait_for_timeout(800)
+    page.goto(PAGE.as_uri() + '?demo=1'); page.wait_for_timeout(800)
     set_creds(page)
     page.evaluate(f"localStorage.setItem('mm.lgUrl','{URL}'); localStorage.setItem('mm.lgSecret','TOKEN123')")
     page.reload(); page.wait_for_timeout(800)
@@ -76,7 +76,7 @@ with sync_playwright() as p:
 
     # 3. no sheet linked -> works exactly as before (demo data only)
     ctx, page, _ = new_page(b)
-    page.goto(PAGE.as_uri()); page.wait_for_timeout(800)
+    page.goto(PAGE.as_uri() + '?demo=1'); page.wait_for_timeout(800)
     set_creds(page); page.reload(); page.wait_for_timeout(800)
     try_login(page)
     check('S3: with no sheet linked the lock still opens (demo data only)', not modal_open(page))
@@ -84,7 +84,7 @@ with sync_playwright() as p:
 
     # 4. a rejected key sends the person back to sign-in, with a note, and forgets the key
     ctx, page, _ = new_page(b, sheet_ok=False)
-    page.goto(PAGE.as_uri()); page.wait_for_timeout(800)
+    page.goto(PAGE.as_uri() + '?demo=1'); page.wait_for_timeout(800)
     set_creds(page)
     page.evaluate(f"localStorage.setItem('mm.lgUrl','{URL}'); localStorage.setItem('mm.lgSecret','OLDTOKEN')")
     page.reload(); page.wait_for_timeout(800)
