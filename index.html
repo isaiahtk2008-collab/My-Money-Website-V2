@@ -5359,6 +5359,207 @@ document.addEventListener('click', e => {
   if (b) { S.tradingCur = b.dataset.tradingCur; render(); }
 });
 
+/* ===== TRADING + PRE-IPO EDITS (edit-only: change a row by its Row ID, never delete) =====
+   Same flow as the Owed pop-up: the script re-checks the live row first (Row ID + expect), logs old and new values to the Edit Log, and refuses on any doubt.
+   Drafted by Gemini 3.5 flash, then reviewed and corrected (reopening clears the close date, an existing unusual status can stay as it is). */
+function trNumDiff(a, b, tol = 0.005) {
+  if (a === null && b === null) return false;
+  if (a === null || b === null) return true;
+  return Math.abs(a - b) > tol;
+}
+
+function tradeChanges(item, input, today = TODAY) {
+  input = input || {};
+  const stInput = owedStr(input.status).toLowerCase();
+  if (stInput !== 'open' && stInput !== 'closed') return { error: 'Choose Open or Closed' };
+  const normStatus = stInput === 'closed' ? 'Closed' : 'Open';
+
+  const exitStr = owedStr(input.exit);
+  const exitNum = exitStr === '' ? null : num(exitStr);
+  if (exitStr !== '' && (exitNum === null || exitNum < 0)) return { error: 'Enter an exit price of 0 or more' };
+
+  const feesStr = owedStr(input.fees);
+  const feesNum = feesStr === '' ? 0 : num(feesStr);
+  if (feesStr !== '' && (feesNum === null || feesNum < 0)) return { error: 'Enter fees of 0 or more' };
+
+  let cDateStr = owedStr(input.closedOn);
+  if (cDateStr !== '' && (!/^\d{4}-\d{2}-\d{2}$/.test(cDateStr) || !pd(cDateStr))) return { error: 'Enter a valid close date' };
+
+  if (normStatus === 'Closed') {
+    if (exitNum === null) return { error: 'Enter the exit price to close this trade' };
+    if (!cDateStr) cDateStr = isoDay(today);
+    if (item.opened) {
+      const closePd = pd(cDateStr);
+      if (closePd && closePd < item.opened) return { error: 'The close date is before the trade was opened' };
+    }
+  } else {
+    cDateStr = '';   // an open trade has no close date
+  }
+
+  const changes = {}, patch = {};
+  if (normStatus.toLowerCase() !== owedStr(item.status).toLowerCase()) { changes['Status'] = normStatus; patch['Status'] = normStatus; }
+  if (trNumDiff(exitNum, item.exit != null ? item.exit : null, 0.0001)) { changes['Exit Price'] = exitNum; patch['Exit Price'] = exitNum; }
+  if (trNumDiff(feesNum, item.fees || 0, 0.0001)) { changes['Fees'] = feesNum; patch['Fees'] = feesNum; }
+  const curClosed = item.closedOn ? isoDay(item.closedOn) : '';
+  if (cDateStr !== curClosed) { changes['Date Closed'] = cDateStr ? { $date: cDateStr } : null; patch['Date Closed'] = cDateStr || null; }
+  const inNotes = owedStr(input.notes);
+  if (inNotes !== owedStr(item.notes)) { changes['Notes'] = inNotes || null; patch['Notes'] = inNotes || null; }
+  if (!Object.keys(changes).length) return { error: 'No changes to save' };
+
+  const expect = { 'Row ID': item.id, Symbol: item.symbol };
+  if (item.qty > 0) expect['Quantity'] = item.qty;
+  if (item.entry != null) expect['Entry Price'] = item.entry;
+  return { changes, expect, patch };
+}
+
+const IPO_STATUSES = ['Bid placed', 'Allocated', 'Not allocated', 'Listed', 'Cancelled'];
+
+function ipoChanges(item, input, rawRow, today = TODAY) {
+  input = input || {};
+  const stInput = owedStr(input.status);
+  // one of the five choices, OR the status the row already has (so an unusual existing status can be left alone)
+  const matchSt = IPO_STATUSES.find(s => s.toLowerCase() === stInput.toLowerCase())
+    || (stInput && stInput.toLowerCase() === owedStr(item.statusRaw).toLowerCase() ? stInput : null);
+  if (!matchSt) return { error: 'Choose a status' };
+
+  const parseNum = (val, errName) => {
+    const s = owedStr(val);
+    if (!s) return null;
+    const n = num(s);
+    return n === null || n < 0 ? { error: `Enter ${errName} of 0 or more` } : n;
+  };
+  const alloc = parseNum(input.allocated, 'shares allocated');
+  if (alloc && alloc.error) return alloc;
+  const finalP = parseNum(input.final, 'a final price');
+  if (finalP && finalP.error) return finalP;
+  const curP = parseNum(input.current, 'a current price');
+  if (curP && curP.error) return curP;
+  const costB = parseNum(input.cost, 'a cost basis');
+  if (costB && costB.error) return costB;
+
+  const lockStr = owedStr(input.lockup);
+  if (lockStr !== '' && (!/^\d{4}-\d{2}-\d{2}$/.test(lockStr) || !pd(lockStr))) return { error: 'Enter a valid lockup date' };
+  if ((matchSt === 'Allocated' || matchSt === 'Listed') && (!alloc || alloc <= 0)) return { error: 'Enter how many shares you were allocated' };
+
+  const curCurrent = rawRow ? num(rawRow['Current Price']) : null;
+  const curCost = rawRow ? num(rawRow['Cost Basis']) : null;
+  const curNotes = rawRow ? owedStr(rawRow['Notes']) : owedStr(item.notes);
+
+  const changes = {}, patch = {};
+  if (matchSt.toLowerCase() !== owedStr(item.statusRaw).toLowerCase()) { changes['Status'] = matchSt; patch['Status'] = matchSt; }
+  if (trNumDiff(alloc, item.sharesAlloc)) { changes['Shares Allocated'] = alloc; patch['Shares Allocated'] = alloc; }
+  if (trNumDiff(finalP, item.final)) { changes['Final Price'] = finalP; patch['Final Price'] = finalP; }
+  if (trNumDiff(curP, curCurrent)) { changes['Current Price'] = curP; patch['Current Price'] = curP; }
+  if (trNumDiff(costB, curCost)) { changes['Cost Basis'] = costB; patch['Cost Basis'] = costB; }
+  const curLock = item.lockup ? isoDay(item.lockup) : '';
+  if (lockStr !== curLock) { changes['Lockup Expiry'] = lockStr ? { $date: lockStr } : null; patch['Lockup Expiry'] = lockStr || null; }
+  const inNotes = owedStr(input.notes);
+  if (inNotes !== curNotes) { changes['Notes'] = inNotes || null; patch['Notes'] = inNotes || null; }
+  if (!Object.keys(changes).length) return { error: 'No changes to save' };
+
+  const expect = { 'Row ID': item.id, Company: item.company };
+  if (item.sharesReq != null) expect['Shares Requested'] = item.sharesReq;
+  return { changes, expect, patch };
+}
+
+function tradingOpenEdit(id) {
+  const m = tradingModel(store.base || store.raw);
+  const item = (m.trades || []).find(x => x.id === id);
+  if (!item) { toast('That entry is no longer there. Press Refresh.'); return; }
+  const title = 'Close / edit trade';
+  const sub = `${item.symbol} · ${item.direction} ${item.qty} × ${trMoney(item.entry, item.currency)}`;
+  const statusOpts = ['Open', 'Closed'].map(s => `<option value="${s}"${item.status === s.toLowerCase() ? ' selected' : ''}>${s}</option>`).join('');
+  openOverlay(`<form class="palbox" style="padding:20px" role="dialog" aria-modal="true" aria-label="${esc(title)}" data-tradeform data-oid="${esc(id)}" novalidate>
+    <div class="dh"><div><h2>${esc(title)}</h2><p class="hint" style="color:var(--muted)">${esc(sub)}</p></div><button type="button" class="ibtn" data-act="close" aria-label="Close">${ICON.x}</button></div>
+    <div class="ed-grid">
+      <div class="ed-f"><label for="tr-status">Status</label><select id="tr-status">${statusOpts}</select></div>
+      <div class="ed-f"><label for="tr-exit">Exit price</label><input type="text" id="tr-exit" inputmode="decimal" autocomplete="off" value="${item.exit != null ? esc(item.exit) : ''}" data-focus></div>
+      <div class="ed-f"><label for="tr-fees">Fees</label><input type="text" id="tr-fees" inputmode="decimal" autocomplete="off" value="${item.fees ? esc(item.fees) : ''}"></div>
+      <div class="ed-f"><label for="tr-closed">Close date</label><input type="date" id="tr-closed" value="${esc(item.closedOn ? isoDay(item.closedOn) : '')}"></div>
+    </div>
+    <div class="ed-f" style="margin-top:10px"><label for="tr-notes">Notes</label><input type="text" id="tr-notes" autocomplete="off" value="${esc(item.notes || '')}"></div>
+    <p class="hint" style="margin-top:8px">Closing a trade needs an exit price. Everything is saved to your Trades tab and the edit is logged.</p>
+    <p class="ed-msg" id="ed-msg" role="alert" hidden></p>
+    <div class="ed-actions"><button type="button" class="btn sec" data-act="close">Cancel</button><button type="submit" class="btn">Save changes</button></div></form>`, 'pal');
+}
+
+async function tradingSave(id) {
+  if (rowBusy) return;
+  const item = (tradingModel(store.base || store.raw).trades || []).find(x => x.id === id);
+  if (!item) { toast('That entry is no longer there. Press Refresh.'); return; }
+  const g = k => { const el = document.getElementById(k); return el ? el.value : ''; };
+  const res = tradeChanges(item, { status: g('tr-status'), exit: g('tr-exit'), fees: g('tr-fees'), closedOn: g('tr-closed'), notes: g('tr-notes') }, TODAY);
+  const msg = document.getElementById('ed-msg');
+  if (res.error) { if (msg) { msg.textContent = res.error; msg.hidden = false; } else toast(res.error); return; }
+  if (msg) msg.hidden = true;
+  rowSetBusy(true);
+  try {
+    await sheetCall({ action: 'edit', target: 'Trades', rowId: id, expect: res.expect, changes: res.changes });
+    store.set(owedPatchRaw(store.base || store.raw, 'Trades', id, res.patch));
+    closeOverlay(); toast('Saved to your sheet'); syncSoon();
+  } catch (e) { rowShowErr(e); } finally { rowSetBusy(false); }
+}
+
+function ipoRawRow(raw, id) { return ((raw && raw.PreIPO && raw.PreIPO.rows) || []).find(r => r && owedStr(r['Row ID']) === id); }
+
+function ipoOpenEdit(id) {
+  const raw = store.base || store.raw;
+  const item = (preIpoModel(raw).items || []).find(x => x.id === id);
+  if (!item) { toast('That entry is no longer there. Press Refresh.'); return; }
+  const rawRow = ipoRawRow(raw, id);
+  const title = 'Update IPO bid';
+  const sub = `${item.company}${item.ticker ? ' · ' + item.ticker : ''}`;
+  const choices = IPO_STATUSES.slice();
+  if (item.statusRaw && !choices.some(s => s.toLowerCase() === item.statusRaw.toLowerCase())) choices.unshift(item.statusRaw);   // keep an unusual existing status selectable
+  const sel = choices.find(s => s.toLowerCase() === (item.statusRaw || '').toLowerCase());
+  const opts = choices.map(s => `<option value="${esc(s)}"${s === sel ? ' selected' : ''}>${esc(s)}</option>`).join('');
+  const cell = k => rawRow && rawRow[k] != null ? esc(rawRow[k]) : '';
+  openOverlay(`<form class="palbox" style="padding:20px" role="dialog" aria-modal="true" aria-label="${esc(title)}" data-ipoform data-oid="${esc(id)}" novalidate>
+    <div class="dh"><div><h2>${esc(title)}</h2><p class="hint" style="color:var(--muted)">${esc(sub)}</p></div><button type="button" class="ibtn" data-act="close" aria-label="Close">${ICON.x}</button></div>
+    <div class="ed-grid">
+      <div class="ed-f"><label for="ipo-status">Status</label><select id="ipo-status">${opts}</select></div>
+      <div class="ed-f"><label for="ipo-alloc">Shares allocated</label><input type="text" id="ipo-alloc" inputmode="decimal" autocomplete="off" value="${item.sharesAlloc != null ? esc(item.sharesAlloc) : ''}" data-focus></div>
+      <div class="ed-f"><label for="ipo-final">Final price</label><input type="text" id="ipo-final" inputmode="decimal" autocomplete="off" value="${item.final != null ? esc(item.final) : ''}"></div>
+      <div class="ed-f"><label for="ipo-current">Current price</label><input type="text" id="ipo-current" inputmode="decimal" autocomplete="off" value="${cell('Current Price')}"></div>
+      <div class="ed-f"><label for="ipo-cost">Cost basis (total paid)</label><input type="text" id="ipo-cost" inputmode="decimal" autocomplete="off" value="${cell('Cost Basis')}"></div>
+      <div class="ed-f"><label for="ipo-lockup">Lockup expires</label><input type="date" id="ipo-lockup" value="${esc(item.lockup ? isoDay(item.lockup) : '')}"></div>
+    </div>
+    <div class="ed-f" style="margin-top:10px"><label for="ipo-notes">Notes</label><input type="text" id="ipo-notes" autocomplete="off" value="${cell('Notes')}"></div>
+    <p class="ed-msg" id="ed-msg" role="alert" hidden></p>
+    <div class="ed-actions"><button type="button" class="btn sec" data-act="close">Cancel</button><button type="submit" class="btn">Save changes</button></div></form>`, 'pal');
+}
+
+async function ipoSave(id) {
+  if (rowBusy) return;
+  const raw = store.base || store.raw;
+  const item = (preIpoModel(raw).items || []).find(x => x.id === id);
+  if (!item) { toast('That entry is no longer there. Press Refresh.'); return; }
+  const g = k => { const el = document.getElementById(k); return el ? el.value : ''; };
+  const res = ipoChanges(item, { status: g('ipo-status'), allocated: g('ipo-alloc'), final: g('ipo-final'), current: g('ipo-current'), cost: g('ipo-cost'), lockup: g('ipo-lockup'), notes: g('ipo-notes') }, ipoRawRow(raw, id), TODAY);
+  const msg = document.getElementById('ed-msg');
+  if (res.error) { if (msg) { msg.textContent = res.error; msg.hidden = false; } else toast(res.error); return; }
+  if (msg) msg.hidden = true;
+  rowSetBusy(true);
+  try {
+    await sheetCall({ action: 'edit', target: 'Pre-IPO', rowId: id, expect: res.expect, changes: res.changes });
+    store.set(owedPatchRaw(store.base || store.raw, 'PreIPO', id, res.patch));
+    closeOverlay(); toast('Saved to your sheet'); syncSoon();
+  } catch (e) { rowShowErr(e); } finally { rowSetBusy(false); }
+}
+
+document.addEventListener('click', e => {
+  const t = e.target && e.target.closest && e.target.closest('[data-trade-edit]');
+  if (t) { tradingOpenEdit(t.dataset.tradeEdit); return; }
+  const i = e.target && e.target.closest && e.target.closest('[data-ipo-edit]');
+  if (i) ipoOpenEdit(i.dataset.ipoEdit);
+});
+document.addEventListener('submit', e => {
+  const t = e.target && e.target.closest && e.target.closest('[data-tradeform]');
+  if (t) { e.preventDefault(); tradingSave(t.dataset.oid); return; }
+  const i = e.target && e.target.closest && e.target.closest('[data-ipoform]');
+  if (i) { e.preventDefault(); ipoSave(i.dataset.oid); }
+});
+
 function vOwed() {
   const m = owedModel(store.base || store.raw);
   if (!m.hasOwed) {
@@ -6285,11 +6486,11 @@ const FORMS=[
   F('Direction',{r:1,t:'radio',o:['Long','Short'],def:'Long'}),F('Status',{r:1,t:'radio',o:['Open','Closed'],def:'Open'}),
   F('Quantity',{r:1,t:'dec'}),F('Entry Price',{r:1,t:'dec'}),F('Exit Price',{t:'dec'}),F('Fees',{t:'money'}),
   F('Currency',{r:1,t:'radio',o:['CAD','USD'],def:'CAD',c:1}),F('Multiplier',{l:'Multiplier (options 100, futures contract size)',t:'dec'}),
-  F('Option Type',{t:'radio',o:['Call','Put']}),F('Strike',{t:'dec'}),F('Expiry',{t:'date'}),F('Strategy'),F('Date Closed',{t:'date'}),F('Notes')]},
+  F('Option Type',{t:'radio',o:['Call','Put']}),F('Strike',{t:'dec'}),F('Expiry',{t:'date',nd:1}),F('Strategy'),F('Date Closed',{t:'date',nd:1}),F('Notes')]},
 {id:'ipo',g:'Investing',t:'IPO bid',s:'Track an IPO bid or pre-IPO holding',tab:'Pre-IPO',sum:['Company'],f:[
   F('Company',{r:1}),F('Ticker'),F('Account',{t:'radio',o:['TFSA','RRSP','FHSA','Margin','Cash'],c:1}),
   F('Status',{r:1,t:'radio',o:['Bid placed','Allocated','Not allocated','Listed','Cancelled'],def:'Bid placed'}),
-  F('Date Submitted',{r:1,t:'date'}),F('Bid Closes',{t:'date'}),F('IPO Date',{t:'date'}),F('Lockup Expiry',{t:'date'}),
+  F('Date Submitted',{r:1,t:'date'}),F('Bid Closes',{t:'date',nd:1}),F('IPO Date',{t:'date',nd:1}),F('Lockup Expiry',{t:'date',nd:1}),
   F('Shares Requested',{r:1,t:'dec'}),F('Shares Allocated',{t:'dec'}),F('Price Low',{t:'dec'}),F('Price High',{t:'dec'}),F('Final Price',{t:'dec'}),
   F('Currency',{r:1,t:'radio',o:['USD','CAD'],def:'USD',c:1}),F('Cost Basis',{l:'Cost Basis (total paid)',t:'money'}),F('Current Price',{t:'dec'}),F('Notes')]}
 ];
@@ -6323,7 +6524,7 @@ function recvSyncPrice(){
 function recvHtml(){
   const bf=recvForm();if(!bf)return '';
   const pk=recvPriceKey(bf),rfs=recvFields(bf);
-  rfs.forEach(x=>{if(x.t==='date'&&!V[x.k])V[x.k]=dayISO(0)});
+  rfs.forEach(x=>{if(x.t==='date'&&!x.nd&&!V[x.k])V[x.k]=dayISO(0)});
   const h=rfs.map((x,i)=>{
     let html=fieldHtml(x,100+i);
     if(pk&&x.k===TR+pk)html=html.replace('<input type="text"','<input type="text" readonly aria-readonly="true"')+'<p class="hint">Locked to Trade-In Value</p>';
@@ -6542,7 +6743,7 @@ function openForm(id,rep){
   cur=BY[id];V={};let ts=0;const d=J(dKey(id),null);
   if(!rep&&d&&d.v){V=d.v;ts=d.ts||Date.now()}
   else if(rep){const l=J('lg.last.'+id,{});cur.f.forEach(x=>{if(x.c&&l[x.k]!=null)V[x.k]=l[x.k];if(l[x.k+'#'])V[x.k+'#']=l[x.k+'#']})}
-  cur.f.forEach(x=>{if(x.t==='date'&&!V[x.k])V[x.k]=dayISO(0)});
+  cur.f.forEach(x=>{if(x.t==='date'&&!x.nd&&!V[x.k])V[x.k]=dayISO(0)});
   cur.f.forEach(x=>{if(x.def!=null&&!V[x.k])V[x.k]=x.def});   /* optional fixed starting value (the Loan and Deposit forms use it for Type) */
   if(cur.pay&&!V['Payment Type'])V['Payment Type']='Cash';
   show(formScreen(cur,ts));setTimeout(()=>{ctx();imeiWarn()},0);
