@@ -74,11 +74,11 @@ with sync_playwright() as p:
 
     # ---- the other screens are untouched ----
     names = page.evaluate("VIEW_NAMES")
-    check('the six original screens keep their order and Owed is added last', names == ['home', 'spending', 'reselling', 'inventory', 'investing', 'data', 'owed'], str(names))
+    check('the original screens keep their order, Trading follows Investing, and Owed is last', names == ['home', 'spending', 'reselling', 'inventory', 'investing', 'trading', 'data', 'owed'], str(names))
     for v in ['home', 'spending', 'reselling', 'inventory', 'investing', 'data']:
         page.evaluate(f"go('{v}')")
         check(f'{v} screen still renders with no errors', page.locator('#view *').count() > 5 and not errors, str(errors))
-    check('the nav rail has seven buttons', page.locator('#rail button.nav').count() == 7)
+    check('the nav rail has eight buttons', page.locator('#rail button.nav').count() == 8)
 
     # ---- empty state: the two tabs do not exist yet (embedded snapshot) ----
     page.evaluate("go('owed')")
@@ -208,7 +208,7 @@ with sync_playwright() as p:
     check('no page errors the whole way through', not errors, str(errors))
     b.close()
 
-    # ---- phone width: the dock's seven tabs must all fit on screen, never overlap, and keep their names for screen readers.
+    # ---- phone width: the dock's eight tabs must all fit on screen, never overlap, and keep their names for screen readers.
     #      (Dock design: only the active tab shows its label; the others are icon-only but keep a visually-hidden label.) ----
     for w in (360, 390):
         b, page, errors, posts = run({'edit': True, 'reply': {'ok': True}}, p, width=w, height=760)
@@ -216,9 +216,9 @@ with sync_playwright() as p:
         boxes = page.evaluate("""(()=>{const out=[];document.querySelectorAll('#rail button.nav').forEach(n=>{const r=n.getBoundingClientRect();const s=n.querySelector('span');out.push([s?s.textContent:'',Math.round(r.left*10)/10,Math.round(r.right*10)/10])});return out})()""")
         gaps = [boxes[i + 1][1] - boxes[i][2] for i in range(len(boxes) - 1)]
         names = page.evaluate("""[...document.querySelectorAll('#rail button.nav')].map(n=>(n.textContent||'').trim())""")
-        check(f'{w}px: all seven dock tabs are on screen', len(boxes) == 7 and boxes[0][1] >= 0 and boxes[-1][2] <= w, str(boxes))
+        check(f'{w}px: all eight dock tabs are on screen', len(boxes) == 8 and boxes[0][1] >= 0 and boxes[-1][2] <= w, str(boxes))
         check(f'{w}px: no two dock tabs overlap (smallest gap {min(gaps):.1f}px)', min(gaps) >= -0.5, str(boxes))
-        check(f'{w}px: every dock tab keeps its name for screen readers', all(names) and len(set(names)) == 7, str(names))
+        check(f'{w}px: every dock tab keeps its name for screen readers', all(names) and len(set(names)) == 8, str(names))
         check(f'{w}px: the Owed screen does not scroll sideways', page.evaluate("document.documentElement.scrollWidth<=window.innerWidth+1"), str(page.evaluate("document.documentElement.scrollWidth")))
         page.screenshot(path=str(SHOTS / f'owed-{w}.png'), full_page=False)
         check(f'{w}px: no page errors', not errors, str(errors))

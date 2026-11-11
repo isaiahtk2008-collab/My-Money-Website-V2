@@ -2974,6 +2974,7 @@ const ICON={
   bulb:P('<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 00-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0012 3z"/>'),
   alert:P('<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.5"/>'),
   tag:P('<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.2"/>'),
+  trade:P('<path d="M7 3v18"/><rect x="5" y="8" width="4" height="7" rx="1"/><path d="M17 3v18"/><rect x="15" y="5" width="4" height="9" rx="1"/>'),
   cart:P('<path d="M3 4h2l2.5 11h10L20 7H6"/><circle cx="9" cy="19" r="1.5"/><circle cx="17" cy="19" r="1.5"/>'),
   clock:P('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
   user:P('<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>'),
@@ -2986,9 +2987,9 @@ const KIND_ICON={Phone:ICON.tag,PC:ICON.box,Accessory:ICON.tag};
 
 /* ----- app state ----- */
 const S={view:'home',range:'90d',cs:'',ce:'',kind:'All',gran:null,F:{},rstat:'All',rtrade:'All',theme:'auto',privacy:false,off:{},bucket:null,palIdx:0,dhf:'all'};
-const VIEW_NAMES=['home','spending','reselling','inventory','investing','data','owed'];
-const VIEW_LABEL={home:'Home',spending:'Spending',reselling:'Reselling',inventory:'Stock',investing:'Investing',data:'Data',owed:'Owed'};
-const VIEW_ICON={home:'home',spending:'spend',reselling:'resell',inventory:'box',investing:'invest',data:'data',owed:'tag'};
+const VIEW_NAMES=['home','spending','reselling','inventory','investing','trading','data','owed'];
+const VIEW_LABEL={home:'Home',spending:'Spending',reselling:'Reselling',inventory:'Stock',investing:'Investing',trading:'Trading',data:'Data',owed:'Owed'};
+const VIEW_ICON={home:'home',spending:'spend',reselling:'resell',inventory:'box',investing:'invest',trading:'trade',data:'data',owed:'tag'};
 const RANGES=[['today','Today'],['wtd','WTD'],['month','This month'],['30d','30D'],['90d','90D'],['ytd','YTD'],['12m','12M'],['all','All'],['custom','Custom']];
 const RG=()=>resolveRange(S);
 const cv=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -4602,7 +4603,8 @@ function vInvesting(){
   </div>
   <div class="grid g3">${iv.P.map(p=>`<div class="card kpi"><span class="lab"><i class="dot" style="background:${catColor(p.name)}"></i>${esc(p.name)}</span><span class="val">${M(p.value)}</span><span class="foot"><span><span class="chip ${p.gain==null?'':p.gain>=0?'good':'bad'}">${p.gain==null?'—':SM(p.gain)}</span> <span class="sub">${p.ret!=null?pct(p.ret,1):''} on ${M(p.contrib)} added</span></span>${spark(p.series.map(s=>s.y))}</span><span class="sub">Last entry ${p.updated?rel(p.updated):'—'}</span></div>`).join('')}</div>
   ${card('Value over time',`<div class="activef" style="margin-bottom:10px">${iv.P.map(p=>`<button class="chip-b" data-act="port" data-v="${esc(p.name)}" aria-pressed="${!S.off[p.name]}"><i class="dot" style="background:${catColor(p.name)}"></i>${esc(p.name)}</button>`).join('')}</div>${chartBox('invChart',true)}`,'<span class="hint">Points are the days you logged a value</span>')}
-  ${card('Journal',`<div class="tl">${[...D.investments].reverse().filter(v=>v.notes||v.value!=null).slice(0,14).map(v=>`<div class="e"><time>${fd(v.date)}</time><i style="background:${catColor(v.portfolio)}"></i><div><p><b>${esc(v.portfolio)}</b>${v.value!=null?' · '+M(v.value):''}${v.flow?` · <span class="pos">+${M(v.flow)}</span>`:''}${v.pct!=null?` · ${pct(v.pct,1)} all-time`:''}</p>${v.notes?`<small>${esc(v.notes)}</small>`:''}</div></div>`).join('')}</div>`)}`;
+  ${card('Journal',`<div class="tl">${[...D.investments].reverse().filter(v=>v.notes||v.value!=null).slice(0,14).map(v=>`<div class="e"><time>${fd(v.date)}</time><i style="background:${catColor(v.portfolio)}"></i><div><p><b>${esc(v.portfolio)}</b>${v.value!=null?' · '+M(v.value):''}${v.flow?` · <span class="pos">+${M(v.flow)}</span>`:''}${v.pct!=null?` · ${pct(v.pct,1)} all-time`:''}</p>${v.notes?`<small>${esc(v.notes)}</small>`:''}</div></div>`).join('')}</div>`)}
+  ${preIpoSafeCard()}`;
   return {html,mount(){
     const dates=[...new Set(D.investments.filter(e=>e.value!=null).map(e=>dkey(e.date)))].sort();
     let ds=iv.P.filter(p=>!S.off[p.name]).map(p=>{const m=new Map(p.series.map(s=>[dkey(s.x),s.y]));return{label:p.name,data:dates.map(d=>m.has(d)?m.get(d):null),borderColor:catColor(p.name).replace(/var\((--c\d)\)/,(_,v)=>cv(v)),backgroundColor:catColor(p.name).replace(/var\((--c\d)\)/,(_,v)=>cv(v)),spanGaps:true,tension:.25,pointRadius:3,borderWidth:2.5}});
@@ -5200,6 +5202,162 @@ function preIpoModel(raw, today = TODAY) {
     }
   };
 }
+
+/* ===== TRADING + PRE-IPO SCREENS (pure renderers: model in, HTML string out; no writes) =====
+   Drafted by Gemini 3.5 flash, then reviewed and corrected (newest-first slices, no unknown classes, plain counts). */
+function trMoney(n, cur) {
+  if (n == null || isNaN(n)) return '—';
+  const c = cur || '';
+  const sym = c === 'CAD' ? 'C$' : (c === 'USD' ? 'US$' : (c ? esc(c) + ' ' : '$'));
+  const fmt = new Intl.NumberFormat('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(n));
+  return (n < 0 ? '-' : '') + sym + fmt;
+}
+
+function trPnlSpan(n, cur) {
+  if (n == null || isNaN(n)) return '—';
+  const col = n > 0 ? 'var(--good)' : (n < 0 ? 'var(--bad)' : 'inherit');
+  return `<span style="color:${col}">${(n > 0 ? '+' : '') + trMoney(n, cur)}</span>`;
+}
+
+function trPlural(n, word) { return `${n} ${word}${n === 1 ? '' : 's'}`; }
+
+function trPreTab(title, headers, tabName) {
+  const pre = x => `<pre style="background:var(--surface2);padding:10px;overflow-x:auto;border:1px solid var(--line);border-radius:8px;font-size:12px;text-align:left">${esc(x)}</pre>`;
+  return card(title, `<div class="empty"><b>One tab to add first</b>Add a tab named <b style="display:inline">${esc(tabName)}</b> to your Google Sheet. Paste this header row into cell A1 of that tab, then press Refresh.${pre(headers)}</div>`);
+}
+
+function trRowStyle() { return 'display:flex;border-bottom:1px solid var(--line);padding:12px 0;gap:12px;flex-wrap:wrap;justify-content:space-between;align-items:center'; }
+
+function ipoStageChip(stage) {
+  if (stage === 'bidding') return '<span class="chip warn">Bid open</span>';
+  if (stage === 'awaiting') return '<span class="chip warn">Awaiting allocation</span>';
+  if (stage === 'allocated') return '<span class="chip good">Allocated</span>';
+  if (stage === 'listed') return '<span class="chip good">Listed</span>';
+  if (stage === 'not-allocated') return '<span class="chip">Not allocated</span>';
+  if (stage === 'cancelled') return '<span class="chip">Cancelled</span>';
+  return `<span class="chip">${esc(stage || '')}</span>`;
+}
+
+function ipoNextText(next) {
+  if (!next) return '';
+  const d = next.days;
+  if (d === 0) return `${esc(next.label)} today`;
+  if (d === 1) return `${esc(next.label)} tomorrow`;
+  return `${esc(next.label)} in ${d} days`;
+}
+
+function tradingScreenHtml(m, opts) {
+  if (!m || !m.hasTrades) return trPreTab('Trading journal', TRADES_HEADERS, 'Trades');
+  const addBtn = '<button type="button" class="btn sec" data-lg="open" data-id="trade">Add trade</button>';
+  if (!m.trades.length) return card('Trading journal', '<div class="empty"><b>No trades yet</b>Tap Add trade to log your first one.</div>', addBtn);
+
+  const cur = opts && opts.cur && m.currencies.includes(opts.cur) ? opts.cur : m.currencies[0];
+  const curSwitch = m.currencies.length > 1
+    ? `<div class="activef" style="margin-bottom:14px">${m.currencies.map(c => `<button type="button" class="chip-b" data-trading-cur="${esc(c)}" aria-pressed="${c === cur}">${esc(c)}</button>`).join('')}</div>` : '';
+
+  const s = m.byCurrency[cur] || {};
+  const statCount = s.statCount || 0;
+  const kpiGrid1 = `<div class="grid g4">`
+    + kpi({ label: 'Net P&L', val: trPnlSpan(s.netPnl, cur), sub: trPlural(statCount, 'closed trade'), spark: s.curve && s.curve.length > 1 ? s.curve.map(c => c.cum) : undefined })
+    + kpi({ label: 'Win rate', val: s.winRate != null ? pct(s.winRate) : '—', sub: `${s.wins || 0}W · ${s.losses || 0}L` })
+    + kpi({ label: 'Profit factor', val: s.profitFactor != null ? Number(s.profitFactor).toFixed(2) : '—', sub: 'wins ÷ losses' })
+    + kpi({ label: 'Open capital', val: trMoney(s.openCost, cur), sub: trPlural(s.openCount || 0, 'open position') }) + `</div>`;
+  const kpiGrid2 = `<div class="grid g4" style="margin-top:12px">`
+    + kpi({ label: 'Avg win', val: trMoney(s.avgWin, cur), sub: 'per winning trade' })
+    + kpi({ label: 'Avg loss', val: trMoney(s.avgLoss, cur), sub: 'per losing trade' })
+    + kpi({ label: 'Expectancy', val: trPnlSpan(s.expectancy, cur), sub: 'average per closed trade' })
+    + kpi({ label: 'Max drawdown', val: trMoney(s.maxDrawdown, cur), sub: 'biggest drop from a peak' }) + `</div>`;
+
+  const held = t => t.daysHeld != null ? ` · held ${trPlural(t.daysHeld, 'day')}` : '';
+  const openTrades = m.open.filter(t => t.currency === cur);
+  const openRows = openTrades.length ? openTrades.map(t => {
+    const action = t.id ? `<button type="button" class="btn sec" data-trade-edit="${esc(t.id)}">Close / edit</button>` : '<span class="hint">Needs a Row ID</span>';
+    const opt = t.optionType ? ` · ${esc(t.optionType)}${t.strike != null ? ' ' + t.strike : ''}${t.expiry ? ' · exp ' + fd(t.expiry) : ''}` : '';
+    return `<div style="${trRowStyle()}"><div style="min-width:220px;flex:1"><div><b>${esc(t.symbol)}</b> <span class="chip">${esc(t.assetType)}</span> <span class="chip ${t.direction === 'Long' ? 'good' : 'bad'}">${esc(t.direction)}</span></div>`
+      + `<div class="hint">${t.qty} × ${trMoney(t.entry, cur)}${held(t)}${opt}${t.strategy ? ' · ' + esc(t.strategy) : ''}</div></div>`
+      + `<div style="display:flex;align-items:center;gap:10px"><div style="text-align:right"><div>${trMoney(t.cost, cur)}</div><div class="hint">cost</div></div>${action}</div></div>`;
+  }).join('') : '<div class="empty"><b>Nothing here</b>Nothing open right now.</div>';
+  const openCard = card('Open positions', openRows, addBtn);
+
+  let assetCard = '';
+  if (statCount > 0 && s.byAsset) {
+    const th = 'padding:8px 0;text-align:left;font-weight:600';
+    const rows = Object.keys(s.byAsset).map(k => {
+      const a = s.byAsset[k];
+      return `<tr style="border-bottom:1px solid var(--line)"><td style="padding:8px 0"><b>${esc(k)}</b></td><td>${a.count}</td><td>${a.closed}</td><td>${trPnlSpan(a.net, cur)}</td><td>${a.winRate != null ? pct(a.winRate) : '—'}</td></tr>`;
+    }).join('');
+    assetCard = card('By asset type', `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="border-bottom:1px solid var(--line);color:var(--muted)"><th style="${th}">Asset</th><th style="${th}">Trades</th><th style="${th}">Closed</th><th style="${th}">Net P&amp;L</th><th style="${th}">Win rate</th></tr></thead><tbody>${rows}</tbody></table></div>`);
+  }
+
+  const closedTrades = m.closed.filter(t => t.currency === cur).slice(0, 25);
+  const closedRows = closedTrades.length ? closedTrades.map(t => {
+    const action = t.id ? `<button type="button" class="btn sec" data-trade-edit="${esc(t.id)}">Edit</button>` : '<span class="hint">Needs a Row ID</span>';
+    const warn = t.entry != null && t.exit != null ? '' : ' <span class="chip warn">Needs entry and exit</span>';
+    const meta = `${t.entry != null ? trMoney(t.entry, cur) : '—'} → ${t.exit != null ? trMoney(t.exit, cur) : '—'} · qty ${t.qty}${t.fees ? ' · fees ' + trMoney(t.fees, cur) : ''}${held(t)}${t.closedOn ? ' · closed ' + fdy(t.closedOn) : ''}`;
+    const pc = t.pnlPct != null ? ` <span class="chip ${t.net > 0 ? 'good' : t.net < 0 ? 'bad' : ''}">${pct(t.pnlPct, 1)}</span>` : '';
+    return `<div style="${trRowStyle()}"><div style="min-width:220px;flex:1"><div><b>${esc(t.symbol)}</b> <span class="chip ${t.direction === 'Long' ? 'good' : 'bad'}">${esc(t.direction)}</span>${warn}</div><div class="hint">${meta}</div></div>`
+      + `<div style="display:flex;align-items:center;gap:10px"><div style="text-align:right">${trPnlSpan(t.net, cur)}${pc}</div>${action}</div></div>`;
+  }).join('') : `<div class="empty"><b>Nothing here</b>No closed trades in ${esc(cur)} yet.</div>`;
+  const closedCard = card('Closed trades', closedRows);
+
+  const notes = [];
+  if (m.skipped) notes.push(`${trPlural(m.skipped, 'row')} with no Symbol ${m.skipped === 1 ? 'is' : 'are'} hidden.`);
+  if (m.incomplete) notes.push(`${trPlural(m.incomplete, 'closed trade')} ${m.incomplete === 1 ? 'is' : 'are'} missing an entry or exit price, so ${m.incomplete === 1 ? 'it is' : 'they are'} left out of the stats.`);
+  return `${curSwitch}${kpiGrid1}${kpiGrid2}<div style="display:flex;flex-direction:column;gap:20px;margin-top:20px">${openCard}${assetCard}${closedCard}</div>${notes.length ? `<p class="hint" style="margin-top:12px">${notes.join(' ')}</p>` : ''}`;
+}
+
+function preIpoCardHtml(m) {
+  if (!m || !m.hasPre) return trPreTab('IPOs and pre-IPO', PREIPO_HEADERS, 'Pre-IPO');
+  const addBtn = '<button type="button" class="btn sec" data-lg="open" data-id="ipo">Add IPO bid</button>';
+  if (!m.items.length) return card('IPOs and pre-IPO', '<div class="empty"><b>No IPO bids yet</b>Tap Add IPO bid to track your first one.</div>', addBtn);
+
+  const lines = [];
+  Object.keys(m.totals.byCurrency).forEach(cur => {
+    const t = m.totals.byCurrency[cur], parts = [];
+    if (t.reservedLow > 0 || t.reservedHigh > 0) parts.push(`Reserved ${trMoney(t.reservedLow, cur)}–${trMoney(t.reservedHigh, cur)} (pending bids)`);
+    if (t.holdingsCost > 0 || t.holdingsValue > 0) parts.push(`Holdings ${trMoney(t.holdingsValue, cur)} on ${trMoney(t.holdingsCost, cur)} cost (${t.gain >= 0 ? '+' : ''}${trMoney(t.gain, cur)})`);
+    if (parts.length) lines.push(`<div style="font-weight:600;margin-bottom:8px">${esc(cur)}: ${parts.join(' · ')}</div>`);
+  });
+
+  const act = i => i.id ? `<button type="button" class="btn sec" data-ipo-edit="${esc(i.id)}">Update</button>` : '<span class="hint">Needs a Row ID</span>';
+  const activeHtml = m.active.length ? m.active.map(i => {
+    const meta = [];
+    if (i.account) meta.push(esc(i.account));
+    if (i.sharesReq != null) meta.push(`requested ${i.sharesReq} sh`);
+    if (i.sharesAlloc != null) meta.push(`allocated ${i.sharesAlloc} sh`);
+    if (i.low != null && i.high != null) meta.push(`${trMoney(i.low, i.currency)}–${trMoney(i.high, i.currency)}`);
+    if (i.final != null) meta.push(`final ${trMoney(i.final, i.currency)}`);
+    const nx = ipoNextText(i.next);
+    if (nx) meta.push(nx);
+    const right = (i.stage === 'allocated' || i.stage === 'listed') && i.gain != null
+      ? `<div style="text-align:right">${trPnlSpan(i.gain, i.currency)}${i.gainPct != null ? ` <span class="chip ${i.gain >= 0 ? 'good' : 'bad'}">${pct(i.gainPct, 1)}</span>` : ''}</div>` : '';
+    return `<div style="${trRowStyle()}"><div style="min-width:220px;flex:1"><div><b>${esc(i.company)}</b>${i.ticker ? ` <span class="chip">${esc(i.ticker)}</span>` : ''} ${ipoStageChip(i.stage)}</div><div class="hint">${meta.join(' · ')}</div></div>`
+      + `<div style="display:flex;align-items:center;gap:10px">${right}${act(i)}</div></div>`;
+  }).join('') : '<div class="empty"><b>Nothing here</b>No active IPO bids right now.</div>';
+
+  const doneHtml = m.done.length ? `<details style="margin-top:14px"><summary style="cursor:pointer;color:var(--muted);font-weight:600">Closed (${m.done.length})</summary><div style="margin-top:8px">`
+    + m.done.slice(0, 10).map(i => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px"><span><b>${esc(i.company)}</b>${i.ticker ? ` <span class="chip">${esc(i.ticker)}</span>` : ''} ${ipoStageChip(i.stage)}</span>${act(i)}</div>`).join('') + `</div></details>` : '';
+  const hint = m.totals.pendingCount > 0 ? '<p class="hint" style="margin-top:12px">Bids are requests, not guaranteed: you may get fewer shares or none.</p>' : '';
+  return card('IPOs and pre-IPO', `${lines.join('')}${activeHtml}${doneHtml}${hint}`, addBtn);
+}
+
+/* Both screens are wrapped so odd sheet data can never take the rest of the site down. */
+function vTrading() {
+  try {
+    return { html: tradingScreenHtml(tradingModel(store.base || store.raw), { cur: S.tradingCur }) };
+  } catch (e) {
+    return { html: card('Trading journal', '<div class="empty"><b>Could not read the Trades tab</b>Check the header row against the one in the setup note, then press Refresh.</div>') };
+  }
+}
+
+function preIpoSafeCard() {
+  try { return preIpoCardHtml(preIpoModel(store.base || store.raw)); } catch (e) { return ''; }
+}
+
+document.addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('[data-trading-cur]');
+  if (b) { S.tradingCur = b.dataset.tradingCur; render(); }
+});
 
 function vOwed() {
   const m = owedModel(store.base || store.raw);
@@ -5804,8 +5962,8 @@ if (!window.__ssSetBound) {
   });
 }
 /* ===== STATUS SIGNALS SETTINGS END ===== */
-const VIEWS={home:vHome,spending:vSpending,reselling:vReselling,inventory:vInventory,investing:vInvesting,data:vData,owed:vOwed};
-const SUBS={spending:'Where your money goes',reselling:'What your flips earn',inventory:'Devices waiting to sell',investing:'Your portfolios',data:'Sources, sync and quality',owed:'Loans and deposits'};
+const VIEWS={home:vHome,spending:vSpending,reselling:vReselling,inventory:vInventory,investing:vInvesting,trading:vTrading,data:vData,owed:vOwed};
+const SUBS={spending:'Where your money goes',reselling:'What your flips earn',inventory:'Devices waiting to sell',investing:'Your portfolios',trading:'Journal, positions and stats',data:'Sources, sync and quality',owed:'Loans and deposits'};
 
 /* ===== NAV REORDER (drag a menu button to move it; order saved on this device only) ===== */
 function orderNav(saved,defaults){
@@ -5817,7 +5975,10 @@ function orderNav(saved,defaults){
   }catch(_){return defaults.slice()}
 }
 function navOrder(){
-  try{const raw=LS.get('nav.order');return orderNav(raw?JSON.parse(raw):null,VIEW_NAMES)}catch(_){return VIEW_NAMES.slice()}
+  try{const raw=LS.get('nav.order');let a=raw?JSON.parse(raw):null;
+    /* a menu order saved before the Trading tab existed keeps its order; Trading slots in after Investing */
+    if(Array.isArray(a)&&a.length===VIEW_NAMES.length-1&&!a.includes('trading')){const i=a.indexOf('investing');a=a.slice();a.splice(i<0?a.length:i+1,0,'trading')}
+    return orderNav(a,VIEW_NAMES)}catch(_){return VIEW_NAMES.slice()}
 }
 function navIsCustom(){const o=navOrder();return o.some((v,i)=>v!==VIEW_NAMES[i])}
 function navSave(arr){try{LS.set('nav.order',JSON.stringify(arr))}catch(_){}}
@@ -5920,7 +6081,7 @@ function matchfixStatus() {
 }
 function setupTop(){
   const h=new Date().getHours();
-  $('#ttl').textContent=S.view==='home'?(h<12?'Good morning':h<18?'Good afternoon':'Good evening')+(window.mmGuest||(window.matchMedia&&matchMedia('(max-width:700px)').matches)?'':', Isaiah'):({spending:'Spending',reselling:'Reselling',inventory:'Stock',investing:'Investing',data:'Data & sync',owed:'Owed'})[S.view];
+  $('#ttl').textContent=S.view==='home'?(h<12?'Good morning':h<18?'Good afternoon':'Good evening')+(window.mmGuest||(window.matchMedia&&matchMedia('(max-width:700px)').matches)?'':', Isaiah'):({spending:'Spending',reselling:'Reselling',inventory:'Stock',investing:'Investing',trading:'Trading',data:'Data & sync',owed:'Owed'})[S.view];
   $('#sub').textContent=S.view==='home'?new Date().toLocaleDateString('en-CA',{weekday:'long',month:'long',day:'numeric'})+' · '+(store.source.kind==='embedded'?'Demo data, not your numbers':store.source.name+', '+ago(store.syncedAt)):SUBS[S.view];
   document.title='My Money';
   let __railX=0;try{__railX=$('#rail').scrollLeft||0}catch(_){}
@@ -6118,7 +6279,19 @@ const FORMS=[
   F('Date Out',{l:'Date Loaned',r:1,t:'date'}),F('Due Date',{l:'Return By',r:1,t:'date'}),F('Phone / Email',{t:'tel'}),F('Notes')]},
 {id:'dep',g:'Money',t:'Deposit taken',s:'Money held on a device until pickup',tab:'Owed',sum:['Person','Item / Device'],f:[
   F('Type',{r:1,t:'radio',o:['Deposit'],def:'Deposit'}),F('Person',{l:'Customer',r:1}),F('Item / Device',{l:'Device',r:1}),F('Total Amount',{l:'Total Price',r:1,t:'money'}),F('Amount Paid',{l:'Deposit Paid',r:1,t:'money'}),
-  F('Date Out',{l:'Date Deposit Taken',r:1,t:'date'}),F('Due Date',{l:'Pickup By',r:1,t:'date'}),F('Phone / Email',{t:'tel'}),F('Notes')]}
+  F('Date Out',{l:'Date Deposit Taken',r:1,t:'date'}),F('Due Date',{l:'Pickup By',r:1,t:'date'}),F('Phone / Email',{t:'tel'}),F('Notes')]},
+{id:'trade',g:'Investing',t:'Trade',s:'Log a stock, crypto, option or futures trade',tab:'Trades',sum:['Symbol'],f:[
+  F('Date Opened',{r:1,t:'date'}),F('Asset Type',{r:1,t:'radio',o:['Stock','Crypto','Option','Future'],c:1}),F('Symbol',{r:1}),
+  F('Direction',{r:1,t:'radio',o:['Long','Short'],def:'Long'}),F('Status',{r:1,t:'radio',o:['Open','Closed'],def:'Open'}),
+  F('Quantity',{r:1,t:'dec'}),F('Entry Price',{r:1,t:'dec'}),F('Exit Price',{t:'dec'}),F('Fees',{t:'money'}),
+  F('Currency',{r:1,t:'radio',o:['CAD','USD'],def:'CAD',c:1}),F('Multiplier',{l:'Multiplier (options 100, futures contract size)',t:'dec'}),
+  F('Option Type',{t:'radio',o:['Call','Put']}),F('Strike',{t:'dec'}),F('Expiry',{t:'date'}),F('Strategy'),F('Date Closed',{t:'date'}),F('Notes')]},
+{id:'ipo',g:'Investing',t:'IPO bid',s:'Track an IPO bid or pre-IPO holding',tab:'Pre-IPO',sum:['Company'],f:[
+  F('Company',{r:1}),F('Ticker'),F('Account',{t:'radio',o:['TFSA','RRSP','FHSA','Margin','Cash'],c:1}),
+  F('Status',{r:1,t:'radio',o:['Bid placed','Allocated','Not allocated','Listed','Cancelled'],def:'Bid placed'}),
+  F('Date Submitted',{r:1,t:'date'}),F('Bid Closes',{t:'date'}),F('IPO Date',{t:'date'}),F('Lockup Expiry',{t:'date'}),
+  F('Shares Requested',{r:1,t:'dec'}),F('Shares Allocated',{t:'dec'}),F('Price Low',{t:'dec'}),F('Price High',{t:'dec'}),F('Final Price',{t:'dec'}),
+  F('Currency',{r:1,t:'radio',o:['USD','CAD'],def:'USD',c:1}),F('Cost Basis',{l:'Cost Basis (total paid)',t:'money'}),F('Current Price',{t:'dec'}),F('Notes')]}
 ];
 const BY=Object.fromEntries(FORMS.map(f=>[f.id,f]));
 let cur=null,V={},busy=false,saveT=null,flushing=false;
@@ -6278,7 +6451,7 @@ function getVal(x){const k=x.k,v=V[k],o=(V[k+'#']||'').trim();
   if(x.t==='select'||x.t==='item')return v==='__o'?o:(v||'');
   return String(v==null?'':v).trim()}
 function payload(f){const out={};f.f.forEach(x=>{const s=getVal(x);if(s==='')return;
-  if(x.t==='money'||x.t==='int')out[x.k]=numOf(s);
+  if(x.t==='money'||x.t==='int'||x.t==='dec')out[x.k]=numOf(s);
   else if(x.t==='pct')out[x.k]=numOf(s)/100;
   else if(x.t==='date')out[x.k]={$date:s};
   else out[x.k]=s});return out}
@@ -6343,7 +6516,7 @@ function fieldHtml(f,i){
   }else if(f.t==='money'||f.t==='pct'){
     b=`<div class="lg-aff ${f.t}"><span>${f.t==='money'?'$':'%'}</span><input type="text" class="lg-in" id="${id}" data-k="${k}" data-ty="${f.t}" inputmode="decimal" autocomplete="off" placeholder="0.00" value="${E(v)}"></div>${f.k==='Sale Price'?`<p class="lg-ctx" data-c="${k}"></p>`:''}`;
   }else{
-    const im=f.t==='int'?'numeric':f.t==='tel'?'tel':'text';
+    const im=f.t==='int'?'numeric':f.t==='dec'?'decimal':f.t==='tel'?'tel':'text';
     b=`<input type="text" class="lg-in" id="${id}" data-k="${k}" data-ty="${f.t}" inputmode="${im}" autocomplete="off" ${f.sug?`list="lg-dl-${f.sug}"`:''} value="${E(v)}">${/^(tr:)?Serial Number$/.test(f.k)?`<p class="lg-ctx" data-c="${k}" role="status"></p>`:''}`;
   }
   return `<div class="lg-f" data-f="${k}">${lab}${b}${err}</div>`;
@@ -6458,7 +6631,7 @@ function setErr(k,msg){const el=$$('[data-e]').find(e=>e.dataset.e===k);if(!el)r
 function validate(f){let first=null;
   f.f.forEach(x=>{const s=getVal(x);let m='';
     if(!s){if(x.r)m='Required'}
-    else if(x.t==='money'||x.t==='pct'||x.t==='int'){const n=numOf(s);
+    else if(x.t==='money'||x.t==='pct'||x.t==='int'||x.t==='dec'){const n=numOf(s);
       if(n==null)m='Enter a number';else if(n<0&&!x.neg)m="Can't be negative";else if(x.t==='int'&&!Number.isInteger(n))m='Whole number please'}
     else if(x.t==='date'&&!/^\d{4}-\d{2}-\d{2}$/.test(s))m='Pick a date';
     setErr(x.k,m);if(m&&!first)first=x.k});

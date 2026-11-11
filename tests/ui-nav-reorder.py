@@ -7,7 +7,7 @@ from playwright.sync_api import sync_playwright
 
 PAGE = pathlib.Path(__file__).resolve().parent.parent / 'index.html'
 SHOTS = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else pathlib.Path('/tmp')
-DEF = ['home', 'spending', 'reselling', 'inventory', 'investing', 'data', 'owed']
+DEF = ['home', 'spending', 'reselling', 'inventory', 'investing', 'trading', 'data', 'owed']
 fails, passed = [], 0
 
 def check(name, cond, extra=''):
@@ -57,10 +57,10 @@ with sync_playwright() as p:
     check('order survives reload', order(page) == want, order(page))
     # keyboard
     page.focus('#rail .nav[data-v=home]'); page.keyboard.press('Alt+ArrowUp')
-    want2 = ['spending', 'reselling', 'inventory', 'investing', 'data', 'home', 'owed']
+    want2 = ['spending', 'reselling', 'inventory', 'investing', 'trading', 'data', 'home', 'owed']
     check('Alt+Up moves the focused button', order(page) == want2, order(page))
     check('focus stays on the moved button', page.evaluate("document.activeElement.dataset.v") == 'home')
-    check('screen-reader announcement', 'moved to position 6 of 7' in page.inner_text('#navlive'), page.inner_text('#navlive'))
+    check('screen-reader announcement', 'moved to position 7 of 8' in page.inner_text('#navlive'), page.inner_text('#navlive'))
     page.keyboard.press('Alt+ArrowDown'); page.keyboard.press('Alt+ArrowDown')
     check('Alt+Down stops at the end', order(page)[-1] == 'home', order(page))
     # every screen loads in the custom order
@@ -71,10 +71,17 @@ with sync_playwright() as p:
     page.click('.navreset'); check('Reset restores the default order', order(page) == DEF, order(page))
     check('Reset button hides again', page.locator('.navreset').count() == 0)
     # corrupt storage never breaks the page
-    for bad in ['{bad json', '["home"]', '["a","b","c","d","e","f","g"]', 'null', '"x"', '["home","home","spending","reselling","inventory","investing","data"]']:
+    for bad in ['{bad json', '["home"]', '["a","b","c","d","e","f","g"]', '["a","b","c","d","e","f","g","h"]', 'null', '"x"', '["home","home","spending","reselling","inventory","investing","data"]', '["home","home","spending","reselling","inventory","investing","trading","data"]']:
         page.evaluate("v=>localStorage.setItem('mm.nav.order',v)", bad); page.reload()
         page.wait_for_function("typeof store!=='undefined' && store.D && store.D.expenses.length>3")
         check('corrupt saved order falls back: ' + bad[:30], order(page) == DEF, order(page))
+    # a menu order saved BEFORE the Trading tab existed (7 entries) keeps its order, and Trading slots in after Investing
+    page.evaluate("v=>localStorage.setItem('mm.nav.order',v)", '["spending","home","reselling","inventory","investing","data","owed"]'); page.reload()
+    page.wait_for_function("typeof store!=='undefined' && store.D && store.D.expenses.length>3")
+    check('an old 7-tab saved order is kept and Trading slots in after Investing', order(page) == ['spending', 'home', 'reselling', 'inventory', 'investing', 'trading', 'data', 'owed'], order(page))
+    page.evaluate("v=>localStorage.setItem('mm.nav.order',v)", '["home","spending","reselling","inventory","investing","data","owed"]'); page.reload()
+    page.wait_for_function("typeof store!=='undefined' && store.D && store.D.expenses.length>3")
+    check('an old 7-tab DEFAULT order stays the default (no Reset button)', order(page) == DEF and page.locator('.navreset').count() == 0, order(page))
     # pure function
     r = page.evaluate("[orderNav(null,VIEW_NAMES),orderNav([...VIEW_NAMES].reverse(),VIEW_NAMES),orderNav('x',VIEW_NAMES)]")
     check('orderNav pure checks', r[0] == DEF and r[1] == DEF[::-1] and r[2] == DEF)

@@ -24,7 +24,7 @@ window.Chart.register = function(){};
 window.Chart.getChart = function(id){ const el = typeof id === 'string' ? document.getElementById(id) : id; return el && el.__inst || null };
 window.Chart.defaults = {font:{},plugins:{legend:{labels:{}}}};
 """
-VIEWS = ['home', 'spending', 'reselling', 'inventory', 'investing', 'data', 'owed']
+VIEWS = ['home', 'spending', 'reselling', 'inventory', 'investing', 'trading', 'data', 'owed']
 
 def open_page(p, query=''):
     b = p.chromium.launch()
