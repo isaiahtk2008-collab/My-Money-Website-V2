@@ -87,7 +87,7 @@ const GUESTS_KEY = 'mm.guests';
 const MAX_GUESTS = 20;                                         // live (not yet ended) guest links at one time
 const GUEST_MINUTES = [30, 60, 360, 720, 1440, 2880, 10080];   // 30 min, 1 h, 6 h, 12 h, 24 h, 48 h, 7 days. Nothing else is accepted.
 // Tabs a preset hides come back with the same headers and NO rows. Masked columns show (hidden) instead of the value.
-const GUEST_HIDE_TABS = ['Expenses', 'Investments', 'Owed'];
+const GUEST_HIDE_TABS = ['Expenses', 'Investments', 'Owed', 'Trades', 'Pre-IPO'];
 const GUEST_MASK_COLS = ['Sold To', 'Sold to', 'Bought From', 'Found By', 'Bought By', 'Sale By', 'IMEI', 'Device Label', 'Notes', 'Notes (Bought)', 'Notes (Sold)', 'Sale Notes', 'Establishment'];
 const GUEST_PRESETS = {
   all:      { name: 'Everything (read-only)', hideTabs: [], maskCols: [] },
@@ -220,15 +220,15 @@ function tx_(v) {
 
 // WRITE: these are the ONLY tabs entries can be added to (matched ignoring case and spaces).
 // Summary, Master Inventory, PCs, PnA and the other formula tabs are not listed, so they can never be touched.
-const ALLOWED_TABS = ['Form Responses - Bought', 'Form Responses - PCs', 'Bought Access - Form', 'Form Responses - Sold', 'Form Responses - Sold PCs', 'Sold Access - Form', 'Expenses', 'Investment Tracking Sheet', 'Owed'];
+const ALLOWED_TABS = ['Form Responses - Bought', 'Form Responses - PCs', 'Bought Access - Form', 'Form Responses - Sold', 'Form Responses - Sold PCs', 'Sold Access - Form', 'Expenses', 'Investment Tracking Sheet', 'Owed', 'Trades', 'Pre-IPO'];
 
 // EDIT / DELETE: the ONLY tabs where an existing row can be changed or removed (matched ignoring case and spaces).
 // Formula tabs (Master Inventory, PCs, PnA, Summary...) are not listed, so a row there can never be edited or deleted.
 const EDITABLE_TABS = ['Expenses'];
 
-// EDIT ONLY: the six entry tabs plus the Owed tab. An existing row can be EDITED here (every change is written to the "Edit Log" tab first). A row can be deleted only from the three Sold tabs (see SALE_DELETE_TABS), never from a Bought or Owed tab.
+// EDIT ONLY: the six entry tabs plus the Owed, Trades and Pre-IPO tabs. An existing row can be EDITED here (every change is written to the "Edit Log" tab first). A row can be deleted only from the three Sold tabs (see SALE_DELETE_TABS), never from a Bought, Owed, Trades or Pre-IPO tab.
 // Formula tabs (Master Inventory, PCs, PnA, Summary...) must never be added to this list or to EDITABLE_TABS.
-const EDIT_ONLY_TABS = ['Form Responses - Bought', 'Form Responses - PCs', 'Bought Access - Form', 'Form Responses - Sold', 'Form Responses - Sold PCs', 'Sold Access - Form', 'Owed'];
+const EDIT_ONLY_TABS = ['Form Responses - Bought', 'Form Responses - PCs', 'Bought Access - Form', 'Form Responses - Sold', 'Form Responses - Sold PCs', 'Sold Access - Form', 'Owed', 'Trades', 'Pre-IPO'];
 
 // DELETE (sale rows): the only entry tabs a row can be deleted from (plus Expenses via EDITABLE_TABS).
 // Bought tabs and formula tabs must never be added here. A sale row is logged in full to the "Edit Log" tab before it is removed.
@@ -258,7 +258,10 @@ const READ_TABS = {
   SoldPCs:      { tab: 'Form Responses - Sold PCs', keys: [] },
   SoldAccess:   { tab: 'Sold Access - Form',        keys: [] },
   // Owed (loans and deposits, told apart by its Type column): you create this tab by hand (the script never creates it). If it is missing it is reported as missing and the website simply skips it.
-  Owed:         { tab: 'Owed',                      keys: [] }
+  Owed:         { tab: 'Owed',                      keys: [] },
+  // Trades (day / swing trading journal) and Pre-IPO (IPO bids and holdings): you create these tabs by hand (the script never creates them). A missing tab is reported as missing and the website simply skips it.
+  Trades:       { tab: 'Trades',                    keys: [] },
+  PreIPO:       { tab: 'Pre-IPO',                   keys: [] }
 };
 
 // Every reply is JSON. `status` is added alongside the existing `ok` flag so older and newer callers both work.
