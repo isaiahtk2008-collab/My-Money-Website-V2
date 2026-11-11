@@ -2690,7 +2690,7 @@ function normalize(raw){
 
 /* ----- Data sources: anything that returns the raw shape plugs in here ----- */
 const TABS={Expenses:'Expenses',Phones:'Master Inventory',PCs:'PCs',Accessories:'PnA',Investments:'Investment Tracking Sheet'};
-const EXTRA_TABS={BoughtPhones:'Form Responses - Bought',BoughtPCs:'Form Responses - PCs',BoughtAccess:'Bought Access - Form',SoldPhones:'Form Responses - Sold',SoldPCs:'Form Responses - Sold PCs',SoldAccess:'Sold Access - Form',Owed:'Owed'};
+const EXTRA_TABS={BoughtPhones:'Form Responses - Bought',BoughtPCs:'Form Responses - PCs',BoughtAccess:'Bought Access - Form',SoldPhones:'Form Responses - Sold',SoldPCs:'Form Responses - Sold PCs',SoldAccess:'Sold Access - Form',Owed:'Owed',Trades:'Trades',PreIPO:'Pre-IPO'};
 /* No data loaded yet: the same tabs and headers as the demo snapshot but with zero rows, so every tile, chart and table starts at zero.
    Nothing here touches your sheet. Add ?demo=1 to the page link to look at the old made-up demo numbers instead. */
 const EMPTY_RAW=(function(){const e={};Object.keys(MM_RAW).forEach(function(k){const t=MM_RAW[k];e[k]={sheet:t.sheet,headers:t.headers.slice(),rows:[]}});return e})();
