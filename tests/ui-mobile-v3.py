@@ -1,7 +1,7 @@
 # Run with: python3 tests/ui-mobile-v3.py        (needs: pip install playwright && playwright install chromium)
 # Drives the real page in Chromium (never touches Google; every network request except the page itself is blocked).
 # Proves the mobile redesign (floating dock, Home graph card, simpler tabs) works and that DESKTOP is unchanged:
-#  - phone widths: dock fits all 7 tabs, only the active tab shows a label, no sideways scrolling on any page
+#  - phone widths: dock fits all 8 tabs, only the active tab shows a label, no sideways scrolling on any page
 #  - Home: hero graph card first, quick actions, metric switch (Profit / Spending / Net / Invested), scrubbing tooltip
 #  - tabs: first KPI becomes the summary card, table rows become cards, only 12 rows at first, Show more still works
 #  - desktop: hero + quick actions hidden, nav rail unchanged, tables stay tables
@@ -35,7 +35,7 @@ def boot(p, width, height=844, scheme='dark'):
     page.wait_for_function("typeof store!=='undefined' && store.D && store.D.expenses.length>3")
     return b, page, errors
 
-VIEWS = ['home', 'spending', 'reselling', 'inventory', 'investing', 'data', 'owed']
+VIEWS = ['home', 'spending', 'reselling', 'inventory', 'investing', 'trading', 'data', 'owed']
 
 with sync_playwright() as p:
     # ---------------- phone widths ----------------
@@ -52,7 +52,7 @@ with sync_playwright() as p:
                       const vis=n.filter(b=>{const s=b.querySelector('span');const r=s.getBoundingClientRect();return r.width>2&&r.height>2});
                       return {count:n.length,left:Math.min(...n.map(b=>b.getBoundingClientRect().left)),right:Math.max(...n.map(b=>b.getBoundingClientRect().right)),railR:rl.right,railL:rl.left,vis:vis.map(b=>b.dataset.v),
                               pos:getComputedStyle(document.querySelector('#rail')).position,logo:getComputedStyle(document.querySelector('#rail .logo')).display}})()""")
-                    check(f'{tag}: dock shows all 7 tabs inside the pill', r['count'] == 7 and r['left'] >= r['railL'] - 1 and r['right'] <= r['railR'] + 1, str(r))
+                    check(f'{tag}: dock shows all 8 tabs inside the pill', r['count'] == 8 and r['left'] >= r['railL'] - 1 and r['right'] <= r['railR'] + 1, str(r))
                     check(f'{tag}: only the active tab shows its label', r['vis'] == ['home'], str(r))
                     check(f'{tag}: dock floats (fixed) and the $ logo is tucked away', r['pos'] == 'fixed' and r['logo'] == 'none', str(r))
                     f = page.evaluate("""(()=>{const rl=document.querySelector('#rail').getBoundingClientRect(),W=innerWidth;
