@@ -4968,6 +4968,239 @@ function owedRows(items, kind, openN) {
   return html;
 }
 
+/* ===== TRADING + PRE-IPO MODELS (pure functions; no DOM, no writes) =====
+   Trading reads ONE sheet tab named "Trades" (raw.Trades). Pre-IPO reads ONE sheet tab named "Pre-IPO" (raw.PreIPO). Both tabs are created by hand in the
+   Google Sheet; until they exist the screens show how to add them. Nothing here changes the sheet. Amounts of different currencies are NEVER added together.
+   Drafted by Gemini 3.5 flash, then reviewed and corrected (Row ID column, exact headers only, Timestamp / Row ID never make a spare row "real data"). */
+const TRADES_HEADERS = 'Timestamp\tRow ID\tDate Opened\tAsset Type\tSymbol\tDirection\tStatus\tQuantity\tEntry Price\tExit Price\tFees\tCurrency\tMultiplier\tOption Type\tStrike\tExpiry\tStrategy\tDate Closed\tNotes';
+const PREIPO_HEADERS = 'Timestamp\tRow ID\tCompany\tTicker\tAccount\tStatus\tDate Submitted\tBid Closes\tIPO Date\tLockup Expiry\tShares Requested\tShares Allocated\tPrice Low\tPrice High\tFinal Price\tCurrency\tCost Basis\tCurrent Price\tNotes';
+
+function trStr(v) { return String(v == null ? '' : v).trim(); }
+
+function trBlankRow(r) {
+  if (!r || typeof r !== 'object') return true;
+  for (const k of Object.keys(r)) {
+    if (k === '_row' || k === 'Timestamp' || k === 'Row ID') continue;
+    if (trStr(r[k]) !== '') return false;
+  }
+  return true;
+}
+
+function trAsset(v) {
+  const s = trStr(v);
+  if (/stock|equit|share|etf/i.test(s)) return 'Stock';
+  if (/crypto|coin|btc|eth/i.test(s)) return 'Crypto';
+  if (/option|call|put/i.test(s)) return 'Option';
+  if (/future/i.test(s)) return 'Future';
+  return 'Other';
+}
+
+function trDir(v) { return /short|sell/i.test(trStr(v)) ? 'Short' : 'Long'; }
+
+function trStatus(v, exitVal) {
+  const s = trStr(v);
+  if (s && /closed?|exited|sold/i.test(s)) return 'closed';
+  if (!s && exitVal !== null) return 'closed';
+  return 'open';
+}
+
+function tradingModel(raw, today = TODAY) {
+  const hasTrades = Boolean(raw && raw.Trades && Array.isArray(raw.Trades.rows));
+  if (!hasTrades) return { hasTrades: false, trades: [], open: [], closed: [], currencies: [], byCurrency: {}, skipped: 0, incomplete: 0 };
+
+  let skipped = 0, incomplete = 0;
+  const all = [];
+  for (const r of raw.Trades.rows) {
+    if (!r || trBlankRow(r)) continue;
+    const symbol = trStr(r['Symbol']).toUpperCase();
+    if (!symbol) { skipped++; continue; }
+
+    const opened = pd(r['Date Opened']) || pd(r['Timestamp']);
+    const closedOn = pd(r['Date Closed']);
+    const assetType = trAsset(r['Asset Type']);
+    const direction = trDir(r['Direction']);
+    const exit = num(r['Exit Price']);
+    const entry = num(r['Entry Price']);
+    const status = trStatus(r['Status'], exit);
+    const qty = num(r['Quantity']) || 0;
+    const fees = num(r['Fees']) || 0;
+    const currency = trStr(r['Currency']).toUpperCase() || 'CAD';
+    const rawMult = num(r['Multiplier']);
+    const mult = rawMult != null && rawMult > 0 ? rawMult : (assetType === 'Option' ? 100 : 1);
+    const cost = entry != null ? entry * qty * mult : null;
+
+    let gross = null, net = null, pnlPct = null;
+    if (status === 'closed') {
+      if (entry != null && exit != null) {
+        gross = (direction === 'Long' ? exit - entry : entry - exit) * qty * mult;
+        net = gross - fees;
+        pnlPct = cost ? net / cost : null;
+      } else incomplete++;
+    }
+
+    let daysHeld = null;
+    if (opened) daysHeld = Math.max(0, diffD(opened, status === 'closed' && closedOn ? closedOn : today));
+
+    all.push({
+      id: trStr(r['Row ID']), row: r._row, opened, closedOn, assetType, symbol, direction, status, qty, entry, exit, fees, currency, mult,
+      optionType: trStr(r['Option Type']), strike: num(r['Strike']), expiry: pd(r['Expiry']), strategy: trStr(r['Strategy']), notes: trStr(r['Notes']),
+      cost, gross, net, pnlPct, daysHeld
+    });
+  }
+
+  all.sort((a, b) => {
+    if (a.opened && b.opened) { const d = b.opened.getTime() - a.opened.getTime(); if (d !== 0) return d; }
+    else if (a.opened) return -1;
+    else if (b.opened) return 1;
+    return (b.row || 0) - (a.row || 0);
+  });
+  const open = all.filter(t => t.status === 'open');
+  const closed = all.filter(t => t.status === 'closed');
+
+  const counts = {};
+  for (const t of all) counts[t.currency] = (counts[t.currency] || 0) + 1;
+  const currencies = Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b));
+
+  const byCurrency = {};
+  for (const cur of currencies) {
+    const ts = all.filter(t => t.currency === cur);
+    const openTs = ts.filter(t => t.status === 'open');
+    const closedTs = ts.filter(t => t.status === 'closed');
+    const st = closedTs.filter(t => t.net !== null);
+    const statCount = st.length;
+    const winsT = st.filter(t => t.net > 0), lossT = st.filter(t => t.net < 0);
+    const wins = winsT.length, losses = lossT.length, flat = statCount - wins - losses;
+    const grossProfit = sum(winsT, t => t.net), grossLoss = sum(lossT, t => t.net), netPnl = sum(st, t => t.net);
+
+    let best = null, worst = null;
+    for (const t of st) { if (!best || t.net > best.net) best = t; if (!worst || t.net < worst.net) worst = t; }
+
+    const ordered = st.slice().sort((a, b) => {
+      const da = a.closedOn || a.opened, db = b.closedOn || b.opened;
+      if (da && db) { const d = da.getTime() - db.getTime(); if (d !== 0) return d; }
+      else if (da) return -1;
+      else if (db) return 1;
+      return (a.row || 0) - (b.row || 0);
+    });
+    let cum = 0, peak = 0, maxDrawdown = 0;
+    const curve = [];
+    for (const t of ordered) {
+      cum += t.net;
+      if (cum > peak) peak = cum;
+      if (peak - cum > maxDrawdown) maxDrawdown = peak - cum;
+      curve.push({ date: t.closedOn || t.opened || null, cum, id: t.id });
+    }
+
+    const byAsset = {};
+    for (const at of ['Stock', 'Crypto', 'Option', 'Future', 'Other']) {
+      const a = ts.filter(t => t.assetType === at);
+      if (!a.length) continue;
+      const as = a.filter(t => t.status === 'closed' && t.net !== null);
+      byAsset[at] = { count: a.length, closed: as.length, net: sum(as, t => t.net), winRate: as.length ? as.filter(t => t.net > 0).length / as.length : null };
+    }
+
+    byCurrency[cur] = {
+      currency: cur, count: ts.length, openCount: openTs.length, closedCount: closedTs.length, statCount, wins, losses, flat,
+      winRate: statCount ? wins / statCount : null, grossProfit, grossLoss, netPnl, fees: sum(st, t => t.fees),
+      avgWin: wins ? grossProfit / wins : null, avgLoss: losses ? grossLoss / losses : null,
+      profitFactor: grossLoss < 0 ? grossProfit / Math.abs(grossLoss) : null, expectancy: statCount ? netPnl / statCount : null,
+      best, worst, maxDrawdown, openCost: sum(openTs.filter(t => t.cost != null), t => t.cost), curve, byAsset
+    };
+  }
+  return { hasTrades: true, trades: all, open, closed, currencies, byCurrency, skipped, incomplete };
+}
+
+function ipoStage(statusRaw, daysToBid) {
+  const s = trStr(statusRaw).toLowerCase();
+  if (/cancel|withdr/.test(s)) return 'cancelled';
+  if (/not alloc|no alloc|missed/.test(s)) return 'not-allocated';
+  if (/list|trading/.test(s)) return 'listed';
+  if (/alloc/.test(s)) return 'allocated';
+  return daysToBid === null || daysToBid >= 0 ? 'bidding' : 'awaiting';
+}
+
+function ipoNext(stage, dates) {
+  if (stage === 'cancelled' || stage === 'not-allocated') return null;
+  const c = [];
+  const add = (label, date, days) => { if (date && days !== null && days >= 0) c.push({ label, date, days }); };
+  if (stage !== 'listed') { add('Bid window closes', dates.bid, dates.dBid); add('IPO day', dates.ipo, dates.dIpo); }
+  add('Lockup expires', dates.lock, dates.dLock);
+  c.sort((a, b) => a.days - b.days);
+  return c[0] || null;
+}
+
+function preIpoModel(raw, today = TODAY) {
+  const hasPre = Boolean(raw && raw.PreIPO && Array.isArray(raw.PreIPO.rows));
+  if (!hasPre) return { hasPre: false, items: [], active: [], done: [], totals: { pendingCount: 0, allocatedCount: 0, byCurrency: {} }, skipped: 0 };
+
+  let skipped = 0;
+  const all = [];
+  for (const r of raw.PreIPO.rows) {
+    if (!r || trBlankRow(r)) continue;
+    const company = trStr(r['Company']);
+    if (!company) { skipped++; continue; }
+
+    const submitted = pd(r['Date Submitted']), bidCloses = pd(r['Bid Closes']), ipoDate = pd(r['IPO Date']), lockup = pd(r['Lockup Expiry']);
+    const sharesReq = num(r['Shares Requested']), sharesAlloc = num(r['Shares Allocated']);
+    const low = num(r['Price Low']), high = num(r['Price High']), final = num(r['Final Price']);
+    const currentPrice = num(r['Current Price']), costBasis = num(r['Cost Basis']);
+    const daysToBid = bidCloses ? diffD(today, bidCloses) : null;
+    const daysToIpo = ipoDate ? diffD(today, ipoDate) : null;
+    const daysToLockup = lockup ? diffD(today, lockup) : null;
+    const statusRaw = trStr(r['Status']);
+    const stage = ipoStage(statusRaw, daysToBid);
+    const cost = costBasis != null ? costBasis : (sharesAlloc != null && final != null ? sharesAlloc * final : null);
+    const value = currentPrice != null && sharesAlloc != null ? currentPrice * sharesAlloc : null;
+    const gain = value != null && cost != null ? value - cost : null;
+
+    all.push({
+      id: trStr(r['Row ID']), row: r._row, company, ticker: trStr(r['Ticker']).toUpperCase(), account: trStr(r['Account']), statusRaw, stage,
+      submitted, bidCloses, ipoDate, lockup, sharesReq, sharesAlloc, low, high, final, currency: trStr(r['Currency']).toUpperCase() || 'USD',
+      estLow: low != null && sharesReq != null ? low * sharesReq : null, estHigh: high != null && sharesReq != null ? high * sharesReq : null,
+      cost, value, gain, gainPct: gain != null && cost > 0 ? gain / cost : null, daysToBid, daysToIpo, daysToLockup,
+      next: ipoNext(stage, { bid: bidCloses, ipo: ipoDate, lock: lockup, dBid: daysToBid, dIpo: daysToIpo, dLock: daysToLockup }), notes: trStr(r['Notes'])
+    });
+  }
+
+  const active = [], done = [];
+  for (const it of all) {
+    const live = it.stage === 'bidding' || it.stage === 'awaiting' || it.stage === 'allocated' || (it.stage === 'listed' && it.daysToLockup !== null && it.daysToLockup >= 0);
+    (live ? active : done).push(it);
+  }
+  active.sort((a, b) => {
+    const da = a.next ? a.next.days : null, db = b.next ? b.next.days : null;
+    if (da !== null && db !== null) { if (da !== db) return da - db; }
+    else if (da !== null) return -1;
+    else if (db !== null) return 1;
+    return (a.row || 0) - (b.row || 0);
+  });
+  done.sort((a, b) => {
+    if (a.submitted && b.submitted) { const d = b.submitted.getTime() - a.submitted.getTime(); if (d !== 0) return d; }
+    else if (a.submitted) return -1;
+    else if (b.submitted) return 1;
+    return (a.row || 0) - (b.row || 0);
+  });
+  const items = active.concat(done);
+
+  const byCurrency = {};
+  for (const it of items) {
+    const c = byCurrency[it.currency] || (byCurrency[it.currency] = { reservedLow: 0, reservedHigh: 0, holdingsCost: 0, holdingsValue: 0, gain: 0 });
+    if (it.stage === 'bidding' || it.stage === 'awaiting') { c.reservedLow += it.estLow || 0; c.reservedHigh += it.estHigh || 0; }
+    else if (it.stage === 'allocated' || it.stage === 'listed') {
+      c.holdingsCost += it.cost || 0; c.holdingsValue += it.value || 0;
+      if (it.cost != null && it.value != null) c.gain += it.value - it.cost;
+    }
+  }
+  return {
+    hasPre: true, items, active, done, skipped,
+    totals: {
+      pendingCount: items.filter(i => i.stage === 'bidding' || i.stage === 'awaiting').length,
+      allocatedCount: items.filter(i => i.stage === 'allocated' || i.stage === 'listed').length,
+      byCurrency
+    }
+  };
+}
+
 function vOwed() {
   const m = owedModel(store.base || store.raw);
   if (!m.hasOwed) {
