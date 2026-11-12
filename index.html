@@ -5266,8 +5266,8 @@ function ipoNextText(next) {
 
 function tradingScreenHtml(m, opts) {
   if (!m || !m.hasTrades) return trPreTab('Trading journal', TRADES_HEADERS, 'Trades');
-  const addBtn = '<button type="button" class="btn sec" data-lg="open" data-id="trade">Add trade</button>';
-  if (!m.trades.length) return card('Trading journal', '<div class="empty"><b>No trades yet</b>Tap Add trade to log your first one.</div>', addBtn);
+  const addBtn = '';
+  if (!m.trades.length) return card('Trading journal', '<div class="empty"><b>No trades yet</b>Tap + to log your first trade, IPO or pre-IPO.</div>', addBtn);
 
   const cur = opts && opts.cur && m.currencies.includes(opts.cur) ? opts.cur : m.currencies[0];
   const curSwitch = m.currencies.length > 1
@@ -6500,17 +6500,23 @@ const FORMS=[
   F('Type',{r:1,t:'radio',o:['Deposit'],def:'Deposit'}),F('Person',{l:'Customer',r:1}),F('Item / Device',{l:'Device',r:1}),F('Total Amount',{l:'Total Price',r:1,t:'money'}),F('Amount Paid',{l:'Deposit Paid',r:1,t:'money'}),
   F('Date Out',{l:'Date Deposit Taken',r:1,t:'date'}),F('Due Date',{l:'Pickup By',r:1,t:'date'}),F('Phone / Email',{t:'tel'}),F('Notes')]},
 {id:'trade',g:'Investing',t:'Trade',s:'Log a stock, crypto, option or futures trade',tab:'Trades',sum:['Symbol'],f:[
-  F('Date Opened',{r:1,t:'date'}),F('Asset Type',{r:1,t:'radio',o:['Stock','Crypto','Option','Future'],c:1}),F('Symbol',{r:1}),
+  F('Date Opened',{r:1,t:'date'}),F('Asset Type',{r:1,t:'radio',o:['Stock','Crypto','Option','Future','IPO','Pre-IPO'],c:1}),F('Symbol',{r:1}),
   F('Direction',{r:1,t:'radio',o:['Long','Short'],def:'Long'}),F('Status',{r:1,t:'radio',o:['Open','Closed'],def:'Open'}),
   F('Quantity',{r:1,t:'dec'}),F('Entry Price',{r:1,t:'dec'}),F('Exit Price',{t:'dec'}),F('Fees',{t:'money'}),
   F('Currency',{r:1,t:'radio',o:['CAD','USD'],def:'CAD',c:1}),F('Multiplier',{l:'Multiplier (options 100, futures contract size)',t:'dec'}),
   F('Option Type',{t:'radio',o:['Call','Put']}),F('Strike',{t:'dec'}),F('Expiry',{t:'date',nd:1}),F('Strategy'),F('Date Closed',{t:'date',nd:1}),F('Notes')]},
-{id:'ipo',g:'Investing',t:'IPO bid',s:'Track an IPO bid or pre-IPO holding',tab:'Pre-IPO',sum:['Company'],f:[
+{id:'ipo',g:'Investing',t:'IPO bid',s:'Track an IPO bid and what you get allocated',tab:'Pre-IPO',sum:['Company'],sw:1,f:[
   F('Company',{r:1}),F('Ticker'),F('Account',{t:'radio',o:['TFSA','RRSP','FHSA','Margin','Cash'],c:1}),
   F('Status',{r:1,t:'radio',o:['Bid placed','Allocated','Not allocated','Listed','Cancelled'],def:'Bid placed'}),
   F('Date Submitted',{r:1,t:'date'}),F('Bid Closes',{t:'date',nd:1}),F('IPO Date',{t:'date',nd:1}),F('Lockup Expiry',{t:'date',nd:1}),
   F('Shares Requested',{r:1,t:'dec'}),F('Shares Allocated',{t:'dec'}),F('Price Low',{t:'dec'}),F('Price High',{t:'dec'}),F('Final Price',{t:'dec'}),
-  F('Currency',{r:1,t:'radio',o:['USD','CAD'],def:'USD',c:1}),F('Cost Basis',{l:'Cost Basis (total paid)',t:'money'}),F('Current Price',{t:'dec'}),F('Notes')]}
+  F('Currency',{r:1,t:'radio',o:['USD','CAD'],def:'USD',c:1}),F('Cost Basis',{l:'Cost Basis (total paid)',t:'money'}),F('Current Price',{t:'dec'}),F('Notes')]},
+{id:'preipo',g:'Investing',t:'Pre-IPO holding',s:'Shares of a private company you already own, before it lists',tab:'Pre-IPO',sum:['Company'],sw:1,f:[
+  F('Company',{r:1}),F('Ticker'),F('Account',{t:'radio',o:['TFSA','RRSP','FHSA','Margin','Cash'],c:1}),
+  F('Date Submitted',{l:'Date Acquired',r:1,t:'date'}),F('Shares Allocated',{l:'Shares Owned',r:1,t:'dec'}),
+  F('Final Price',{l:'Price Paid per Share',t:'dec'}),F('Cost Basis',{l:'Cost Basis (total paid, optional)',t:'money'}),
+  F('Current Price',{l:'Latest Valuation per Share',t:'dec'}),F('IPO Date',{l:'Expected IPO Date',t:'date',nd:1}),F('Lockup Expiry',{t:'date',nd:1}),
+  F('Currency',{r:1,t:'radio',o:['USD','CAD'],def:'USD',c:1}),F('Notes')]}
 ];
 const BY=Object.fromEntries(FORMS.map(f=>[f.id,f]));
 let cur=null,V={},busy=false,saveT=null,flushing=false;
@@ -6673,7 +6679,9 @@ function payload(f){const out={};f.f.forEach(x=>{const s=getVal(x);if(s==='')ret
   if(x.t==='money'||x.t==='int'||x.t==='dec')out[x.k]=numOf(s);
   else if(x.t==='pct')out[x.k]=numOf(s)/100;
   else if(x.t==='date')out[x.k]={$date:s};
-  else out[x.k]=s});return out}
+  else out[x.k]=s});
+  if(f.id==='preipo'){out.Status='Allocated';out.Notes='Pre-IPO holding'+(out.Notes?' - '+out.Notes:'')}
+  return out}
 const summ=(f,v)=>{const k=f.sum.find(a=>v[a]!=null);const a=v['Amount']!=null?' · $'+v['Amount']:'';return f.t+(k?' · '+v[k]:'')+a};
 
 /* ---------- Rendering ---------- */
@@ -6741,12 +6749,16 @@ function fieldHtml(f,i){
   return `<div class="lg-f" data-f="${k}">${lab}${b}${err}</div>`;
 }
 
+const SW_TYPES=['Stock','Crypto','Option','Future','IPO','Pre-IPO'];
+function swHtml(f){const on=f.id==='ipo'?'IPO':f.id==='preipo'?'Pre-IPO':'';
+  return `<div class="lg-f" data-f="__type"><span class="lg-l">Asset Type</span><div class="lg-chips" role="group" aria-label="Asset Type">${SW_TYPES.map(x=>`<button type="button" class="chip-b" data-lg="swform" data-v="${E(x)}" aria-pressed="${x===on}">${E(x)}</button>`).join('')}</div></div>`}
 function formScreen(f,draftTs){
   const last=J('lg.last.'+f.id,null);
   const sugs=[...new Set(f.f.map(x=>x.sug).filter(Boolean))];
   return `<div class="lg-top"><div style="display:flex;gap:10px;align-items:center"><button class="ibtn" data-lg="menu" aria-label="Back to all forms">${ICO.back}</button><div><h2>${E(f.t)}</h2><p>${E(f.s)}</p></div></div><div class="lg-r">${xbtn()}</div></div>
   ${draftTs?`<div class="lg-note"><span>Draft restored (${agoTxt(draftTs)})</span><button data-lg="discard">Discard</button></div>`:''}
   ${last&&!draftTs?`<div style="margin-bottom:14px"><button class="chip-b" data-lg="repeat">Repeat last entry's details</button></div>`:''}
+  ${f.sw?swHtml(f):''}
   ${f.f.map((x,i)=>fieldHtml(x,i)+(f.pay&&x.k==='Sale Price'?payHtml():'')).join('')}
   ${sugs.map(s=>`<datalist id="lg-dl-${s}">${sugList(s).map(x=>`<option value="${E(x)}">`).join('')}</datalist>`).join('')}
   <div class="lg-foot"><button class="btn" data-lg="submit">Log entry</button><span class="hint">Ctrl+Enter</span></div>`;
@@ -6994,6 +7006,8 @@ document.addEventListener('click',e=>{
   switch(a){
     case 'menu':cur=null;show(menuScreen());flush(true);break;
     case 'open':openForm(d.id,false);break;
+    case 'swform':{if(d.v==='IPO')openForm('ipo',false);else if(d.v==='Pre-IPO')openForm('preipo',false);
+      else{openForm('trade',false);V['Asset Type']=d.v;$$('[data-lg="pick"]').forEach(b=>{if(b.dataset.k==='Asset Type')b.setAttribute('aria-pressed',b.dataset.v===d.v)});saveDraft()}break}
     case 'again':openForm(d.id,true);break;
     case 'repeat':openForm(cur.id,true);break;
     case 'discard':LS.set(dKey(cur.id),'');openForm(cur.id,false);break;
@@ -7002,7 +7016,8 @@ document.addEventListener('click',e=>{
     case 'calc':cur=null;show(calcScreen());calcUpdate();break;
     case 'submit':submit();break;
     case 'dq':{V[d.k]=dayISO(+d.n);const el=$$('input[type=date]').find(i=>i.dataset.k===d.k);if(el)el.value=V[d.k];setErr(d.k,'');saveDraft();break}
-    case 'pick':{if(d.k==='Received device type'&&cur&&cur.pay){recvPick(t,d);break}if(d.k==='Payment Type'&&cur&&cur.pay){payPick(t,d);break}const f=fOf(d.k),v=d.v;
+    case 'pick':{if(d.k==='Asset Type'&&cur&&cur.id==='trade'&&(d.v==='IPO'||d.v==='Pre-IPO')){openForm(d.v==='IPO'?'ipo':'preipo',false);break}
+      if(d.k==='Received device type'&&cur&&cur.pay){recvPick(t,d);break}if(d.k==='Payment Type'&&cur&&cur.pay){payPick(t,d);break}const f=fOf(d.k),v=d.v;
       if(f.t==='multi'){let arr=V[d.k]=Array.isArray(V[d.k])?V[d.k]:[];const i=arr.indexOf(v);
         if(i>=0)arr.splice(i,1);else{arr=V[d.k]=(f.ex||[]).includes(v)?[v]:arr.filter(z=>!(f.ex||[]).includes(z));arr.push(v)}
         $$('[data-lg="pick"]',t.parentNode).forEach(b=>b.setAttribute('aria-pressed',arr.includes(b.dataset.v)))}
@@ -7160,6 +7175,7 @@ document.addEventListener('click',e=>{const t=e.target.closest&&e.target.closest
 /* ---------- Entry point + boot ---------- */
 const fab=document.createElement('button');fab.type='button';fab.className='lg-fab';fab.dataset.lg='menu';fab.title='Log an entry (N)';
 fab.innerHTML=ICO.plus+'<span class="lg-bd" hidden></span>';document.body.appendChild(fab);badge();
+fab.addEventListener('click',e=>{if(location.hash.slice(1)==='trading'){e.stopPropagation();openForm('trade',false)}});
 (()=>{const tl=$('#tools');if(tl&&tl.parentNode){const p=document.createElement('button');p.type='button';p.id='syncpill';p.className='chip-b';p.dataset.lg='pill';tl.parentNode.insertBefore(p,tl);}updatePill()})();
 window.addEventListener('online',()=>{updatePill();flush(true).then(updatePill)});window.addEventListener('offline',updatePill);
 setTimeout(showBackupBanner,2500);
