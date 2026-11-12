@@ -351,7 +351,27 @@ function readTab(ss, spec, tz) {
   if (!sheet) return { sheet: spec.tab, headers: [], rows: [], missing: true };
   const lastRow = sheet.getLastRow(), lastCol = sheet.getLastColumn();
   if (lastRow < 1 || lastCol < 1) return { sheet: spec.tab, headers: [], rows: [] };
-  const values = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  // Speed: a formula tab (like PCs) can reach thousands of empty-looking rows. Find the last row that really has data by reading only the key
+  // columns, then read the full width only that far. Same rows come out as before; if anything looks odd it falls back to reading everything.
+  let readRows = lastRow;
+  if (lastRow > 1 && spec.keys.length) {
+    try {
+      const head0 = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h).replace(/ /g, ' ').trim());
+      const keyCols = spec.keys.map(k => head0.lastIndexOf(k)).filter(i => i >= 0);   // last match wins, like the row object built below
+      if (keyCols.length) {
+        let lastReal = 1;   // sheet row number of the last row with data in any key column (1 = none)
+        keyCols.forEach(ci => {
+          const col = sheet.getRange(2, ci + 1, lastRow - 1, 1).getValues();
+          for (let r = col.length - 1; r >= 0 && r + 2 > lastReal; r--) {
+            const c = cleanCell(col[r][0], tz);
+            if (c !== null && c !== undefined) { lastReal = r + 2; break; }
+          }
+        });
+        readRows = lastReal;
+      }
+    } catch (err) { readRows = lastRow; }
+  }
+  const values = sheet.getRange(1, 1, readRows, lastCol).getValues();
   const headers = values[0].map(h => String(h).replace(/ /g, ' ').trim());
   const rows = [];
   for (let r = 1; r < values.length; r++) {
@@ -374,6 +394,87 @@ function readAll() {
   const tabs = {};
   Object.keys(READ_TABS).forEach(key => { tabs[key] = readTab(ss, READ_TABS[key], tz); });
   return tabs;
+}
+
+/* ---------- READ CACHE (speed only) ----------
+   Reading every tab used to run from scratch on every request. The finished result is now kept for a short time in the script's own private cache
+   (CacheService: nothing outside this script can read it). Every request that can change the sheet clears it before it lets go of the lock, so the website
+   never shows its own edits late. Edits made by hand in the sheet, or by Google Forms, can take up to READ_CACHE_TTL_S seconds to appear; the website's
+   Refresh button asks for a fresh read and skips the cache. A guest link is filtered AFTER the cache, so it can never see more than before.
+   If the cache ever fails, reads simply go to the sheet exactly as they did before. */
+const READ_CACHE_TTL_S = 60;            // how long a cached read may be served
+const READ_CACHE_GEN_KEY = 'mm.rd.gen'; // the "generation": changing it makes every older cached read unusable at once
+const READ_CACHE_GEN_TTL_S = 21600;
+const READ_CACHE_CHUNK = 30000;         // characters per cache entry (an entry must stay under 100 KB)
+const READ_CACHE_MAX_CHUNKS = 60;       // bigger than this is not cached at all
+
+// Called after anything that may change the sheet. Never throws.
+function readCacheBump_() {
+  try {
+    let id;
+    try { id = Utilities.getUuid(); } catch (err) { id = String(Date.now()) + String(Math.random()).slice(2); }
+    CacheService.getScriptCache().put(READ_CACHE_GEN_KEY, id, READ_CACHE_GEN_TTL_S);
+  } catch (err) { /* only a speed-up: if it fails, reads just go to the sheet */ }
+}
+
+function readCacheLoad_(cache, gen) {
+  const base = 'mm.rd.' + gen + '.';
+  const n = parseInt(cache.get(base + 'n'), 10);
+  if (!(n >= 1 && n <= READ_CACHE_MAX_CHUNKS)) return null;
+  const keys = [];
+  for (let i = 0; i < n; i++) keys.push(base + i);
+  const parts = [];
+  if (typeof cache.getAll === 'function') { const got = cache.getAll(keys); keys.forEach(k => parts.push(got[k])); }
+  else keys.forEach(k => parts.push(cache.get(k)));
+  if (parts.some(part => typeof part !== 'string')) return null;
+  try { return JSON.parse(parts.join('')); } catch (err) { return null; }
+}
+
+function readCacheStore_(cache, gen, obj) {
+  try {
+    // Plain-ASCII JSON (every non-ASCII character written as \uXXXX): the text is then cut into entries by length with no risk of splitting an emoji
+    // or accented letter in half, and every entry is the same size in bytes as in characters (the 100 KB limit is in bytes). JSON.parse puts it all back.
+    const text = JSON.stringify(obj).replace(/[\u007f-\uffff]/g, c => '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4));
+    const n = Math.ceil(text.length / READ_CACHE_CHUNK);
+    if (n < 1 || n > READ_CACHE_MAX_CHUNKS) return;
+    const base = 'mm.rd.' + gen + '.';
+    for (let i = 0; i < n; i++) cache.put(base + i, text.slice(i * READ_CACHE_CHUNK, (i + 1) * READ_CACHE_CHUNK), READ_CACHE_TTL_S);
+    cache.put(base + 'n', String(n), READ_CACHE_TTL_S);   // the count goes in LAST, so a half-stored read is never used
+  } catch (err) { /* skip caching */ }
+}
+
+// Same result as readAll(). A cache hit needs no lock. A miss takes the script lock (like every write does), so the snapshot is never taken halfway through a write.
+// The caller must NOT already hold the script lock.
+function readAllCached_(opts) {
+  const fresh = !!(opts && opts.fresh);
+  let cache;
+  try { cache = CacheService.getScriptCache(); } catch (err) { return readAll(); }
+  if (!fresh) {
+    try {
+      const gen = cache.get(READ_CACHE_GEN_KEY);
+      if (gen) { const hit = readCacheLoad_(cache, gen); if (hit) return hit; }
+    } catch (err) { /* fall through to a normal read */ }
+  }
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    if (!fresh) {   // someone else may have filled the cache while this request waited for the lock
+      try {
+        const gen2 = cache.get(READ_CACHE_GEN_KEY);
+        if (gen2) { const hit2 = readCacheLoad_(cache, gen2); if (hit2) return hit2; }
+      } catch (err) { /* read the sheet */ }
+    }
+    const data = readAll();
+    try {
+      if (fresh) readCacheBump_();   // a fresh read replaces the cached copy for everybody
+      let gen3 = cache.get(READ_CACHE_GEN_KEY);
+      if (!gen3) { readCacheBump_(); gen3 = cache.get(READ_CACHE_GEN_KEY); }
+      if (gen3) readCacheStore_(cache, gen3, data);
+    } catch (err) { /* skip caching */ }
+    return data;
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // Reports what it read and anything the website could not use. Shows a few example cells, never the whole sheet.
@@ -513,7 +614,7 @@ function readReply_(body, guest) {
   try {
     if (guest) {
       if (body.action !== 'read') return { ok: false, error: 'view-only' };   // belt and braces: settings and check are never shown to guests
-      const gtabs = filterForGuest_(readAll(), guest.preset);
+      const gtabs = filterForGuest_(readAllCached_(), guest.preset);   // a guest never gets to skip the cache
       const greply = { ok: true, version: 3, at: new Date().toISOString(), tabs: gtabs, guest: { preset: guest.preset, exp: guest.exp } };
       if (body.flat === '1' || body.flat === 1 || body.flat === true) greply.data = flatten(gtabs);
       return greply;
@@ -522,7 +623,7 @@ function readReply_(body, guest) {
       return { ok: true, version: 3, secretSet: !!SECRET, settings: readSettings_(SpreadsheetApp.getActiveSpreadsheet()) };
     }
     if (body.action === 'check') return { ok: true, version: 3, at: new Date().toISOString(), tabs: checkAll() };
-    const tabs = readAll();
+    const tabs = readAllCached_({ fresh: body.fresh === true || body.fresh === 1 || body.fresh === '1' });   // the owner's Refresh button sends fresh
     const reply = { ok: true, version: 3, at: new Date().toISOString(), tabs: tabs };
     if (body.flat === '1' || body.flat === 1 || body.flat === true) reply.data = flatten(tabs); // action "read" with flat -> { status: "success", data: [...] }
     return reply;
@@ -960,6 +1061,7 @@ function runRowIdFill(label) {
     console.log(label + ' filled ' + total + ' Row IDs: ' + JSON.stringify(counts));
     return { ok: true, total: total, counts: counts };
   } finally {
+    readCacheBump_();   // new Row IDs may have been written
     lock.releaseLock();
   }
 }
@@ -971,14 +1073,15 @@ function fillMissingIdsOnSubmit(e) { return runRowIdFill('fillMissingIdsOnSubmit
 
 function doPost(e) {
   const lock = LockService.getScriptLock();
+  let held = false;    // true once this request holds the script lock
+  let wrote = false;   // true once this request may have changed the sheet: the read cache is then cleared before the lock is let go
   try {
-    lock.waitLock(20000);
     let body;
     try { body = JSON.parse((e && e.postData && e.postData.contents) || '{}'); } catch (parseErr) { return json({ ok: false, error: 'bad json' }); }
     if (!body || typeof body !== 'object') return json({ ok: false, error: 'bad json' });
 
     // Signing in is the only request that needs no token: it carries a Google sign-in, which login_ checks with Google.
-    if (body.action === 'login') return json(login_(body.credential));
+    if (body.action === 'login') { lock.waitLock(20000); held = true; return json(login_(body.credential)); }
 
     // Everything else needs a live session token or a live guest key. An empty or missing token is refused (an unset SECRET never means "open").
     if (!authOk_(body.secret)) {
@@ -990,8 +1093,14 @@ function doPost(e) {
       return json({ ok: false, error: 'view-only' });
     }
 
-    if (body.action === 'logout') { endSession_(body.secret); return json({ ok: true }); }
-    if (body.action === 'read' || body.action === 'check' || body.action === 'settings_get') return json(readReply_(body, null));
+    if (body.action === 'logout') { lock.waitLock(20000); held = true; endSession_(body.secret); return json({ ok: true }); }
+    // A plain read does NOT take the lock here: it is answered from a short-lived cache, and only a cache miss takes the lock (inside readAllCached_).
+    if (body.action === 'read') return json(readReply_(body, null));
+
+    // Everything below behaves exactly as before: the script lock is taken first, then the request runs.
+    lock.waitLock(20000); held = true;
+    if (body.action === 'check' || body.action === 'settings_get') return json(readReply_(body, null));
+    wrote = true;   // from here on the request may change the sheet, so the read cache is cleared in `finally` before the lock is released
 
     // Guest links: owner only (a guest key never gets past the block above).
     if (body.action === 'guest_create') return json(createGuest_(body.minutes, body.preset, body.label));
@@ -1103,6 +1212,9 @@ function doPost(e) {
   } catch (err) {
     return json({ ok: false, error: String(err) });
   } finally {
-    lock.releaseLock();
+    if (held) {
+      if (wrote) readCacheBump_();
+      lock.releaseLock();
+    }
   }
 }

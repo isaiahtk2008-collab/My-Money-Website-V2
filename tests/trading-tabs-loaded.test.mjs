@@ -24,7 +24,7 @@ test('loadViaScript keeps Trades and PreIPO (header-only tabs too) and still ski
     PreIPO: { sheet: 'Pre-IPO', headers: ['Timestamp', 'Row ID'], rows: [] },
     SoldAccess: { sheet: 'Sold Access - Form', headers: [], rows: [], missing: true }
   };
-  const fn = new Function('LS', 'fetch', 'mmAuthFail', m[0] + '\n' + loader[0] + '\nreturn loadViaScript;')(
+  const fn = new Function('LS', 'fetch', 'mmAuthFail', 'let _mmFresh=false; const mmRcSave=()=>{};\n' + m[0] + '\n' + loader[0] + '\nreturn loadViaScript;')(
     { get: () => '' },
     async () => ({ ok: true, json: async () => ({ ok: true, tabs: tabsReply }) }),
     () => {}

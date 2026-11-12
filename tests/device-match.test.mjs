@@ -31,6 +31,7 @@ const ctx = vm.createContext({
   fetch: async () => ({ ok: true, json: async () => payload })
 });
 vm.runInContext([
+  'let _mmFresh=false; const mmRcSave=()=>{};',   // the loader now also remembers its last good read; not what this file tests
   constLine('TABS'),
   constLine('EXTRA_TABS'),
   asyncFn('loadViaScript'),
