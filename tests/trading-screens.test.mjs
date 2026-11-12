@@ -17,7 +17,7 @@ function fnBlock(name) { const s = html.indexOf('function ' + name + '('); if (s
 
 const consts = ['sod', 'DAY', 'TODAY', 'diffD', 'pd', 'num', 'sum', 'esc', 'pct', 'MO', 'fd', 'fdy', 'TRADES_HEADERS', 'PREIPO_HEADERS'].map(constLine);
 const funcs = ['trStr', 'trBlankRow', 'trAsset', 'trDir', 'trStatus', 'tradingModel', 'ipoStage', 'ipoNext', 'preIpoModel',
-  'trMoney', 'trPnlSpan', 'trPlural', 'trPreTab', 'trRowStyle', 'ipoStageChip', 'ipoNextText', 'tradingScreenHtml', 'preIpoCardHtml'].map(fnBlock);
+  'trMoney', 'trPnlSpan', 'trPlural', 'trScriptDiag', 'trPreTab', 'trRowStyle', 'ipoStageChip', 'ipoNextText', 'tradingScreenHtml', 'preIpoCardHtml'].map(fnBlock);
 const stubs = `function card(t,b,r){return '[CARD '+t+(r?'|'+r:'')+']'+b}
 function kpi(o){return '[KPI '+o.label+'|'+o.val+'|'+(o.sub||'')+(o.spark?'|spark'+o.spark.length:'')+']'}`;
 const ctx = vm.createContext({ Intl, Math, Date, Set, Map, Array, Object, JSON, Number, String, RegExp, console });
