@@ -87,7 +87,7 @@ with sync_playwright() as p:
 
     # ---- levels, classes, badges ----
     open_menu(page)
-    check('menu still lists all ten forms', page.locator('.drawer.lg .li[data-lg=open]').count() == 10)
+    check('menu still lists all eleven forms (Trade sits under Investment)', page.locator('.drawer.lg .li[data-lg=open]').count() == 11)
     loan = row(page, 'loan'); dep = row(page, 'dep')
     check('Loan out is overdue (Sam is past the return date)', 'ss-overdue' in (loan.get_attribute('class') or ''), loan.get_attribute('class'))
     check('Deposit taken is overdue (Riley is past pickup)', 'ss-overdue' in (dep.get_attribute('class') or ''), dep.get_attribute('class'))
@@ -110,7 +110,7 @@ with sync_playwright() as p:
     # ---- Escape closes only the list ----
     loan.locator('.ic').click()
     page.keyboard.press('Escape')
-    check('Escape closes the list but keeps the menu open', page.locator('.ss-pop').count() == 0 and page.locator('.drawer.lg .li[data-lg=open]').count() == 10)
+    check('Escape closes the list but keeps the menu open', page.locator('.ss-pop').count() == 0 and page.locator('.drawer.lg .li[data-lg=open]').count() == 11)
 
     # ---- direct open ----
     loan.locator('.ic').click()
@@ -208,7 +208,7 @@ with sync_playwright() as p:
     page.evaluate("closeOverlay()")
     page.evaluate("store.set(Object.assign({}, store.raw, {Owed:{sheet:'Owed',headers:[],rows:[null,{Person:'X'},{Type:'Loan',Person:'Y','Total Amount':'abc','Due Date':'garbage'}]}}))")
     open_menu(page)
-    check('garbage in the Owed tab does not break the menu', page.locator('.drawer.lg .li[data-lg=open]').count() == 10 and not errors, str(errors))
+    check('garbage in the Owed tab does not break the menu', page.locator('.drawer.lg .li[data-lg=open]').count() == 11 and not errors, str(errors))
     check('no request was ever sent to the sheet during all of this', posts == [], str(posts))
     check('no page errors', not errors, str(errors))
     b.close()

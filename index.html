@@ -6710,6 +6710,13 @@ function show(html){const d=$('#overlay .drawer.lg');
   else openOverlay(`<div class="drawer lg" role="dialog" aria-modal="true" aria-label="Log an entry">${html}</div>`)}
 const qn=()=>J('lg.q',[]).length;
 
+/* Which forms each menu section lists. Trade (stock, crypto, option, futures) sits in the Money section right under Investment.
+   FORMS itself is not reordered, so form colours, drafts and saved data are untouched. IPO bid and Pre-IPO holding stay reachable
+   from the Asset Type chips inside the Trade form. */
+function menuForms(g){
+  const l=FORMS.filter(f=>f.g===g&&!(g==='Money'&&f.id==='trade'));
+  if(g==='Money'){const t=BY.trade,i=l.findIndex(f=>f.id==='inv');if(t)l.splice(i<0?l.length:i+1,0,t)}
+  return l}
 function menuScreen(){
   const url=LS.get('lgUrl'),q=qn(),SS=ssSummaries();
   const su=syncUrgency(J('lg.q',[]));
@@ -6717,7 +6724,7 @@ function menuScreen(){
     :`<button class="${su.urgent?'chip-b glow-urgent':'chip-b'}" data-lg="settings"><i class="dot" style="background:var(--${su.urgent?'bad':'warn'})"></i>Not connected: saving on this device${q?' ('+q+')':''}</button>`;
   /* order: Money (expense + investment), Buying, Selling, then the Tools section (margin calculator) at the bottom.
      Dot colours follow each form's position in FORMS so they stay the same as before the reorder. */
-  const groups=['Money','Buying','Selling'].map(g=>`<h4 class="lg-gh">${g}</h4><div class="list">${FORMS.filter(f=>f.g===g).map(f=>{const n=FORMS.indexOf(f)+1;const d=J('lg.d.'+f.id,null),deco=ssRowDecor(f.id,SS),dr=draftState(d),drAttr=(dr&&!deco.cls)?` data-dr="${dr}"`:'',drBadge=(dr&&!deco.cls)?'<i class="ss-b ss-b-draft" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1L19 8l-3-3L5 16z"/></svg></i>':'';
+  const groups=['Money','Buying','Selling'].map(g=>`<h4 class="lg-gh">${g}</h4><div class="list">${menuForms(g).map(f=>{const n=FORMS.indexOf(f)+1;const d=J('lg.d.'+f.id,null),deco=ssRowDecor(f.id,SS),dr=draftState(d),drAttr=(dr&&!deco.cls)?` data-dr="${dr}"`:'',drBadge=(dr&&!deco.cls)?'<i class="ss-b ss-b-draft" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1L19 8l-3-3L5 16z"/></svg></i>':'';
     return `<button class="li${deco.cls}" data-lg="open" data-id="${f.id}"><span class="ic"${deco.iconAttrs}${drAttr}>${FORM_ICO[f.id]||'<i class="dot" style="background:var(--c'+n+')"></i>'}${deco.badge}${drBadge}</span><span class="tx"><b>${E(f.t)}</b><span>${E(f.s)}</span></span>${dr?`<span class="pill draft${dr==='stale'?' glow-draft':''}">${dr==='stale'?'Draft · waiting':'Draft'}</span>`:''}${chev()}</button>`}).join('')}</div>`).join('');
   return `<div class="lg-top"><div><h2>Log an entry</h2><p>Goes straight to your sheet</p></div><div class="lg-r"><button class="ibtn" data-lg="settings" aria-label="Sheet connection and queue">${ICO.cfg}</button>${xbtn()}</div></div>${status}${groups}<h4 class="lg-gh">Tools</h4><div class="list"><button class="li" data-lg="calc"><span class="tx"><b>Margin calculator</b><span>Work out a listing price from cost and target profit</span></span>${chev()}</button></div><div style="height:24px"></div>`;
 }
@@ -7175,7 +7182,6 @@ document.addEventListener('click',e=>{const t=e.target.closest&&e.target.closest
 /* ---------- Entry point + boot ---------- */
 const fab=document.createElement('button');fab.type='button';fab.className='lg-fab';fab.dataset.lg='menu';fab.title='Log an entry (N)';
 fab.innerHTML=ICO.plus+'<span class="lg-bd" hidden></span>';document.body.appendChild(fab);badge();
-fab.addEventListener('click',e=>{if(location.hash.slice(1)==='trading'){e.stopPropagation();openForm('trade',false)}});
 (()=>{const tl=$('#tools');if(tl&&tl.parentNode){const p=document.createElement('button');p.type='button';p.id='syncpill';p.className='chip-b';p.dataset.lg='pill';tl.parentNode.insertBefore(p,tl);}updatePill()})();
 window.addEventListener('online',()=>{updatePill();flush(true).then(updatePill)});window.addEventListener('offline',updatePill);
 setTimeout(showBackupBanner,2500);
