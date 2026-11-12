@@ -45,7 +45,7 @@ test('Trading screen: a missing Trades tab shows the setup note with the exact h
     assert.ok(h.includes('Timestamp\tRow ID\tDate Opened\tAsset Type\tSymbol'));
   }
   const h = screen({ Trades: { rows: [] } });
-  assert.ok(h.includes('No trades yet') && h.includes('data-lg="open" data-id="trade"'));
+  assert.ok(h.includes('No trades yet') && !h.includes('data-id="trade"') && h.includes('Tap +'));
 });
 
 test('Trading screen: KPIs, open positions and closed trades render for the selected currency; the equity curve feeds the Net P&L spark', () => {

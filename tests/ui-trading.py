@@ -56,7 +56,8 @@ def run(p, width=1100, height=800):
             return route.fulfill(status=200, content_type='application/json', body=json.dumps({'ok': True, 'service': 'my-money-entry', 'version': 3, 'read': True, 'edit': True}), headers={'access-control-allow-origin': '*'})
         if req.method == 'OPTIONS':
             return route.fulfill(status=204, headers={'access-control-allow-origin': '*', 'access-control-allow-headers': '*'})
-        posts.append(json.loads(req.post_data))
+        body = json.loads(req.post_data)
+        if body.get('action') != 'read': posts.append(body)   # background re-reads after a save are not writes
         return route.fulfill(status=200, content_type='application/json', body=json.dumps({'ok': True, 'row': 9, 'rowId': 'NEW1', 'unmatched': []}), headers={'access-control-allow-origin': '*'})
     page.route('**/*', lambda r: r.continue_() if r.request.url.startswith('file:') else r.abort())
     page.route(URL + '*', script)
@@ -83,7 +84,7 @@ with sync_playwright() as p:
 
     # ---- with data ----
     page.evaluate(f"store.set(Object.assign({{}}, store.raw, {raw_js()}))")
-    page.evaluate("go('trading')"); page.wait_for_selector('#view [data-lg=open][data-id=trade]')
+    page.evaluate("go('trading')"); page.wait_for_selector('[data-trading-cur=USD]')
     t = view_text(page)
     check('the nav has a Trading tab and it is the active screen', page.locator('#rail button.nav[data-v=trading]').count() == 1 and page.evaluate("S.view") == 'trading')
     check('the page title says Trading', 'Trading' in page.inner_text('#ttl'), page.inner_text('#ttl'))
@@ -122,8 +123,8 @@ with sync_playwright() as p:
             if len(posts) > n: return posts[-1]
             page.wait_for_timeout(100)
         return None
-    page.evaluate("go('trading')"); page.wait_for_selector('#view [data-lg=open][data-id=trade]')
-    page.locator('#view [data-lg=open][data-id=trade]').first.click()
+    page.evaluate("go('trading')"); page.wait_for_selector('[data-trading-cur=USD]')
+    page.locator('.lg-fab').click()
     labs = page.inner_text('#overlay')
     check('Add trade opens the Trade form with its fields', all(x in labs for x in ['Symbol', 'Quantity', 'Entry Price', 'Exit Price', 'Direction', 'Currency', 'Multiplier', 'Strike']), labs)
     check('Direction starts on Long, Status on Open, Currency on CAD', page.locator('#overlay [data-k=Direction][aria-pressed=true]').inner_text() == 'Long' and page.locator('#overlay [data-k=Status][aria-pressed=true]').inner_text() == 'Open' and page.locator('#overlay [data-k=Currency][aria-pressed=true]').inner_text() == 'CAD')
@@ -151,6 +152,25 @@ with sync_playwright() as p:
     req = wait_post(n)
     v = (req or {}).get('values', {})
     check('Add IPO bid sends ONE new row to the Pre-IPO tab with numbers and the defaults', req is not None and req.get('tab') == 'Pre-IPO' and len(posts) == n + 1 and v.get('Company') == 'Acme' and v.get('Shares Requested') == 2 and v.get('Price Low') == 70.5 and v.get('Price High') == 78 and v.get('Status') == 'Bid placed' and v.get('Currency') == 'USD', str(req))
+    page.locator('#overlay [data-act=close]').first.click()
+    # ---- the + button on the Trading page opens the Trade form; IPO and Pre-IPO chips swap to their own questions ----
+    page.evaluate("go('trading')"); page.wait_for_selector('[data-trading-cur=USD]')
+    check('Trading page: the in-page Add trade button is gone (the + button replaces it)', page.locator('#view [data-lg=open][data-id=trade]').count() == 0)
+    n = len(posts)
+    page.locator('.lg-fab').click()
+    check('the + button on Trading opens the Trade form directly, with IPO and Pre-IPO chips', 'Symbol' in page.inner_text('#overlay') and page.locator('#overlay [data-k="Asset Type"]', has_text='Pre-IPO').count() == 1 and page.locator('#overlay [data-k="Asset Type"]', has_text='IPO').count() >= 1)
+    page.locator('#overlay [data-k="Asset Type"][data-v="IPO"]').click()
+    labs = page.inner_text('#overlay')
+    check('picking IPO swaps to the IPO questions (bid, price range, lockup) with the type chips still on top', all(x in labs for x in ['Company', 'Shares Requested', 'Price Low', 'Price High', 'Bid Closes', 'Lockup Expiry']) and 'Symbol' not in labs and page.locator('#overlay [data-lg=swform][aria-pressed=true]').inner_text() == 'IPO', labs[:300])
+    page.locator('#overlay [data-lg=swform][data-v=Stock]').click()
+    check('the type chips switch back to the Trade form with Stock selected', 'Symbol' in page.inner_text('#overlay') and page.locator('#overlay [data-k="Asset Type"][aria-pressed=true]').inner_text() == 'Stock')
+    page.locator('#overlay [data-k="Asset Type"][data-v="Pre-IPO"]').click()
+    labs = page.inner_text('#overlay')
+    check('picking Pre-IPO shows the holding questions', all(x in labs for x in ['Company', 'Date Acquired', 'Shares Owned', 'Price Paid per Share', 'Latest Valuation per Share', 'Expected IPO Date']) and 'Shares Requested' not in labs, labs[:300])
+    page.fill('#overlay [data-k="Company"]', 'PrivCo'); page.fill('#overlay [data-k="Shares Allocated"]', '10'); page.fill('#overlay [data-k="Final Price"]', '12.5')
+    page.locator('#overlay [data-lg=submit]').click()
+    req = wait_post(n); v = (req or {}).get('values', {})
+    check('a Pre-IPO holding sends ONE row to the Pre-IPO tab: Status Allocated, tagged in Notes, no extra columns', req is not None and req.get('tab') == 'Pre-IPO' and len(posts) == n + 1 and v.get('Company') == 'PrivCo' and v.get('Status') == 'Allocated' and v.get('Shares Allocated') == 10 and v.get('Final Price') == 12.5 and str(v.get('Notes', '')).startswith('Pre-IPO holding') and 'Asset Type' not in v, str(v))
     page.locator('#overlay [data-act=close]').first.click()
     # ---- the edit pop-ups: close a trade, record an IPO allocation; refusals send nothing ----
     page.evaluate("go('trading')"); page.wait_for_selector('[data-trade-edit=T1]')
