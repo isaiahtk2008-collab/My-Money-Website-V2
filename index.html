@@ -2708,6 +2708,8 @@ async function loadViaScript(url,tabs){
   if(j&&j.error==='auth'){mmAuthFail();throw new Error('auth')}
   if(!j||!j.ok)throw new Error((j&&j.error)||'script');
   if(!j.tabs)throw new Error('old script');
+  /* Diagnostics only: remember which tab keys this script sent, so a screen can tell "script too old" from "tab missing". */
+  try{window.__mmScriptTabs=Object.keys(j.tabs);window.__mmScriptErr=''}catch(e){}
   const out={};
   for(const key of Object.keys(tabs)){const t=j.tabs[key];if(!t||t.missing||!Array.isArray(t.rows))throw new Error('tab '+tabs[key]);out[key]={sheet:t.sheet||tabs[key],headers:t.headers||[],rows:t.rows}}
   /* Optional entry tabs (newer script only). Kept when present and usable, silently skipped otherwise; no existing screen reads them. */
@@ -2716,7 +2718,7 @@ async function loadViaScript(url,tabs){
 function GoogleSheetSource(sheetId,tabs=TABS){
   return {name:'Google Sheet',kind:'google',sheetId,async load(){
     const sUrl=LS.get('lgUrl');
-    if(sUrl){try{return await loadViaScript(sUrl,tabs)}catch(e){if(!sheetId)throw e}}
+    if(sUrl){try{return await loadViaScript(sUrl,tabs)}catch(e){try{window.__mmScriptTabs=null;window.__mmScriptErr=String((e&&e.message)||e)}catch(_){}if(!sheetId)throw e}}
     if(!sheetId)throw new Error('no source');
     const out={};
     for(const [key,tab] of Object.entries(tabs)){
@@ -5221,7 +5223,23 @@ function trPnlSpan(n, cur) {
 
 function trPlural(n, word) { return `${n} ${word}${n === 1 ? '' : 's'}`; }
 
+/* Why is this tab not loaded? Reads only what loadViaScript noted. Returns '' when the normal "add the tab" note is the right message. */
+function trScriptDiag(tabName) {
+  let keys = null, err = '';
+  try { keys = window.__mmScriptTabs; err = window.__mmScriptErr || ''; } catch (e) { return ''; }
+  const key = tabName === 'Pre-IPO' ? 'PreIPO' : tabName;
+  if (Array.isArray(keys) && keys.indexOf(key) < 0) {
+    return `<div class="empty"><b>Your Apps Script needs updating</b>The sheet tab "${esc(tabName)}" can exist and still not show, because your deployed script is older and does not send it. Open Extensions &gt; Apps Script from your sheet, replace the code with the newest apps-script.gs from the project, then Deploy &gt; Manage deployments &gt; pencil &gt; Version: New version &gt; Deploy (the web app link stays the same). Then press Refresh.</div>`;
+  }
+  if (!Array.isArray(keys) && err) {
+    return `<div class="empty"><b>The script could not be reached</b>The site fell back to the public sheet feed, which cannot see "${esc(tabName)}" (${esc(err)}). Check the web app link and sign-in in the $ menu, then press Refresh.</div>`;
+  }
+  return '';
+}
+
 function trPreTab(title, headers, tabName) {
+  const diag = trScriptDiag(tabName);
+  if (diag) return card(title, diag);
   const pre = x => `<pre style="background:var(--surface2);padding:10px;overflow-x:auto;border:1px solid var(--line);border-radius:8px;font-size:12px;text-align:left">${esc(x)}</pre>`;
   return card(title, `<div class="empty"><b>One tab to add first</b>Add a tab named <b style="display:inline">${esc(tabName)}</b> to your Google Sheet. Paste this header row into cell A1 of that tab, then press Refresh.${pre(headers)}</div>`);
 }
