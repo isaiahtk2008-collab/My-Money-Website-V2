@@ -23,8 +23,8 @@ const block = html.slice(a, b);
 assert.ok(!/fetch|sheetCall|XMLHttpRequest|localStorage|sessionStorage|sendBeacon|document\.|window\.|LS\./.test(block), 'core has no network, storage or page access');
 
 const ctx = vm.createContext({ Date, Math, JSON, Object, Array, String, Number, parseInt, isNaN });
-vm.runInContext(block + '\nthis.api={EB_DEFAULTS,ebNormalize,ebItems,ebNext,ebPrune,ebSnooze,ebDaysBetween,ebDayKey,ebWhen,ebKey,ebPatch,ebSampleItems};', ctx);
-const { ebNormalize, ebItems: rawItems, ebNext, ebPrune, ebSnooze, ebDaysBetween, ebDayKey, ebWhen, ebKey, ebPatch, ebSampleItems } = ctx.api;
+vm.runInContext(block + '\nthis.api={ebAnnounce,EB_DEFAULTS,ebNormalize,ebItems,ebNext,ebPrune,ebSnooze,ebDaysBetween,ebDayKey,ebWhen,ebKey,ebPatch,ebSampleItems};', ctx);
+const { ebAnnounce, ebNormalize, ebItems: rawItems, ebNext, ebPrune, ebSnooze, ebDaysBetween, ebDayKey, ebWhen, ebKey, ebPatch, ebSampleItems } = ctx.api;
 
 const plain = x => JSON.parse(JSON.stringify(x));
 const ebItems = (...args) => plain(rawItems(...args));   // plain copies, so deepEqual is not confused by objects made in the vm context
@@ -49,7 +49,10 @@ test('settings: on by default, bad values fall back, numbers are clamped', () =>
   assert.equal(ebNormalize({ enabled: 'yes' }).enabled, true);
   assert.equal(ebNormalize({ size: 'huge' }).size, 'medium');
   assert.equal(ebNormalize({ size: 'large' }).size, 'large');
-  assert.equal(ebNormalize({ position: 'left' }).position, 'bottom', 'only bottom exists in this PR');
+  for (const p of ['top', 'bottom', 'left', 'right']) assert.equal(ebNormalize({ position: p }).position, p, p + ' is allowed');
+  assert.equal(ebNormalize({ position: 'middle' }).position, 'bottom', 'an unknown position falls back to bottom');
+  assert.equal(ebNormalize({ position: 'LEFT' }).position, 'bottom', 'positions are case sensitive, so odd values fall back');
+  assert.equal(ebNormalize({ position: ['left'] }).position, 'bottom');
   assert.equal(ebNormalize({ depDays: -5 }).depDays, 0);
   assert.equal(ebNormalize({ depDays: 9999 }).depDays, 60);
   assert.equal(ebNormalize({ loanDays: '7.9' }).loanDays, 7);
@@ -194,7 +197,9 @@ test('settings: one option changes at a time and the result is always cleaned', 
   assert.equal(ebPatch(null, 'speed', '2').speed, 3);
   assert.equal(ebPatch(null, 'speed', '31').speed, 30);
   assert.equal(ebPatch(null, 'pause', false).pause, false);
-  assert.equal(ebPatch(null, 'position', 'left').position, 'bottom', 'only Bottom exists until the positions PR');
+  assert.equal(ebPatch(null, 'position', 'left').position, 'left');
+  assert.equal(ebPatch({ position: 'right', size: 'small' }, 'position', 'top').size, 'small', 'changing the position keeps the size');
+  assert.equal(ebPatch(null, 'position', 'diagonal').position, 'bottom', 'a bad position falls back');
   // keeps the other settings, ignores unknown names, never throws
   const base = { enabled: true, size: 'small', depDays: 5, loanDays: 9, speed: 10, pause: false };
   const next = plain(ebPatch(base, 'depDays', 7));
@@ -232,4 +237,35 @@ test('settings UI: lives under In-App, saves only on this device, reset keeps sn
   const click = ui.slice(ui.indexOf("if(previewing()){endPreview()"), ui.indexOf("/* ----- Settings card"));
   assert.ok(click.indexOf('previewing()') < click.indexOf('saveSn('), 'a preview Snooze/Dismiss returns before anything is saved');
   assert.ok(/pointerenter/.test(ui) && /touchstart/.test(ui), 'pause on hover and tap still wired');
+});
+
+// ---- Part 2 PR 3: positions, sizes, accessibility ----
+test('screen-reader summary counts overdue and due-soon items and is empty when nothing is due', () => {
+  assert.equal(ebAnnounce([]), '');
+  assert.equal(ebAnnounce(null), '');
+  assert.equal(ebAnnounce('x'), '');
+  assert.equal(ebAnnounce([{ level: 'overdue' }]), '1 deposit or loan deadline: 1 overdue.');
+  assert.equal(ebAnnounce([{ level: 'pending' }]), '1 deposit or loan deadline: 1 due soon.');
+  assert.equal(ebAnnounce([{ level: 'overdue' }, { level: 'pending' }, { level: 'pending' }]), '3 deposit or loan deadlines: 1 overdue, 2 due soon.');
+  assert.equal(ebAnnounce([null, { level: 'overdue' }]), '1 deposit or loan deadline: 1 overdue.', 'a bad entry is skipped, never throws');
+  assert.equal(ebAnnounce([null, undefined]), '');
+});
+
+test('CSS has a layout for every position and size, slides toward the right edge, and honors reduced motion', () => {
+  const ui = html.slice(b, html.indexOf("setTimeout(()=>flush(true),2500);"));
+  for (const p of ['top', 'left', 'right']) assert.ok(ui.includes('.eb-' + p + '{') || ui.includes('.eb-' + p + ' '), p + ' has a layout');
+  assert.ok(/\.eb-top \.eb-card\.eb-out\{transform:translateY\(-8px\)/.test(ui), 'top slides up');
+  assert.ok(/\.eb-left \.eb-card\.eb-out\{transform:translateX\(-8px\)/.test(ui) && /\.eb-right \.eb-card\.eb-out\{transform:translateX\(8px\)/.test(ui), 'side cards slide sideways');
+  assert.ok(/\.eb-s-small\.eb-left/.test(ui) && /\.eb-s-large\.eb-left/.test(ui), 'side cards have sizes');
+  assert.ok(/@media \(prefers-reduced-motion:reduce\)\{[^}]*transition:none !important[^}]*\}[^}]*animation:none !important/.test(ui), 'reduced motion turns off fading and blinking');
+  assert.ok(/var\(--rail,76px\)/.test(ui), 'side and top cards clear the left rail');
+});
+
+test('accessibility wiring: silent card, polite hidden summary, Escape snoozes, top banner measures the header', () => {
+  const ui = html.slice(b, html.indexOf("setTimeout(()=>flush(true),2500);"));
+  assert.ok(/id="eb-live" aria-live="polite" aria-atomic="true"/.test(ui), 'hidden polite summary exists');
+  assert.ok(!/class="eb-card"[^>]*aria-live/.test(ui) && !/card\.setAttribute\('aria-live'/.test(ui), 'the rotating card is not itself a live region');
+  assert.ok(/e\.key==='Escape'/.test(ui) && /\[data-eb="snooze"\]/.test(ui), 'Escape snoozes');
+  assert.ok(/ebAnnounce\(items\)/.test(ui) && /ls!==liveSig/.test(ui) && /setTimeout\(\(\)=>\{const l=document\.getElementById\('eb-live'\)/.test(ui), 'announced only when the set of items changes, a moment after the region exists');
+  assert.ok(/--eb-top/.test(ui) && /getBoundingClientRect/.test(ui), 'top position is placed under the header');
 });

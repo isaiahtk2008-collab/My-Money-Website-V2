@@ -122,6 +122,46 @@ with sync_playwright() as p:
         check('phone: does not cover the Log entry button', not overlaps(fab.bounding_box(), bb), f'{fab.bounding_box()} {bb}')
     page.set_viewport_size({'width': 1100, 'height': 800})
 
+    # Part 2 PR 3: every position x every size x desktop / phone / short landscape phone
+    CHROME = """(()=>{
+      const vis=el=>{const r=el.getBoundingClientRect(),cs=getComputedStyle(el);return r.width>0&&r.height>0&&cs.visibility!=='hidden'&&cs.display!=='none'};
+      const box=(el,n)=>{const r=el.getBoundingClientRect();return{n,x:r.x,y:r.y,width:r.width,height:r.height}};
+      const out=[];
+      document.querySelectorAll('.lg-fab').forEach(e=>vis(e)&&out.push(box(e,'Log entry button')));
+      document.querySelectorAll('#rail button, nav.rail button').forEach(e=>vis(e)&&out.push(box(e,'nav button')));
+      document.querySelectorAll('.top button, .top a[href], .top input, .top select').forEach(e=>vis(e)&&!e.closest('#expiry-banner')&&out.push(box(e,'header control')));
+      return out})()"""
+    page.evaluate("window.scrollTo(0,0)")
+    for vp in [(1100, 800), (390, 800), (740, 360)]:
+        page.set_viewport_size({'width': vp[0], 'height': vp[1]}); page.wait_for_timeout(150)
+        for pos in ['bottom', 'top', 'left', 'right']:
+            for size in ['small', 'medium', 'large']:
+                page.evaluate("localStorage.setItem('mm.expiry', JSON.stringify({position:'%s',size:'%s',speed:30}))" % (pos, size))
+                page.evaluate('window.__mmExpiryCheck()'); page.wait_for_timeout(120)
+                tag = f'{pos}/{size} at {vp[0]}x{vp[1]}'
+                cls = page.locator('#expiry-banner').get_attribute('class') or ''
+                bb = page.locator('#expiry-banner .eb-card').bounding_box()
+                check(tag + ': uses its position and size classes', f'eb-{pos}' in cls.split() and f'eb-s-{size}' in cls.split(), cls)
+                check(tag + ': card is fully on screen', bb['x'] >= 0 and bb['y'] >= 0 and bb['x'] + bb['width'] <= vp[0] + 0.5 and bb['y'] + bb['height'] <= vp[1] + 0.5, str(bb))
+                bad = [c['n'] for c in page.evaluate(CHROME) if overlaps(c, bb)]
+                check(tag + ': does not cover the Log entry button, nav or header buttons', not bad, str(bad))
+                if pos in ('left', 'right'):
+                    check(tag + ': side card is slim', bb['width'] <= 290, str(bb))
+                check(tag + ': no sideways scrolling', page.evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'))
+    page.set_viewport_size({'width': 1100, 'height': 800})
+
+    # screen reader summary + keyboard
+    page.evaluate("localStorage.setItem('mm.expiry', JSON.stringify({position:'left',speed:3}))"); page.evaluate('window.__mmExpiryCheck()'); page.wait_for_timeout(450)
+    check('hidden summary is announced politely', page.locator('#expiry-banner #eb-live').get_attribute('aria-live') == 'polite' and '2 deposit or loan deadlines' in page.locator('#eb-live').text_content(), page.locator('#eb-live').text_content())
+    check('the rotating card itself is not a live region', page.locator('#expiry-banner .eb-card').get_attribute('aria-live') is None)
+    before = page.locator('#eb-live').text_content()
+    page.wait_for_timeout(3600)
+    check('rotating does not re-announce', page.locator('#eb-live').text_content() == before)
+    page.locator('[data-eb="snooze"]').focus(); page.keyboard.press('Escape'); page.wait_for_timeout(450)
+    check('Escape on the banner snoozes the shown entry', page.locator('#expiry-banner .eb-card').count() == 1 and '1 of' not in page.locator('#expiry-banner .eb-card').inner_text())
+    check('summary updates after a snooze', '1 deposit or loan deadline' in page.locator('#eb-live').text_content(), page.locator('#eb-live').text_content())
+    page.evaluate("localStorage.removeItem('mm.expiry.snooze')"); page.evaluate("localStorage.removeItem('mm.expiry')"); page.evaluate('window.__mmExpiryCheck()')
+
     # reduced motion = instant
     rctx = b.new_context(viewport={'width': 1100, 'height': 800}, reduced_motion='reduce')
     rp = rctx.new_page()

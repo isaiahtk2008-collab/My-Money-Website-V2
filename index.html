@@ -7590,7 +7590,7 @@ window.__mmNotifSettingsHtml=notifSettingsHtml;
 /* ===== EXPIRY BANNER CORE START ===== */
 /* Pure logic. No storage, network or page access, so tests can load this block on its own. */
 const EB_DEFAULTS={enabled:true,position:'bottom',size:'medium',depDays:3,loanDays:3,speed:6,pause:true};
-const EB_SIZES=['small','medium','large'], EB_POSITIONS=['bottom'];   // more positions are added in a later PR
+const EB_SIZES=['small','medium','large'], EB_POSITIONS=['bottom','top','left','right'];
 function ebInt(v,lo,hi,d){const n=parseInt(v,10);return isNaN(n)?d:Math.max(lo,Math.min(hi,n))}
 function ebFlag(v){return !(v===false||v==='false'||v===0||v==='0')}
 function ebNormalize(raw){
@@ -7681,11 +7681,22 @@ function ebSampleItems(){
     {key:'preview:dep',kind:'dep',name:'Sample customer',what:'Sample phone',amount:250,daysLeft:1,when:ebWhen(1),level:'pending'}
   ];
 }
+/* Screen-reader summary, spoken only when the set of due items changes (not on every rotation). Empty when nothing is due. */
+function ebAnnounce(items){
+  if(!Array.isArray(items)||!items.length)return'';
+  let over=0,soon=0;
+  for(let i=0;i<items.length;i++){if(!items[i])continue; if(items[i].level==='overdue')over++;else soon++}
+  const n=over+soon, parts=[];
+  if(!n)return'';
+  if(over)parts.push(over+' overdue');
+  if(soon)parts.push(soon+' due soon');
+  return n+' deposit or loan deadline'+(n===1?'':'s')+': '+parts.join(', ')+'.';
+}
 /* ===== EXPIRY BANNER CORE END ===== */
 
 (()=>{try{
 const K_CFG='mm.expiry', K_SN='mm.expiry.snooze';
-let idx=0, items=[], sig='', timer=null, hold=false, holdTimer=null, tries=0, previewUntil=0, previewTimer=null;
+let idx=0, items=[], sig='', liveSig='', timer=null, hold=false, holdTimer=null, tries=0, previewUntil=0, previewTimer=null;
 const esc2=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>typeof mny==='function'?mny(n):'$'+(Math.round(n*100)/100);
 function load(){try{return ebNormalize(JSON.parse(localStorage.getItem(K_CFG)))}catch(e){return ebNormalize(null)}}
@@ -7704,8 +7715,8 @@ function css(){
   if(document.getElementById('eb-css'))return;
   const s=document.createElement('style'); s.id='eb-css';
   s.textContent=
-'.eb{position:fixed;left:max(16px,env(safe-area-inset-left,0px));right:96px;bottom:calc(24px + env(safe-area-inset-bottom,0px));z-index:60;pointer-events:none;display:flex;justify-content:flex-start}'+
-'@media (max-width:720px){.eb{bottom:calc(88px + env(safe-area-inset-bottom,0px));right:84px}}'+
+'.eb{position:fixed;left:calc(var(--rail,76px) + 16px);right:96px;bottom:calc(24px + env(safe-area-inset-bottom,0px));z-index:60;pointer-events:none;display:flex;justify-content:flex-start}'+
+'@media (max-width:720px){.eb{left:max(16px,env(safe-area-inset-left,0px));bottom:calc(88px + env(safe-area-inset-bottom,0px));right:84px}}'+
 '.eb.eb-pv{z-index:90}'+   // a preview started from Settings must sit above the Settings panel (z-index 80) to be seen; it ends by itself after 20 seconds
 '@media print{.eb{display:none}}'+
 '.eb-card{pointer-events:auto;box-sizing:border-box;width:100%;max-width:420px;padding:10px 12px;border-radius:14px;border:1px solid var(--line,#2a303b);background:var(--surface,#14181f);color:var(--ink,var(--text,#e9ecf1));box-shadow:0 8px 30px rgba(0,0,0,.28);font-size:13px;line-height:1.35;opacity:1;transform:none;transition:opacity .28s ease,transform .28s ease}'+
@@ -7721,12 +7732,25 @@ function css(){
 '.eb-f{display:flex;align-items:center;gap:6px;margin-top:8px}'+
 '.eb-n{margin-right:auto;font-size:11px;color:var(--muted,inherit)}'+
 '.eb-b{font:inherit;font-size:12px;padding:4px 10px;border-radius:9px;border:1px solid var(--line,#2a303b);background:transparent;color:inherit;cursor:pointer}'+
-'.eb-s-small .eb-card{font-size:12px;padding:7px 10px}.eb-s-large .eb-card{font-size:15px;padding:14px 16px}';
+'.eb-s-small .eb-card{font-size:12px;padding:7px 10px;max-width:340px}.eb-s-large .eb-card{font-size:15px;padding:14px 16px;max-width:520px}'+
+/* Top (and the side cards): sit under the page header (its height is measured into --eb-top) so they never cover the header buttons. */
+'.eb-top{bottom:auto;top:max(calc(env(safe-area-inset-top,0px) + 8px),var(--eb-top,0px));left:calc(var(--rail,76px) + 16px);right:16px}'+
+/* Left / right: slim side card, centred in the free space under the header and above the bottom controls, clear of the left rail and the Log entry button. */
+'.eb-left,.eb-right{top:max(calc(env(safe-area-inset-top,0px) + 8px),var(--eb-top,0px));bottom:calc(92px + env(safe-area-inset-bottom,0px));width:auto;align-items:center}'+
+'.eb-left{left:calc(var(--rail,76px) + 12px);right:auto}'+
+'.eb-right{left:auto;right:max(12px,env(safe-area-inset-right,0px));justify-content:flex-end}'+
+'.eb-left .eb-card,.eb-right .eb-card{width:220px;max-width:calc(100vw - 24px);max-height:100%;overflow:auto}'+
+'.eb-s-small.eb-left .eb-card,.eb-s-small.eb-right .eb-card{width:180px}.eb-s-large.eb-left .eb-card,.eb-s-large.eb-right .eb-card{width:280px}'+
+'.eb-left .eb-f,.eb-right .eb-f{flex-wrap:wrap}.eb-left .eb-n,.eb-right .eb-n{flex:1 0 100%}'+
+'@media (max-width:720px){.eb-top{left:max(12px,env(safe-area-inset-left,0px));right:12px}.eb-left{left:max(12px,env(safe-area-inset-left,0px))}.eb-left,.eb-right{bottom:calc(156px + env(safe-area-inset-bottom,0px))}}'+
+/* The fade-out slides toward the edge the banner lives on. */
+'.eb-top .eb-card.eb-out{transform:translateY(-8px)}.eb-left .eb-card.eb-out{transform:translateX(-8px)}.eb-right .eb-card.eb-out{transform:translateX(8px)}'+
+'@media (prefers-reduced-motion:reduce){.eb-card,:root[data-ap3-anim] .eb-card{transition:none !important}.eb-overdue{animation:none !important}}';
   document.head.appendChild(s);
 }
 function pauseOn(){const c=load(); if(!c.pause)return; hold=true; clearTimeout(timer); timer=null}
 /* Removing the banner can swallow its mouse-leave / focus-out events, so the pause is cleared here too, or rotation would stay stuck for the next banner. */
-function gone(b){if(b)b.remove(); hold=false; clearTimeout(holdTimer); clearTimeout(timer); timer=null; sig=''}
+function gone(b){if(b)b.remove(); hold=false; clearTimeout(holdTimer); clearTimeout(timer); timer=null; sig=''; liveSig=''}
 function pauseOff(){hold=false; clearTimeout(holdTimer); schedule()}
 function bar(){
   let b=document.getElementById('expiry-banner');
@@ -7734,7 +7758,8 @@ function bar(){
     css();
     b=document.createElement('div'); b.id='expiry-banner';
     b.setAttribute('role','region'); b.setAttribute('aria-label','Deposit and loan deadlines');
-    b.innerHTML='<div class="eb-card"></div>';
+    b.innerHTML='<div class="eb-card"></div><div class="sr" id="eb-live" aria-live="polite" aria-atomic="true"></div>';   // the card is silent while it rotates; only the hidden summary is announced, and only when the set of due items changes
+    b.addEventListener('keydown',e=>{if(e.key==='Escape'){const s=b.querySelector('[data-eb="snooze"]'); if(s){e.stopPropagation(); s.click()}}});
     b.addEventListener('pointerenter',e=>{if(e.pointerType==='mouse')pauseOn()});
     b.addEventListener('pointerleave',e=>{if(e.pointerType==='mouse')pauseOff()});
     b.addEventListener('focusin',pauseOn);
@@ -7785,9 +7810,26 @@ function check(){
     const b=bar(); b.className='eb eb-'+c.position+' eb-s-'+c.size+(pv?' eb-pv':'');
     if(idx>=items.length)idx=0;
     if(s!==sig){sig=s; show(false)}
+    const ls=items.map(i=>i.key+'|'+i.level).join(';'), live=document.getElementById('eb-live');
+    if(ls!==liveSig){liveSig=ls; const msg=ebAnnounce(items); if(live)setTimeout(()=>{const l=document.getElementById('eb-live'); if(l)l.textContent=msg},200)}   // a little later, because screen readers often skip text that is set the moment a live region is created
+    place();
     schedule();
   }catch(e){}
 }
+/* Top, left and right: keep the banner just under the page header, so it never covers the header buttons. Bottom needs no measuring. */
+function place(){
+  try{
+    const b=document.getElementById('expiry-banner'); if(!b)return;
+    if(b.classList.contains('eb-bottom')){b.style.removeProperty('--eb-top'); return}
+    const h=document.querySelector('.top'), r=h?h.getBoundingClientRect():null;
+    const v=(r&&r.bottom>0?Math.round(r.bottom)+8:0)+'px';
+    if(b.style.getPropertyValue('--eb-top')!==v)b.style.setProperty('--eb-top',v);   // only when it changed, so scrolling causes no extra work
+  }catch(e){}
+}
+let placeRaf=0;
+function placeSoon(){if(placeRaf)return; placeRaf=requestAnimationFrame(()=>{placeRaf=0; place()})}
+window.addEventListener('scroll',placeSoon,{passive:true});
+window.addEventListener('resize',placeSoon);
 document.addEventListener('click',e=>{try{
   const t=e.target&&e.target.closest?e.target.closest('[data-eb]'):null; if(!t)return;
   const it=items[idx]; if(!it)return;
@@ -7805,7 +7847,7 @@ function settingsHtml(){
 <section class="m3-card" id="eb-card">
   <div class="m3-card-head"><span class="m3-icon" aria-hidden="true">event_upcoming</span><div><div class="m3-card-title">Expiry banner</div><div class="m3-card-sub">Warns you when a deposit pickup or a loan return is close or overdue. Shown inside the app while it is open. Stays on this device.</div></div></div>
   <div class="m3-row"><div><b>Expiry banner</b><small style="display:block">Show a banner for deposits and loans that are due soon</small></div><label><input type="checkbox" id="eb-on" ${c.enabled?'checked':''}> On</label></div>
-  <div class="lg-f"><label class="lg-l" for="eb-pos">Position</label><select class="lg-set" id="eb-pos"><option value="bottom"${sel(c.position,'bottom')}>Bottom</option><option value="top" disabled>Top (next update)</option><option value="left" disabled>Left (next update)</option><option value="right" disabled>Right (next update)</option></select></div>
+  <div class="lg-f"><label class="lg-l" for="eb-pos">Position</label><select class="lg-set" id="eb-pos"><option value="bottom"${sel(c.position,'bottom')}>Bottom</option><option value="top"${sel(c.position,'top')}>Top</option><option value="left"${sel(c.position,'left')}>Left</option><option value="right"${sel(c.position,'right')}>Right</option></select><small style="display:block;color:var(--muted)">Left and Right show a slim side card.</small></div>
   <div class="lg-f"><label class="lg-l" for="eb-size">Size</label><select class="lg-set" id="eb-size"><option value="small"${sel(c.size,'small')}>Small</option><option value="medium"${sel(c.size,'medium')}>Medium</option><option value="large"${sel(c.size,'large')}>Large</option></select></div>
   <div class="lg-f"><label class="lg-l" for="eb-dep">Deposits: show this many days before pickup (0 = only today and overdue)</label><input type="number" class="lg-set" id="eb-dep" min="0" max="60" step="1" inputmode="numeric" value="${c.depDays}"></div>
   <div class="lg-f"><label class="lg-l" for="eb-loan">Loans: show this many days before the return date (0 = only today and overdue)</label><input type="number" class="lg-set" id="eb-loan" min="0" max="60" step="1" inputmode="numeric" value="${c.loanDays}"></div>

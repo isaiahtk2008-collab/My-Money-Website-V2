@@ -43,7 +43,7 @@ with sync_playwright() as p:
     titles = page.locator('.m3-card-title').all_inner_texts()
     check('card sits right after In-App Reminders', titles.index('Expiry banner') == titles.index('In-App Reminders') + 1, titles)
     check('defaults are shown', page.is_checked('#eb-on') and page.input_value('#eb-size') == 'medium' and page.input_value('#eb-dep') == '3' and page.input_value('#eb-loan') == '3' and page.input_value('#eb-speed') == '6' and page.is_checked('#eb-pause'))
-    check('other positions are listed but not selectable yet', page.evaluate("[...document.querySelectorAll('#eb-pos option')].filter(o=>o.disabled).length") == 3)
+    check('all four positions can be chosen', page.evaluate("[...document.querySelectorAll('#eb-pos option')].map(o=>o.value+(o.disabled?'!':'')).join(',')") == 'bottom,top,left,right')
     check('nothing is saved until something is changed', page.evaluate(CFG) is None)
 
     # saving and cleaning
