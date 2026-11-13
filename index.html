@@ -7574,10 +7574,20 @@ function notifShowBanner(preview){
 }
 function notifHideBanner(){ const b=document.getElementById('notif-banner'); if(b) b.remove(); }
 
-function notifCheck(){ try{ if(notifDue(notifLoad(),new Date(),'',notifDismissedWeek())) notifShowBanner(false); else if(!notifLoad().enabled){ const b=document.getElementById('notif-banner'); if(b&&!b.dataset.preview) notifHideBanner(); } }catch(e){} }
+/* The expiry banner can show this reminder as one of its items. While it does, the old stand-alone card stays hidden, so you never see it twice.
+   If the banner is off (or its investment option is off) or fails to load, the old card works exactly as before. */
+function notifBannerHandles(){ try{ return typeof window.__mmExpiryHandlesInvest==='function' && window.__mmExpiryHandlesInvest()===true }catch(e){ return false } }
+function notifCheck(){ try{ if(notifBannerHandles()){ const b=document.getElementById('notif-banner'); if(b&&!b.dataset.preview) notifHideBanner(); return }
+  if(notifDue(notifLoad(),new Date(),'',notifDismissedWeek())) notifShowBanner(false); else if(!notifLoad().enabled){ const b=document.getElementById('notif-banner'); if(b&&!b.dataset.preview) notifHideBanner(); } }catch(e){} }
+/* Read-only helpers for the expiry banner. Dismissing from the banner uses the same once-per-week memory as the old card. */
+window.__mmNotifApi={
+  due:()=>{ try{ return notifDue(notifLoad(),new Date(),'',notifDismissedWeek())===true }catch(e){ return false } },
+  dismissWeek:()=>{ try{ localStorage.setItem('mm.notif.dismissed',notifWeekKey(new Date())) }catch(e){} },
+  check:()=>notifCheck()
+};
 
 document.addEventListener('change',e=>{ try{ const t=e.target; if(!t||!t.id) return; if(t.id!=='notif-on'&&t.id!=='notif-day'&&t.id!=='notif-time') return;
-  const c=notifLoad(); if(t.id==='notif-on') c.enabled=t.checked; if(t.id==='notif-day') c.day=Number(t.value); if(t.id==='notif-time') c.time=t.value; notifSave(c); try{ localStorage.removeItem('mm.notif.dismissed') }catch(e2){} notifCheck(); }catch(err){} });
+  const c=notifLoad(); if(t.id==='notif-on') c.enabled=t.checked; if(t.id==='notif-day') c.day=Number(t.value); if(t.id==='notif-time') c.time=t.value; notifSave(c); try{ localStorage.removeItem('mm.notif.dismissed') }catch(e2){} notifCheck(); try{ if(typeof window.__mmExpiryCheck==='function') window.__mmExpiryCheck() }catch(e3){} }catch(err){} });
 document.addEventListener('click',e=>{ try{ const t=e.target&&e.target.closest?e.target.closest('[data-notif]'):null; if(!t) return;
   if(t.dataset.notif==='test') notifShowBanner(true);
   if(t.dataset.notif==='dismiss'){ const b=document.getElementById('notif-banner'); if(!(b&&b.dataset.preview)){ try{ localStorage.setItem('mm.notif.dismissed',notifWeekKey(new Date())) }catch(e2){} } notifHideBanner(); } }catch(err){} });
@@ -7589,7 +7599,7 @@ window.__mmNotifSettingsHtml=notifSettingsHtml;
 /* ================= EXPIRY BANNER (in-app only; device-local; read-only: never writes to the sheet or calls the network) ================= */
 /* ===== EXPIRY BANNER CORE START ===== */
 /* Pure logic. No storage, network or page access, so tests can load this block on its own. */
-const EB_DEFAULTS={enabled:true,position:'bottom',size:'medium',depDays:3,loanDays:3,speed:6,pause:true};
+const EB_DEFAULTS={enabled:true,position:'bottom',size:'medium',depDays:3,loanDays:3,speed:6,pause:true,invest:true};
 const EB_SIZES=['small','medium','large'], EB_POSITIONS=['bottom','top','left','right'];
 function ebInt(v,lo,hi,d){const n=parseInt(v,10);return isNaN(n)?d:Math.max(lo,Math.min(hi,n))}
 function ebFlag(v){return !(v===false||v==='false'||v===0||v==='0')}
@@ -7602,7 +7612,8 @@ function ebNormalize(raw){
     depDays:ebInt(r.depDays,0,60,EB_DEFAULTS.depDays),
     loanDays:ebInt(r.loanDays,0,60,EB_DEFAULTS.loanDays),
     speed:ebInt(r.speed,3,30,EB_DEFAULTS.speed),
-    pause:ebFlag(r.pause)
+    pause:ebFlag(r.pause),
+    invest:ebFlag(r.invest)   // show the weekly investment contribution reminder inside the banner (old saved settings have no value, so it defaults to on)
   };
 }
 function ebValidDate(d){return d instanceof Date&&!isNaN(d.getTime())}
@@ -7648,6 +7659,26 @@ function ebItems(owed,cfg,today,snoozes){
   }catch(e){return[]}
   return out;
 }
+/* Weekly investment contribution reminder as a banner item. "due" comes from the existing weekly reminder logic (day, time, dismissed this week), so this stays pure.
+   It is added AFTER the deposit and loan items (they keep their order), uses the yellow "open" look, and is hidden when the banner is off, the option is off, it is not due, or it is snoozed. Never changes its input. */
+const EB_INVEST_KEY='inv:weekly';
+function ebInvestItem(){
+  return{key:EB_INVEST_KEY,kind:'inv',name:'',what:'Weekly contribution',amount:0,daysLeft:0,when:'this week',level:'pending'};
+}
+function ebWithInvest(items,cfg,due,today,snoozes){
+  const base=Array.isArray(items)?items.slice():[];
+  try{
+    if(!cfg||cfg.enabled===false||cfg.invest===false||due!==true)return base;
+    if(ebValidDate(today)){
+      const sn=(snoozes&&typeof snoozes==='object')?snoozes:{};
+      const until=Object.prototype.hasOwnProperty.call(sn,EB_INVEST_KEY)?sn[EB_INVEST_KEY]:null;
+      if(typeof until==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(until)&&until>ebDayKey(today))return base;   // a malformed snooze is ignored
+    }
+    for(let i=0;i<base.length;i++){if(base[i]&&base[i].kind==='inv')return base}
+    base.push(ebInvestItem());
+  }catch(e){}
+  return base;
+}
 /* Rotation: next index, wrapping. A bad index or count gives 0. */
 function ebNext(i,n){n=parseInt(n,10);i=parseInt(i,10);if(!(n>1))return 0;if(isNaN(i)||i<0)return 0;return(i+1)%n}
 /* Snoozes: {itemKey: 'YYYY-MM-DD'} hides that item until that day arrives. Old and malformed entries are dropped; at most 200 are kept. */
@@ -7681,16 +7712,22 @@ function ebSampleItems(){
     {key:'preview:dep',kind:'dep',name:'Sample customer',what:'Sample phone',amount:250,daysLeft:1,when:ebWhen(1),level:'pending'}
   ];
 }
+/* The preview also shows the investment reminder when that option is on. Kept separate so ebSampleItems stays exactly as it was. */
+function ebPreviewItems(cfg){
+  const s=ebSampleItems();
+  if(cfg&&cfg.invest!==false){const it=ebInvestItem(); it.key='preview:inv'; s.push(it)}
+  return s;
+}
 /* Screen-reader summary, spoken only when the set of due items changes (not on every rotation). Empty when nothing is due. */
 function ebAnnounce(items){
   if(!Array.isArray(items)||!items.length)return'';
-  let over=0,soon=0;
-  for(let i=0;i<items.length;i++){if(!items[i])continue; if(items[i].level==='overdue')over++;else soon++}
-  const n=over+soon, parts=[];
-  if(!n)return'';
+  let over=0,soon=0,inv=0;
+  for(let i=0;i<items.length;i++){if(!items[i])continue; if(items[i].kind==='inv'){inv++;continue} if(items[i].level==='overdue')over++;else soon++}
+  const n=over+soon, parts=[], invTxt='Weekly investment contribution reminder.';
+  if(!n)return inv?invTxt:'';
   if(over)parts.push(over+' overdue');
   if(soon)parts.push(soon+' due soon');
-  return n+' deposit or loan deadline'+(n===1?'':'s')+': '+parts.join(', ')+'.';
+  return n+' deposit or loan deadline'+(n===1?'':'s')+': '+parts.join(', ')+'.'+(inv?' Also: '+invTxt.toLowerCase():'');
 }
 /* ===== EXPIRY BANNER CORE END ===== */
 
@@ -7771,10 +7808,11 @@ function bar(){
 }
 function paint(card,it,n){
   card.className='eb-card eb-'+it.level;
-  const head=it.kind==='loan'?'Loan return':'Deposit pickup';
-  const bits=[it.what,(it.kind==='loan'?'owes ':'balance ')+money(it.amount),it.when].filter(Boolean);
+  const inv=it.kind==='inv';
+  const head=inv?'Investment reminder':(it.kind==='loan'?'Loan return':'Deposit pickup');
+  const bits=inv?['Time to make this week\'s investment contribution']:[it.what,(it.kind==='loan'?'owes ':'balance ')+money(it.amount),it.when].filter(Boolean);
   card.innerHTML=
-    '<div class="eb-t"><span class="eb-tag">'+(it.level==='overdue'?'Overdue':'Due soon')+'</span>'+esc2(head)+(it.name?' · '+esc2(it.name):'')+'</div>'+
+    '<div class="eb-t"><span class="eb-tag">'+(inv?'Reminder':(it.level==='overdue'?'Overdue':'Due soon'))+'</span>'+esc2(head)+(it.name?' · '+esc2(it.name):'')+'</div>'+
     '<div class="eb-d">'+esc2(bits.join(' · '))+'</div>'+
     '<div class="eb-f"><span class="eb-n">'+(n>1?(idx+1)+' of '+n:'')+'</span>'+
     '<button type="button" class="eb-b" data-eb="snooze">Snooze</button><button type="button" class="eb-b" data-eb="dismiss">Dismiss</button></div>';
@@ -7798,12 +7836,14 @@ function check(){
   try{
     const pv=previewing(), c0=load(), c=pv?Object.assign({},c0,{enabled:true}):c0, b0=document.getElementById('expiry-banner');
     if(!c.enabled){gone(b0); items=[]; return}
-    if(pv){items=ebSampleItems()}   // preview shows made-up items; real data and snoozes are not touched
+    if(pv){items=ebPreviewItems(c)}   // preview shows made-up items; real data and snoozes are not touched
     else{
       const owed=owedNow();
       if(!owed&&tries++<12)setTimeout(check,5000);   // the sheet data can arrive after start-up
-      const now=new Date();
-      items=ebItems(owed,c,now,ebPrune(loadSn(),ebDayKey(now)));
+      const now=new Date(), sn=ebPrune(loadSn(),ebDayKey(now));
+      items=ebItems(owed,c,now,sn);
+      const api=window.__mmNotifApi;
+      items=ebWithInvest(items,c,!!(api&&api.due()),now,sn);   // the weekly investment reminder rides along (after deposits and loans)
     }
     if(!items.length){gone(b0); return}
     const s=items.map(i=>i.key+'|'+i.level+'|'+i.daysLeft).join(';')+'|'+c.size+'|'+c.position;
@@ -7835,7 +7875,8 @@ document.addEventListener('click',e=>{try{
   const it=items[idx]; if(!it)return;
   if(previewing()){endPreview(); check(); return}   // closing a preview never saves a snooze
   const now=new Date();
-  saveSn(ebSnooze(loadSn(),it.key,now,t.dataset.eb==='dismiss'?3:1));   // Snooze = back tomorrow, Dismiss = back in 3 days
+  if(it.kind==='inv'&&t.dataset.eb==='dismiss'){const api=window.__mmNotifApi; if(api)api.dismissWeek()}   // Dismiss = gone until next week, same as the old card
+  else saveSn(ebSnooze(loadSn(),it.key,now,t.dataset.eb==='dismiss'?3:1));   // Snooze = back tomorrow, Dismiss = back in 3 days
   sig=''; check();
 }catch(err){}});
 
@@ -7853,6 +7894,7 @@ function settingsHtml(){
   <div class="lg-f"><label class="lg-l" for="eb-loan">Loans: show this many days before the return date (0 = only today and overdue)</label><input type="number" class="lg-set" id="eb-loan" min="0" max="60" step="1" inputmode="numeric" value="${c.loanDays}"></div>
   <div class="lg-f"><label class="lg-l" for="eb-speed">Rotation speed: <span id="eb-speed-v">${SPEED_TXT(c.speed)}</span> per item</label><input type="range" id="eb-speed" min="3" max="30" step="1" value="${c.speed}" style="width:100%"><small style="display:block;color:var(--muted)">Only matters when more than one item is due.</small></div>
   <div class="m3-row"><div><b>Pause on hover or tap</b><small style="display:block">Stops rotating while you point at or touch the banner</small></div><label><input type="checkbox" id="eb-pause" ${c.pause?'checked':''}> On</label></div>
+  <div class="m3-row"><div><b>Include weekly investment reminder</b><small style="display:block">Shows the weekly contribution reminder here instead of its own card. Turn on "Weekly contribution reminder" above to use it.</small></div><label><input type="checkbox" id="eb-inv" ${c.invest?'checked':''}> On</label></div>
   <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn sec" data-ebs="preview">Preview banner</button><button type="button" class="btn sec" data-ebs="reset">Reset to defaults</button></div>
 </section>
   `;
@@ -7862,9 +7904,9 @@ function syncControls(){
   set('eb-on',e=>{e.checked=c.enabled}); set('eb-pos',e=>{e.value=c.position}); set('eb-size',e=>{e.value=c.size});
   set('eb-dep',e=>{e.value=c.depDays}); set('eb-loan',e=>{e.value=c.loanDays});
   set('eb-speed',e=>{e.value=c.speed}); set('eb-speed-v',e=>{e.textContent=SPEED_TXT(c.speed)});
-  set('eb-pause',e=>{e.checked=c.pause});
+  set('eb-pause',e=>{e.checked=c.pause}); set('eb-inv',e=>{e.checked=c.invest});
 }
-const FIELD={'eb-on':'enabled','eb-pos':'position','eb-size':'size','eb-dep':'depDays','eb-loan':'loanDays','eb-speed':'speed','eb-pause':'pause'};
+const FIELD={'eb-on':'enabled','eb-pos':'position','eb-size':'size','eb-dep':'depDays','eb-loan':'loanDays','eb-speed':'speed','eb-pause':'pause','eb-inv':'invest'};
 document.addEventListener('input',e=>{try{
   const t=e.target; if(!t||t.id!=='eb-speed')return;
   const v=document.getElementById('eb-speed-v'); if(v)v.textContent=SPEED_TXT(ebPatch(null,'speed',t.value).speed);
@@ -7875,12 +7917,14 @@ document.addEventListener('change',e=>{try{
   localStorage.setItem(K_CFG,JSON.stringify(ebPatch(load(),FIELD[t.id],val)));
   syncControls();   // shows the cleaned-up value, e.g. 99 days becomes 60
   sig=''; check();
+  if(window.__mmNotifApi)window.__mmNotifApi.check();   // hands the reminder back to (or takes it from) the old card right away
 }catch(err){}});
 document.addEventListener('click',e=>{try{
   const t=e.target&&e.target.closest?e.target.closest('[data-ebs]'):null; if(!t)return;
   if(t.dataset.ebs==='reset'){
     try{localStorage.removeItem(K_CFG)}catch(e2){}   // snoozes are kept: they are not settings
     endPreview(); syncControls(); check();
+    if(window.__mmNotifApi)window.__mmNotifApi.check();
   }
   if(t.dataset.ebs==='preview'){
     previewUntil=Date.now()+20000; idx=0; sig=''; hold=false;
@@ -7891,6 +7935,8 @@ document.addEventListener('click',e=>{try{
 window.__mmExpirySettingsHtml=settingsHtml;
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)check(); else{clearTimeout(timer); timer=null}});
 window.__mmExpiryCheck=check;
+/* Tells the old weekly reminder card to stay hidden, because this banner is showing that reminder. */
+window.__mmExpiryHandlesInvest=()=>{const c=load(); return c.enabled&&c.invest&&!!window.__mmNotifApi};
 setTimeout(check,3500); setInterval(check,60000);
 }catch(err){console.error('Expiry banner failed to start (site unaffected):',err)}})();
 
