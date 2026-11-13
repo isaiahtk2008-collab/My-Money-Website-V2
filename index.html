@@ -1230,7 +1230,7 @@ button.li:hover{background:var(--surface2);border-radius:10px}
 .li .rt{font-weight:700;white-space:nowrap}
 .pos{color:var(--good)} .neg{color:var(--bad)}
 .pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:2px 9px;border-radius:999px;background:var(--surface2);color:var(--muted);white-space:nowrap}
-.pill.good{background:var(--good-soft);color:var(--good)} .pill.warn{background:var(--warn-soft);color:var(--warn)} .pill.bad{background:var(--bad-soft);color:var(--bad)} .pill.acc{background:var(--accent-soft);color:var(--accent)}
+.pill.good{background:var(--good-soft);color:var(--good)} .pill.warn{background:var(--warn-soft);color:var(--warn)} .pill.bad{background:var(--bad-soft);color:var(--bad)} .pill.acc{background:var(--accent-soft);color:var(--accent)} .pill.pend{background:var(--ss-yellow-soft);color:var(--ss-yellow)}
 .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
 .toolbar .grow{flex:1;min-width:180px}
 .tmeta{display:flex;justify-content:space-between;color:var(--muted);font-size:12.5px;margin:2px 2px 8px;gap:8px;flex-wrap:wrap}
@@ -2687,6 +2687,22 @@ function stockForDeposit(items){
   }catch(e){}
   return g;
 }
+/* Reselling tab helpers (display only). One place decides what status a device shows, so the table, the detail panel and the filter always agree.
+   Sold wins over everything; an open deposit on an unsold device is Pending; anything else unsold is In stock. */
+function itemStatus(i){
+  if(i&&i.sold)return{key:'sold',label:'Sold',cls:'good'};
+  if(i&&i.pending)return{key:'pending',label:'Pending',cls:'pend'};
+  return{key:'stock',label:'In stock',cls:'warn'};
+}
+function itemStatusPill(i){const s=itemStatus(i);return '<span class="pill '+s.cls+'">'+s.label+'</span>'}
+/* The Reselling "Every item" filter. 'Stock' means AVAILABLE stock (unsold and no open deposit); 'Pending' is unsold with an open deposit. */
+function statusFilterMatch(i,mode){
+  const k=itemStatus(i).key;
+  if(mode==='Sold')return k==='sold';
+  if(mode==='Stock')return k==='stock';
+  if(mode==='Pending')return k==='pending';
+  return true;
+}
 /* ===== PENDING DEPOSITS END ===== */
 
 function normalize(raw){
@@ -3268,8 +3284,8 @@ function openDetail(id){
     const same=store.D.items.filter(i=>i.id!==o.id&&i.name.toLowerCase()===o.name.toLowerCase()&&i.sold&&i.profit!=null).sort((a,b)=>b.sellDate-a.sellDate).slice(0,5);
     const pc=o.profit==null?'':(o.profit>=0?'pos':'neg');
     summary=`${o.name} (${o.kind}) bought ${fdy(o.buyDate)} for ${mny(o.buyPrice)}`+(o.sold?`, sold ${fdy(o.sellDate)} for ${mny(o.sellPrice)}, profit ${mny(o.profit)}`:`, still in stock`);
-    h=`<div class="dh"><div><span class="pill ${o.sold?'good':'warn'}">${o.sold?'Sold':'In stock'}</span>${tradeBadge(o)}<h2 style="margin-top:8px">${esc(o.name)}</h2><p class="hint" style="color:var(--muted)">${esc(o.kind)}${o.condition?' · '+esc(o.condition):''}</p></div><button class="ibtn" data-act="close" aria-label="Close" data-focus>${ICON.x}</button></div>
-      ${o.sold?`<div class="big ${pc}">${SM(o.profit)}<span style="font-size:14px;font-weight:600;color:var(--muted)"> profit${o.roi!=null?' · '+pct(o.roi)+' ROI':''}</span></div>`:`<div class="big">${M(o.cashSpent!=null?o.cashSpent:o.buyPrice)}<span style="font-size:14px;font-weight:600;color:var(--muted)"> ${o.tradeValue>0?'cash spent':'paid'} · ${o.age!=null?plural(o.age,'day')+' in stock':''}</span></div>`}
+    h=`<div class="dh"><div>${itemStatusPill(o)}${tradeBadge(o)}<h2 style="margin-top:8px">${esc(o.name)}</h2><p class="hint" style="color:var(--muted)">${esc(o.kind)}${o.condition?' · '+esc(o.condition):''}</p></div><button class="ibtn" data-act="close" aria-label="Close" data-focus>${ICON.x}</button></div>
+      ${o.sold?`<div class="big ${pc}">${SM(o.profit)}<span style="font-size:14px;font-weight:600;color:var(--muted)"> profit${o.roi!=null?' · '+pct(o.roi)+' ROI':''}</span></div>`:`<div class="big">${M(o.cashSpent!=null?o.cashSpent:o.buyPrice)}<span style="font-size:14px;font-weight:600;color:var(--muted)"> ${o.tradeValue>0?'cash spent':'paid'} · ${o.age!=null?plural(o.age,'day')+' in stock':''}</span></div>${o.pending&&o.pendingDep?`<p class="hint" style="color:var(--muted);margin-top:6px">Deposit held${o.pendingDep.name?' by '+esc(o.pendingDep.name):''}${o.pendingDep.balance!=null?' · '+M(o.pendingDep.balance)+' still owed':''}${o.pendingDep.pickup?' · pickup '+fd(o.pendingDep.pickup):''}. Not counted as available stock or as a sale.</p>`:''}`}
       <div class="steps"><div class="s"><b>Bought</b>${fdy(o.buyDate)}</div><div class="ln"><span>${o.sold&&o.days!=null?plural(o.days,'day'):(o.age!=null?plural(o.age,'day')+' and counting':'')}</span></div><div class="s"><b>${o.sold?'Sold':'Not sold yet'}</b>${o.sold?fdy(o.sellDate):'—'}</div></div>
       ${kv([['Paid',mny(o.buyPrice)],...(o.isTrade&&o.buyPrice!=null?[['Cash spent',mny(o.cashSpent!=null?o.cashSpent:o.buyPrice)],['Trade value received',mny(o.tradeValue||0)]]:[]),['Trade ID',o.tradeId],['Source',o.isTradeIn?o.source:null],['Bought from',o.seller],['Bought on',fdy(o.buyDate)],['Sale price',o.sold?mny(o.sellPrice):null],['Sold to',o.buyer],['Sold on',o.sold?fdy(o.sellDate):null],['Listing clicks',o.clicks],...Object.entries(o.specs).map(([k,v])=>[k,v]),['Notes',o.notes],['Sheet row',o.sheet+' · row '+o.row]])}
       ${same.length?`<h3 style="margin-bottom:6px">Other ${esc(o.name)} sales</h3><div class="list">${same.map(s=>`<button class="li" data-act="open" data-id="${s.id}"><span class="tx"><b>${fdy(s.sellDate)}</b><span>${plural(s.days??0,'day')} to sell${s.buyer?' · '+esc(s.buyer):''}</span></span><span class="rt ${s.profit>=0?'pos':'neg'}">${SM(s.profit)}</span></button>`).join('')}</div>`:''}
@@ -4663,10 +4679,10 @@ function vReselling(){
     cols:[{k:'k',h:'Model'},{k:'kind',h:'Type'},{k:'n',h:'Sold',num:true},{k:'avg',h:'Avg profit',num:true,cell:r=>SM(r.avg)},{k:'days',h:'Avg days',num:true,cell:r=>r.days==null?'—':Math.round(r.days)},{k:'tot',h:'Total profit',num:true,cell:r=>`<b>${SM(r.tot)}</b>`}]}))}
   ${card('Every item',tableShell('items',{placeholder:'Search name, buyer, seller, CPU, GPU, RAM, screen, storage, notes, Trade ID',sort:{k:'date',dir:-1},hidden:['cond','seller'],rows:()=>itemRows(),
     text:r=>[r.name,r.kind,r.buyer,r.seller,r.notes,r.condition,r.tradeId].join(' ')+' '+itemSearchText(r),metaRight:()=>'',
-    cols:[{k:'name',h:'Item',cell:r=>esc(r.name)+tradeBadge(r)},{k:'kind',h:'Type'},{k:'status',h:'Status',cell:r=>`<span class="pill ${r.sold?'good':'warn'}">${r.sold?'Sold':'In stock'}</span>`},{k:'cond',h:'Condition',val:r=>r.condition,cell:r=>esc(r.condition||'—')},
+    cols:[{k:'name',h:'Item',cell:r=>esc(r.name)+tradeBadge(r)},{k:'kind',h:'Type'},{k:'status',h:'Status',val:r=>itemStatus(r).label,cell:r=>itemStatusPill(r)},{k:'cond',h:'Condition',val:r=>r.condition,cell:r=>esc(r.condition||'—')},
       {k:'date',h:'Date',val:r=>+(r.sold?r.sellDate:r.buyDate)||0,cell:r=>fd(r.sold?r.sellDate:r.buyDate),csv:r=>dkey(r.sold?r.sellDate:r.buyDate)},{k:'buyPrice',h:'Cost',num:true,cell:r=>costCell(r)},{k:'sellPrice',h:'Sold for',num:true,cell:r=>r.sold?M(r.sellPrice):'—'},
       {k:'profit',h:'Profit',num:true,cell:r=>r.profit==null?'—':`<b class="${r.profit>=0?'pos':'neg'}">${SM(r.profit)}</b>`},{k:'roi',h:'ROI',num:true,cell:r=>pct(r.roi)},{k:'days',h:'Days',num:true,val:r=>r.sold?r.days:r.age,cell:r=>(r.sold?r.days:r.age)??'—'},{k:'buyer',h:'Buyer',cell:r=>esc(r.buyer||'—')},{k:'seller',h:'Bought from',cell:r=>esc(r.seller||'—')}],
-    sumKey:r=>r.profit,sumLabel:'profit'}).replace('<div data-tbl="items">',`<div class="activef" style="margin-bottom:8px;display:flex;gap:8px;flex-wrap:wrap">${seg('rstat',[['All','All'],['Sold','Sold'],['Stock','In stock']],stl)}${seg('rtrade',[['All','All deals'],['Trade','Trades only']],S.rtrade)}</div><div data-tbl="items">`))}`;
+    sumKey:r=>r.profit,sumLabel:'profit'}).replace('<div data-tbl="items">',`<div class="activef" style="margin-bottom:8px;display:flex;gap:8px;flex-wrap:wrap">${seg('rstat',[['All','All'],['Sold','Sold'],['Stock','In stock'],['Pending','Pending']],stl)}${seg('rtrade',[['All','All deals'],['Trade','Trades only']],S.rtrade)}</div><div data-tbl="items">`))}`;
   return {html,mount(){
     const noSales=!rs.cum.length;   /* no sales: draw a flat $0 line across the range instead of an empty box */
     const lab=noSales?[fd(R.start),fd(R.end)]:rs.cum.map(p=>fd(p.x));
@@ -4683,7 +4699,7 @@ function flipList(a){return `<div class="list">${a.map(i=>`<button class="li" da
 function itemRows(){
   const D=store.D,R=RG();let a=D.items.filter(i=>S.kind==='All'||i.kind===S.kind);
   if(S.rstat==='Sold')a=a.filter(i=>i.sold&&inR(i.sellDate,R.start,R.end));
-  else if(S.rstat==='Stock')a=a.filter(i=>!i.sold);
+  else if(S.rstat==='Stock'||S.rstat==='Pending')a=a.filter(i=>statusFilterMatch(i,S.rstat));
   else a=a.filter(i=>!i.sold||inR(i.sellDate,R.start,R.end));
   if(S.rtrade==='Trade')a=a.filter(i=>i.isTrade);
   return a;
@@ -4694,13 +4710,13 @@ function vInventory(){
   const sel=S.bucket!=null?st.buckets[S.bucket]:null;
   const html=`<div class="grid g4">
     ${kpi({label:'Cash tied up',val:M(st.cash),sub:st.tradeValue>0?'cash you paid for unsold items':'what you paid for unsold items',tip:st.tradeValue>0?'Real cash paid for everything still in stock. Trade-in value is not counted as cash.':'Sum of purchase prices for everything still in stock.'})}
-    ${kpi({label:'Items in stock',val:String(st.stock.length),sub:['Phone','PC','Accessory'].map(k=>st.stock.filter(i=>i.kind===k).length+' '+kindWord(k).toLowerCase()).join(' · ')})}
+    ${kpi({label:'Items in stock',val:String(st.stock.length),sub:['Phone','PC','Accessory'].map(k=>st.stock.filter(i=>i.kind===k).length+' '+kindWord(k).toLowerCase()).join(' · ')+(st.pending.length?' · '+st.pending.length+' pending':''),tip:st.pending.length?'Everything you own that is unsold. Pending items have an open deposit, so '+st.available.length+' are available to sell.':undefined})}
     ${kpi({label:'Average age',val:st.avgAge==null?(st.stock.length?'—':'0 days'):Math.round(st.avgAge)+' days',sub:'since you bought them',tip:'Days from purchase date to today.'})}
   </div>
   ${tradeLines(st.cash,st.tradeValue)}
   ${card('How long things have been sitting',`<div class="bars">${st.buckets.map((b,i)=>`<button class="bar" data-act="bucket" data-v="${i}" aria-pressed="${S.bucket===i}"><span class="nm">${b.l}</span><span class="tr"><i style="width:${st.stock.length?Math.max(b.items.length?4:0,b.items.length/st.stock.length*100):0}%;background:${i>=3?'var(--bad)':i===2?'var(--warn)':'var(--good)'}"></i></span><span class="nv">${plural(b.items.length,'item')}<small>${M(sum(b.items,x=>x.cashSpent!=null?x.cashSpent:x.buyPrice))}</small></span></button>`).join('')}</div>`,sel?`<button class="chip-b" data-act="bucket" data-v="${S.bucket}" aria-pressed="true">${sel.l}${ICON.x.replace('<svg','<svg class="x"')}</button>`:'<span class="hint">Click a row to filter the list</span>')}
   ${card('In stock',tableShell('stock',{placeholder:'Search stock, CPU, GPU, RAM, screen, storage or Trade ID',sort:{k:'age',dir:-1},rows:()=>{const s=inventoryStats(store.D);return S.bucket!=null?s.buckets[S.bucket].items:s.stock},text:r=>[r.name,r.kind,r.seller,r.condition,r.notes,r.tradeId].join(' ')+' '+itemSearchText(r),sumKey:r=>r.cashSpent!=null?r.cashSpent:r.buyPrice,sumLabel:'invested',
-    cols:[{k:'name',h:'Item',cell:r=>esc(r.name)+tradeBadge(r)},{k:'kind',h:'Type'},{k:'condition',h:'Condition',cell:r=>esc(r.condition||'—')},{k:'buyDate',h:'Bought',val:r=>+r.buyDate||0,cell:r=>fd(r.buyDate),csv:r=>r.buyDate?dkey(r.buyDate):''},
+    cols:[{k:'name',h:'Item',cell:r=>esc(r.name)+tradeBadge(r)+(r.pending?' <span class="pill pend">Pending</span>':'')},{k:'kind',h:'Type'},{k:'condition',h:'Condition',cell:r=>esc(r.condition||'—')},{k:'buyDate',h:'Bought',val:r=>+r.buyDate||0,cell:r=>fd(r.buyDate),csv:r=>r.buyDate?dkey(r.buyDate):''},
       {k:'age',h:'Age',val:r=>r.age,cell:r=>r.age==null?'—':`<span class="pill ${r.age<=30?'good':r.age<=60?'warn':'bad'}">${r.age} days</span>`},{k:'buyPrice',h:'Paid',num:true,cell:r=>costCell(r)},
       {k:'min',h:'Break-even + typical profit',num:true,val:r=>r.buyPrice==null?null:r.buyPrice+(st.med[r.kind]||0),cell:r=>r.buyPrice==null?'—':`<span title="Paid ${mny(r.buyPrice)} plus your median ${r.kind.toLowerCase()} profit of ${mny(st.med[r.kind]||0)}">${M(r.buyPrice+(st.med[r.kind]||0))}</span>`},
       {k:'seller',h:'Bought from',cell:r=>esc(r.seller||'—')}]}))}`;
