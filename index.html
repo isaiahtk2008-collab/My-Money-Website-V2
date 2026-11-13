@@ -6611,7 +6611,7 @@ const FORMS=[
   F('Type',{r:1,t:'radio',o:['Loan'],def:'Loan'}),F('Person',{l:'Borrower',r:1}),F('Item / Device'),F('Total Amount',{l:'Amount Loaned',r:1,t:'money'}),F('Amount Paid',{l:'Repaid so far',t:'money'}),
   F('Date Out',{l:'Date Loaned',r:1,t:'date'}),F('Due Date',{l:'Return By',r:1,t:'date'}),F('Phone / Email',{t:'tel'}),F('Notes')]},
 {id:'dep',g:'Money',t:'Deposit taken',s:'Money held on a device until pickup',tab:'Owed',sum:['Person','Item / Device'],f:[
-  F('Type',{r:1,t:'radio',o:['Deposit'],def:'Deposit'}),F('Person',{l:'Customer',r:1}),F('Item / Device',{l:'Device',r:1}),F('Total Amount',{l:'Total Price',r:1,t:'money'}),F('Amount Paid',{l:'Deposit Paid',r:1,t:'money'}),
+  F('Type',{r:1,t:'radio',o:['Deposit'],def:'Deposit'}),F('Person',{l:'Customer',r:1}),F('Item / Device',{l:'Device',r:1,pick:'stock'}),F('Total Amount',{l:'Total Price',r:1,t:'money',hint:1}),F('Amount Paid',{l:'Deposit Paid',r:1,t:'money'}),
   F('Date Out',{l:'Date Deposit Taken',r:1,t:'date'}),F('Due Date',{l:'Pickup By',r:1,t:'date'}),F('Phone / Email',{t:'tel'}),F('Notes')]},
 {id:'trade',g:'Investing',t:'Trade',s:'Log a stock, crypto, option or futures trade',tab:'Trades',sum:['Symbol'],f:[
   F('Date Opened',{r:1,t:'date'}),F('Asset Type',{r:1,t:'radio',o:['Stock','Crypto','Option','Future','IPO','Pre-IPO'],c:1}),F('Symbol',{r:1}),
@@ -6754,6 +6754,27 @@ function payValidate(f){
 
 /* ---------- Data helpers (read from the site's own data, never modify it) ---------- */
 const unsold=kind=>{try{return store.D.items.filter(i=>i.kind===kind&&!i.sold).map(i=>({l:String(i.label||i.name),it:i}))}catch(e){return[]}};
+/* Deposit taken device picker: every unsold device with no open deposit on it, grouped Phones / PCs / Accessories (stockForDeposit, read-only).
+   `flat` keeps each entry with its device so the live hint under the field can show cost and last sale price. Empty when data is not loaded yet. */
+const PICK_GROUPS=[['Phone','Phones'],['PC','PCs'],['Accessory','Accessories']];
+function depPick(){
+  const out={groups:[],flat:[]};
+  try{
+    const g=stockForDeposit(store.D.items);
+    PICK_GROUPS.forEach(([k,label])=>{
+      const list=(g[k]||[]).map(e=>{const rec=store.D.byId.get(e.id);return Object.assign({},e,{it:rec&&rec.o||null})}).filter(e=>e.text);
+      if(list.length){out.groups.push({kind:k,label,list});out.flat.push(...list)}});
+  }catch(e){}
+  return out;
+}
+/* The newest sale of the same model (name, any condition) with a price, used only as a suggestion the person can accept or ignore. */
+function depLastSold(it){
+  try{
+    const n=pdNorm(it.name);
+    const s=store.D.items.filter(i=>i.sold&&i.kind===it.kind&&i.sellPrice!=null&&i.sellPrice>0&&pdNorm(i.name)===n).sort((a,b)=>(b.sellDate?+b.sellDate:0)-(a.sellDate?+a.sellDate:0));
+    return s.length?{price:s[0].sellPrice,date:s[0].sellDate||null}:null;
+  }catch(e){return null}
+}
 /* Expense categories offered in the form. Names are written to the sheet's "Category" column exactly as shown here.
    Existing names match the sheet's own spelling; spelling variants are merged through CAT_MAP so a duplicate never shows
    (for example "Transportation & Vehicle" and the "Trasportation" typo both fold into "Transportation"). */
@@ -6787,7 +6808,7 @@ window.MMLog={BY,YN,numOf,sugList};
 function getVal(x){const k=x.k,v=V[k],o=(V[k+'#']||'').trim();
   if(x.t==='multi')return (Array.isArray(v)?v:[]).map(a=>a==='Other'?o:a).filter(Boolean).join(', ');
   if(x.t==='radio'||x.t==='yn')return v==='Other'&&x.x?o:(v||'');
-  if(x.t==='select'||x.t==='item')return v==='__o'?o:(v||'');
+  if(x.t==='select'||x.t==='item'||x.pick)return v==='__o'?o:(v||'');
   return String(v==null?'':v).trim()}
 function payload(f){const out={};f.f.forEach(x=>{const s=getVal(x);if(s==='')return;
   if(x.t==='money'||x.t==='int'||x.t==='dec')out[x.k]=numOf(s);
@@ -6857,13 +6878,22 @@ function fieldHtml(f,i){
   }else if(f.t==='multi'){
     const a=Array.isArray(v)?v:[];const o=f.o.concat(f.x?['Other']:[]);
     b=`<div class="lg-chips" role="group" aria-label="${k}">${o.map(x=>`<button type="button" class="chip-b" data-lg="pick" data-k="${k}" data-v="${E(x)}" aria-pressed="${a.includes(x)}">${E(x)}</button>`).join('')}</div>${f.x?oth(a.includes('Other')):''}`;
+  }else if(f.pick==='stock'&&depPick().flat.length){
+    /* Deposit taken: choose the device from stock. Typing a name that is not listed stays possible ("Not listed (type it)"), and so does an old draft that holds typed text. */
+    const pk=depPick();let sv=V[f.k]==null?'':V[f.k];
+    if(sv&&sv!=='__o'&&!pk.flat.some(e=>e.text===sv)){V[f.k+'#']=sv;V[f.k]=sv='__o'}
+    let used=false;
+    const opts=pk.groups.map(g=>`<optgroup label="${E(g.label)}">${g.list.map(e=>{const on=!used&&sv===e.text;if(on)used=true;
+      const shown=e.text.toLowerCase().indexOf(String(e.name).toLowerCase())>=0?e.text:e.name+' ('+e.text+')';   /* the exact text that gets written, with the model name added when the label does not contain it */
+      return `<option value="${E(e.text)}" ${on?'selected':''}>${E(shown+(e.cost!=null&&!/\$\s*\d/.test(shown)?' · '+mny(e.cost):'')+(e.age!=null?' · '+e.age+'d':''))}</option>`}).join('')}</optgroup>`).join('');
+    b=`<select class="lg-in" id="${id}" data-k="${k}"><option value="">Choose a device in stock</option>${opts}<option value="__o" ${sv==='__o'?'selected':''}>Not listed (type it)</option></select>${oth(sv==='__o')}<p class="lg-ctx" data-c="${k}" role="status"></p>`;
   }else if(f.t==='item'||f.t==='select'){
     const o=f.t==='item'?unsold(cur.kind).map(x=>x.l):cats();
     b=`<select class="lg-in" id="${id}" data-k="${k}"><option value="">Choose</option>${o.map(x=>`<option value="${E(x)}" ${v===x?'selected':''}>${E(x)}</option>`).join('')}<option value="__o" ${v==='__o'?'selected':''}>${f.t==='item'?'Not listed (type it)':'Other…'}</option></select>${oth(v==='__o')}${f.t==='item'?`<p class="lg-ctx" data-c="${k}"></p>`:''}`;
   }else if(f.t==='date'){
     b=`<input type="date" class="lg-in" id="${id}" data-k="${k}" value="${E(v)}"><div class="lg-dq"><button type="button" class="chip-b" data-lg="dq" data-k="${k}" data-n="0">Today</button><button type="button" class="chip-b" data-lg="dq" data-k="${k}" data-n="1">Yesterday</button></div>`;
   }else if(f.t==='money'||f.t==='pct'){
-    b=`<div class="lg-aff ${f.t}"><span>${f.t==='money'?'$':'%'}</span><input type="text" class="lg-in" id="${id}" data-k="${k}" data-ty="${f.t}" inputmode="decimal" autocomplete="off" placeholder="0.00" value="${E(v)}"></div>${f.k==='Sale Price'?`<p class="lg-ctx" data-c="${k}"></p>`:''}`;
+    b=`<div class="lg-aff ${f.t}"><span>${f.t==='money'?'$':'%'}</span><input type="text" class="lg-in" id="${id}" data-k="${k}" data-ty="${f.t}" inputmode="decimal" autocomplete="off" placeholder="0.00" value="${E(v)}"></div>${f.k==='Sale Price'||f.hint?`<p class="lg-ctx" data-c="${k}"></p>`:''}`;
   }else{
     const im=f.t==='int'?'numeric':f.t==='dec'?'decimal':f.t==='tel'?'tel':'text';
     b=`<input type="text" class="lg-in" id="${id}" data-k="${k}" data-ty="${f.t}" inputmode="${im}" autocomplete="off" ${f.sug?`list="lg-dl-${f.sug}"`:''} value="${E(v)}">${/^(tr:)?Serial Number$/.test(f.k)?`<p class="lg-ctx" data-c="${k}" role="status"></p>`:''}`;
@@ -6905,8 +6935,25 @@ function remember(f){const l={};f.f.forEach(x=>{if(x.c){if(V[x.k]!=null)l[x.k]=V
   const h=hist();f.f.forEach(x=>{if(!x.sug)return;const s=getVal(x);if(!s)return;h[x.sug]=[s,...(h[x.sug]||[]).filter(y=>y!==s)].slice(0,40)});W('lg.hist',h)}
 
 /* ---------- Live context (cost of the item, profit preview) ---------- */
+/* Deposit taken: under the device, what it cost and how long it has sat; under Total Price, the profit at the typed price, or (while the price is empty)
+   what the same model last sold for with a button to use it. A suggestion only: nothing is filled in until it is tapped. */
+function depCtx(pk){
+  const set=(k,h)=>{const el=$$('[data-c]').find(e=>e.dataset.c===k);if(el)el.innerHTML=h};
+  const sel=V[pk.k],hit=sel&&sel!=='__o'?depPick().flat.find(e=>e.text===sel):null,it=hit&&hit.it;
+  if(!it){set(pk.k,'');set('Total Amount','');return}
+  const bits=[];if(it.buyPrice!=null)bits.push('Paid '+mny(it.buyPrice));if(it.seller)bits.push('from '+E(it.seller));if(it.age!=null)bits.push(it.age+' days in stock');
+  set(pk.k,bits.join(' · '));
+  const tp=numOf(V['Total Amount']);let h='';
+  if(tp!=null&&it.buyPrice!=null){const p=tp-it.buyPrice;h=`Profit <b class="${p>=0?'pos':'neg'}">${sgn(p)}</b>${it.buyPrice?` · ${pct(p/it.buyPrice)} ROI`:''}`}
+  else if(!String(V['Total Amount']==null?'':V['Total Amount']).trim()){
+    const ls=depLastSold(it);
+    if(ls)h=`Last sold ${mny(ls.price)}${ls.date?' on '+fdy(ls.date):''} <button type="button" class="chip-b" data-lg="usetp" data-v="${E(String(ls.price))}">Use ${mny(ls.price)}</button>`;
+  }
+  set('Total Amount',h);
+}
 function ctx(){
-  if(!cur)return;const itemF=cur.f.find(x=>x.t==='item');if(!itemF)return;
+  if(!cur)return;const pickF=cur.f.find(x=>x.pick==='stock');if(pickF)return depCtx(pickF);
+  const itemF=cur.f.find(x=>x.t==='item');if(!itemF)return;
   const sel=V[itemF.k],it=(unsold(cur.kind).find(x=>x.l===sel)||{}).it;
   const set=(k,h)=>{const el=$$('[data-c]').find(e=>e.dataset.c===k);if(el)el.innerHTML=h};
   if(!it){set(itemF.k,'');set('Sale Price','');return}
@@ -7137,6 +7184,7 @@ document.addEventListener('click',e=>{
     case 'pill':{if(qn()&&LS.get('lgUrl')&&navigator.onLine!==false){toast('Sending…');flush(false).then(()=>{updatePill();showBackupBanner()})}else{cur=null;show(settingsScreen())}break}
     case 'calc':cur=null;show(calcScreen());calcUpdate();break;
     case 'submit':submit();break;
+    case 'usetp':{const f=cur&&cur.f.find(x=>x.hint);if(!f)break;V[f.k]=d.v;const el=$$('input.lg-in').find(i=>i.dataset.k===f.k);if(el)el.value=d.v;setErr(f.k,'');ctx();saveDraft();break}
     case 'dq':{V[d.k]=dayISO(+d.n);const el=$$('input[type=date]').find(i=>i.dataset.k===d.k);if(el)el.value=V[d.k];setErr(d.k,'');saveDraft();break}
     case 'pick':{if(d.k==='Asset Type'&&cur&&cur.id==='trade'&&(d.v==='IPO'||d.v==='Pre-IPO')){openForm(d.v==='IPO'?'ipo':'preipo',false);break}
       if(d.k==='Received device type'&&cur&&cur.pay){recvPick(t,d);break}if(d.k==='Payment Type'&&cur&&cur.pay){payPick(t,d);break}const f=fOf(d.k),v=d.v;

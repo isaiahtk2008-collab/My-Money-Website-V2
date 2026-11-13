@@ -200,7 +200,7 @@ with sync_playwright() as p:
     page.locator('#overlay [data-act=close]').first.click()
     n = len(posts)
     page.locator('#view [data-lg=open][data-id=dep]').click()
-    page.fill('#overlay [data-k="Person"]', 'Dana'); page.fill('#overlay [data-k="Item / Device"]', 'iPad'); page.fill('#overlay [data-k="Total Amount"]', '500'); page.fill('#overlay [data-k="Amount Paid"]', '100')
+    page.fill('#overlay [data-k="Person"]', 'Dana'); page.select_option('#overlay select[data-k="Item / Device"]', '__o'); page.fill('#overlay [data-k="Item / Device#"]', 'iPad'); page.fill('#overlay [data-k="Total Amount"]', '500'); page.fill('#overlay [data-k="Amount Paid"]', '100')
     page.locator('#overlay [data-lg=submit]').click()
     req = wait_post(n)
     check('Add deposit sends one new row to the Owed tab with Type Deposit', req is not None and req.get('tab') == 'Owed' and req['values'].get('Type') == 'Deposit' and req['values'].get('Amount Paid') == 100 and req['values'].get('Total Amount') == 500, str(req))
