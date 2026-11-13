@@ -2623,6 +2623,72 @@ function canonCondition(v){if(!v)return null;const s=String(v).replace(/\s+/g,' 
   if(/fair/.test(l))return 'Used - Fair';if(/bad|poor/.test(l))return 'Used - Bad';if(/^new/.test(l))return 'New';return s}
 function canonRam(v){if(!v)return null;const m=String(v).match(/(\d+)\s*gb/i);return m?m[1]+'GB':String(v).trim()}
 
+/* ===== PENDING DEPOSITS START =====
+   Read-only helpers that connect an OPEN deposit (Owed tab, Type = Deposit) to the in-stock device it is holding.
+   Nothing here writes to the sheet or calls the network, and nothing here throws. No sheet column is added: the link is worked out from the
+   deposit's "Item / Device" text, which is the same text depositDeviceText() gives (what the Deposit taken device picker will write).
+   Closing the deposit (Picked Up, Forfeited, Refunded) means it is no longer open, so the device is back in stock with no write needed;
+   logging the sale in the normal Sold form turns it into Sold as it always has. */
+function pdNorm(v){return String(v==null?'':v).replace(/\s+/g,' ').trim().toLowerCase()}
+/* The exact text a deposit should hold in "Item / Device" for this device: its Device Label when it has one, otherwise its name. */
+function depositDeviceText(item){return item?String(item.label||item.name||'').replace(/\s+/g,' ').trim():''}
+function pdOldestFirst(a,b){
+  const ta=a&&a.buyDate instanceof Date?a.buyDate.getTime():Infinity,tb=b&&b.buyDate instanceof Date?b.buyDate.getTime():Infinity;
+  return ta!==tb?ta-tb:((a&&a.row)||0)-((b&&b.row)||0)}
+/* Pairs each open deposit with ONE unsold device. Exact match (ignoring case and spacing) on the device label first, then the device name.
+   Two identical devices: the older purchase is taken first, and the pair is reported as ambiguous. A deposit that matches nothing (a name typed
+   by hand, or a device that is already sold) is left in `unmatched` and changes nothing. Returns plain data: { links:[{item,dep,ambiguous}], unmatched:[dep] }. */
+function linkDepositsToItems(items,deps){
+  const links=[],unmatched=[];
+  try{
+    const stock=(Array.isArray(items)?items:[]).filter(i=>i&&!i.sold).sort(pdOldestFirst);
+    const open=(Array.isArray(deps)?deps:[]).filter(d=>d&&d.open).sort((a,b)=>{
+      const ta=a.dateIn instanceof Date?a.dateIn.getTime():Infinity,tb=b.dateIn instanceof Date?b.dateIn.getTime():Infinity;
+      return ta!==tb?ta-tb:(a.row||0)-(b.row||0)});
+    const taken=new Set();
+    for(const dep of open){
+      const key=pdNorm(dep.device);
+      if(!key){unmatched.push(dep);continue}
+      let pool=stock.filter(i=>!taken.has(i)&&pdNorm(i.label)===key);
+      if(!pool.length)pool=stock.filter(i=>!taken.has(i)&&pdNorm(i.name)===key);
+      if(!pool.length){unmatched.push(dep);continue}
+      taken.add(pool[0]);
+      links.push({item:pool[0],dep,ambiguous:pool.length>1});
+    }
+  }catch(e){}
+  return {links,unmatched};
+}
+/* Marks devices that have an open deposit: pending=true, pendingDep=a small plain snapshot, and stage = SOLD | PENDING | IN STOCK on every device.
+   Never changes sold, status, buyPrice or anything else the existing screens read. Returns { linked, unmatched, ambiguous }. */
+function applyPendingDeposits(items,deps){
+  const out={linked:0,unmatched:[],ambiguous:0};
+  try{
+    (Array.isArray(items)?items:[]).forEach(i=>{if(i){i.pending=false;i.pendingDep=null}});
+    const r=linkDepositsToItems(items,deps);
+    r.links.forEach(l=>{
+      l.item.pending=true;
+      l.item.pendingDep={id:l.dep.id||'',row:l.dep.row||null,name:l.dep.name||'',total:l.dep.total,paid:l.dep.paid,balance:l.dep.balance,
+        dateIn:l.dep.dateIn||null,pickup:l.dep.pickup||null,daysLeft:l.dep.daysLeft==null?null:l.dep.daysLeft,overdue:!!l.dep.overdue};
+      if(l.ambiguous)out.ambiguous++;
+    });
+    out.linked=r.links.length;out.unmatched=r.unmatched;
+    (Array.isArray(items)?items:[]).forEach(i=>{if(i)i.stage=i.sold?'SOLD':(i.pending?'PENDING':'IN STOCK')});
+  }catch(e){}
+  return out;
+}
+/* The Deposit taken device picker list: unsold devices with no open deposit on them, grouped Phones / PCs / Accessories, each with the exact text to write. */
+function stockForDeposit(items){
+  const g={Phone:[],PC:[],Accessory:[]};
+  try{
+    (Array.isArray(items)?items:[]).filter(i=>i&&!i.sold&&!i.pending&&g[i.kind]).forEach(i=>{
+      g[i.kind].push({id:i.id,kind:i.kind,name:i.name,text:depositDeviceText(i),cost:i.buyPrice==null?null:i.buyPrice,age:i.age==null?null:i.age});
+    });
+    Object.keys(g).forEach(k=>g[k].sort((a,b)=>String(a.name).localeCompare(String(b.name))||((b.age||0)-(a.age||0))));
+  }catch(e){}
+  return g;
+}
+/* ===== PENDING DEPOSITS END ===== */
+
 function normalize(raw){
   const flags=new Map();
   const flag=(sev,sheet,row,field,msg,fix)=>{const k=[sev,sheet,field,msg].join('|');if(!flags.has(k))flags.set(k,{sev,sheet,field,msg,fix,rows:[]});flags.get(k).rows.push(row)};
@@ -2687,7 +2753,10 @@ function normalize(raw){
     byId.set(o.id,{type:'invest',o});return o}).filter(x=>x.date).sort((a,b)=>a.date-b.date);
   const issues=[...flags.values()].sort((a,b)=>({warn:0,info:1,fixed:2}[a.sev]-{warn:0,info:1,fixed:2}[b.sev]));
   const counts={Expenses:expenses.length,Phones:rowsOf('Phones').length,PCs:rowsOf('PCs').length,Accessories:rowsOf('Accessories').length,Investments:investments.length};
-  return {expenses,items,investments,issues,counts,byId};
+  /* Devices held by an open deposit (read-only; any problem here is ignored so a bad Owed tab can never stop the page loading). */
+  let deposits={linked:0,unmatched:[],ambiguous:0};
+  try{let ds=[];try{const om=owedModel(raw);if(om&&om.hasOwed)ds=om.deps}catch(e){}deposits=applyPendingDeposits(items,ds)}catch(e){}
+  return {expenses,items,investments,issues,counts,byId,deposits};
 }
 
 /* ----- Data sources: anything that returns the raw shape plugs in here ----- */
@@ -2970,7 +3039,7 @@ function inventoryStats(D){
   const stock=D.items.filter(i=>!i.sold);
   const med={};['Phone','PC','Accessory'].forEach(k=>med[k]=median(D.items.filter(i=>i.sold&&i.kind===k&&i.profit!=null).map(i=>i.profit)));
   const B=[['0–14 days',0,14],['15–30 days',15,30],['31–60 days',31,60],['61+ days',61,1e9]].map(([l,a,b])=>({l,a,b,items:stock.filter(i=>(i.age??0)>=a&&(i.age??0)<=b)}));
-  return{stock,cost:sum(stock,i=>i.buyPrice),cash:Math.round(sum(stock,i=>i.cashSpent!=null?i.cashSpent:i.buyPrice)*100)/100,tradeValue:Math.round(sum(stock,i=>i.tradeValue)*100)/100,avgAge:avg(stock,i=>i.age),med,buckets:B};
+  return{stock,available:stock.filter(i=>!i.pending),pending:stock.filter(i=>i.pending),cost:sum(stock,i=>i.buyPrice),cash:Math.round(sum(stock,i=>i.cashSpent!=null?i.cashSpent:i.buyPrice)*100)/100,tradeValue:Math.round(sum(stock,i=>i.tradeValue)*100)/100,avgAge:avg(stock,i=>i.age),med,buckets:B};
 }
 function investingStats(D){
   const P=[...groupBy(D.investments,i=>i.portfolio).entries()].map(([name,es])=>{
