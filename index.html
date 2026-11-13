@@ -7466,6 +7466,7 @@ function secHtml(){
   <div id="gst-body">${guestInner()}</div>
 </section>
 ${typeof window.__mmNotifSettingsHtml==='function'?window.__mmNotifSettingsHtml():''}
+${typeof window.__mmExpirySettingsHtml==='function'?window.__mmExpirySettingsHtml():''}
 ${typeof window.__mmStatusSettingsHtml==='function'?window.__mmStatusSettingsHtml():''}
 ${typeof window.__mmHoverFxSettingsHtml==='function'?window.__mmHoverFxSettingsHtml():''}
 ${typeof window.__mmFoldSettingsHtml==='function'?window.__mmFoldSettingsHtml():''}
@@ -7667,11 +7668,24 @@ function ebSnooze(map,key,today,days){
   if(typeof key==='string'&&key)out[key]=ebDayKey(ebAddDays(today,ebInt(days,1,30,1)));
   return out;
 }
+/* Settings: change one option and clean the result. Unknown option names are ignored, so nothing odd is ever stored. */
+function ebPatch(cfg,key,val){
+  const c=Object.assign({},ebNormalize(cfg));
+  if(Object.prototype.hasOwnProperty.call(EB_DEFAULTS,key))c[key]=val;
+  return ebNormalize(c);
+}
+/* Made-up items for the "Preview banner" button. One overdue and one due soon, so both colors and the rotation can be seen. */
+function ebSampleItems(){
+  return[
+    {key:'preview:loan',kind:'loan',name:'Sample borrower',what:'Sample laptop',amount:120,daysLeft:-2,when:ebWhen(-2),level:'overdue'},
+    {key:'preview:dep',kind:'dep',name:'Sample customer',what:'Sample phone',amount:250,daysLeft:1,when:ebWhen(1),level:'pending'}
+  ];
+}
 /* ===== EXPIRY BANNER CORE END ===== */
 
 (()=>{try{
 const K_CFG='mm.expiry', K_SN='mm.expiry.snooze';
-let idx=0, items=[], sig='', timer=null, hold=false, holdTimer=null, tries=0;
+let idx=0, items=[], sig='', timer=null, hold=false, holdTimer=null, tries=0, previewUntil=0, previewTimer=null;
 const esc2=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>typeof mny==='function'?mny(n):'$'+(Math.round(n*100)/100);
 function load(){try{return ebNormalize(JSON.parse(localStorage.getItem(K_CFG)))}catch(e){return ebNormalize(null)}}
@@ -7692,6 +7706,7 @@ function css(){
   s.textContent=
 '.eb{position:fixed;left:max(16px,env(safe-area-inset-left,0px));right:96px;bottom:calc(24px + env(safe-area-inset-bottom,0px));z-index:60;pointer-events:none;display:flex;justify-content:flex-start}'+
 '@media (max-width:720px){.eb{bottom:calc(88px + env(safe-area-inset-bottom,0px));right:84px}}'+
+'.eb.eb-pv{z-index:90}'+   // a preview started from Settings must sit above the Settings panel (z-index 80) to be seen; it ends by itself after 20 seconds
 '@media print{.eb{display:none}}'+
 '.eb-card{pointer-events:auto;box-sizing:border-box;width:100%;max-width:420px;padding:10px 12px;border-radius:14px;border:1px solid var(--line,#2a303b);background:var(--surface,#14181f);color:var(--ink,var(--text,#e9ecf1));box-shadow:0 8px 30px rgba(0,0,0,.28);font-size:13px;line-height:1.35;opacity:1;transform:none;transition:opacity .28s ease,transform .28s ease}'+
 ':root[data-ap3-anim] .eb-card{transition-duration:var(--ap3-td) !important}'+
@@ -7752,17 +7767,22 @@ function schedule(){
   if(items.length<2||hold||document.hidden)return;
   timer=setTimeout(()=>{idx=ebNext(idx,items.length); show(true); schedule()},load().speed*1000);
 }
+function previewing(){return Date.now()<previewUntil}
+function endPreview(){previewUntil=0; clearTimeout(previewTimer); previewTimer=null; sig=''}
 function check(){
   try{
-    const c=load(), b0=document.getElementById('expiry-banner');
+    const pv=previewing(), c0=load(), c=pv?Object.assign({},c0,{enabled:true}):c0, b0=document.getElementById('expiry-banner');
     if(!c.enabled){gone(b0); items=[]; return}
-    const owed=owedNow();
-    if(!owed&&tries++<12)setTimeout(check,5000);   // the sheet data can arrive after start-up
-    const now=new Date();
-    items=ebItems(owed,c,now,ebPrune(loadSn(),ebDayKey(now)));
+    if(pv){items=ebSampleItems()}   // preview shows made-up items; real data and snoozes are not touched
+    else{
+      const owed=owedNow();
+      if(!owed&&tries++<12)setTimeout(check,5000);   // the sheet data can arrive after start-up
+      const now=new Date();
+      items=ebItems(owed,c,now,ebPrune(loadSn(),ebDayKey(now)));
+    }
     if(!items.length){gone(b0); return}
-    const s=items.map(i=>i.key+'|'+i.level+'|'+i.daysLeft).join(';')+'|'+c.size;
-    const b=bar(); b.className='eb eb-'+c.position+' eb-s-'+c.size;
+    const s=items.map(i=>i.key+'|'+i.level+'|'+i.daysLeft).join(';')+'|'+c.size+'|'+c.position;
+    const b=bar(); b.className='eb eb-'+c.position+' eb-s-'+c.size+(pv?' eb-pv':'');
     if(idx>=items.length)idx=0;
     if(s!==sig){sig=s; show(false)}
     schedule();
@@ -7771,10 +7791,62 @@ function check(){
 document.addEventListener('click',e=>{try{
   const t=e.target&&e.target.closest?e.target.closest('[data-eb]'):null; if(!t)return;
   const it=items[idx]; if(!it)return;
+  if(previewing()){endPreview(); check(); return}   // closing a preview never saves a snooze
   const now=new Date();
   saveSn(ebSnooze(loadSn(),it.key,now,t.dataset.eb==='dismiss'?3:1));   // Snooze = back tomorrow, Dismiss = back in 3 days
   sig=''; check();
 }catch(err){}});
+
+/* ----- Settings card (Settings > In-App, under the weekly reminder). Device-local; writes only mm.expiry. ----- */
+const SPEED_TXT=n=>n+' second'+(n===1?'':'s');
+function settingsHtml(){
+  const c=load(), sel=(v,x)=>v===x?' selected':'';
+  return `
+<section class="m3-card" id="eb-card">
+  <div class="m3-card-head"><span class="m3-icon" aria-hidden="true">event_upcoming</span><div><div class="m3-card-title">Expiry banner</div><div class="m3-card-sub">Warns you when a deposit pickup or a loan return is close or overdue. Shown inside the app while it is open. Stays on this device.</div></div></div>
+  <div class="m3-row"><div><b>Expiry banner</b><small style="display:block">Show a banner for deposits and loans that are due soon</small></div><label><input type="checkbox" id="eb-on" ${c.enabled?'checked':''}> On</label></div>
+  <div class="lg-f"><label class="lg-l" for="eb-pos">Position</label><select class="lg-set" id="eb-pos"><option value="bottom"${sel(c.position,'bottom')}>Bottom</option><option value="top" disabled>Top (next update)</option><option value="left" disabled>Left (next update)</option><option value="right" disabled>Right (next update)</option></select></div>
+  <div class="lg-f"><label class="lg-l" for="eb-size">Size</label><select class="lg-set" id="eb-size"><option value="small"${sel(c.size,'small')}>Small</option><option value="medium"${sel(c.size,'medium')}>Medium</option><option value="large"${sel(c.size,'large')}>Large</option></select></div>
+  <div class="lg-f"><label class="lg-l" for="eb-dep">Deposits: show this many days before pickup (0 = only today and overdue)</label><input type="number" class="lg-set" id="eb-dep" min="0" max="60" step="1" inputmode="numeric" value="${c.depDays}"></div>
+  <div class="lg-f"><label class="lg-l" for="eb-loan">Loans: show this many days before the return date (0 = only today and overdue)</label><input type="number" class="lg-set" id="eb-loan" min="0" max="60" step="1" inputmode="numeric" value="${c.loanDays}"></div>
+  <div class="lg-f"><label class="lg-l" for="eb-speed">Rotation speed: <span id="eb-speed-v">${SPEED_TXT(c.speed)}</span> per item</label><input type="range" id="eb-speed" min="3" max="30" step="1" value="${c.speed}" style="width:100%"><small style="display:block;color:var(--muted)">Only matters when more than one item is due.</small></div>
+  <div class="m3-row"><div><b>Pause on hover or tap</b><small style="display:block">Stops rotating while you point at or touch the banner</small></div><label><input type="checkbox" id="eb-pause" ${c.pause?'checked':''}> On</label></div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn sec" data-ebs="preview">Preview banner</button><button type="button" class="btn sec" data-ebs="reset">Reset to defaults</button></div>
+</section>
+  `;
+}
+function syncControls(){
+  const c=load(), set=(id,fn)=>{const el=document.getElementById(id); if(el)fn(el)};
+  set('eb-on',e=>{e.checked=c.enabled}); set('eb-pos',e=>{e.value=c.position}); set('eb-size',e=>{e.value=c.size});
+  set('eb-dep',e=>{e.value=c.depDays}); set('eb-loan',e=>{e.value=c.loanDays});
+  set('eb-speed',e=>{e.value=c.speed}); set('eb-speed-v',e=>{e.textContent=SPEED_TXT(c.speed)});
+  set('eb-pause',e=>{e.checked=c.pause});
+}
+const FIELD={'eb-on':'enabled','eb-pos':'position','eb-size':'size','eb-dep':'depDays','eb-loan':'loanDays','eb-speed':'speed','eb-pause':'pause'};
+document.addEventListener('input',e=>{try{
+  const t=e.target; if(!t||t.id!=='eb-speed')return;
+  const v=document.getElementById('eb-speed-v'); if(v)v.textContent=SPEED_TXT(ebPatch(null,'speed',t.value).speed);
+}catch(err){}});
+document.addEventListener('change',e=>{try{
+  const t=e.target; if(!t||!t.id||!Object.prototype.hasOwnProperty.call(FIELD,t.id))return;
+  const val=t.type==='checkbox'?t.checked:t.value;
+  localStorage.setItem(K_CFG,JSON.stringify(ebPatch(load(),FIELD[t.id],val)));
+  syncControls();   // shows the cleaned-up value, e.g. 99 days becomes 60
+  sig=''; check();
+}catch(err){}});
+document.addEventListener('click',e=>{try{
+  const t=e.target&&e.target.closest?e.target.closest('[data-ebs]'):null; if(!t)return;
+  if(t.dataset.ebs==='reset'){
+    try{localStorage.removeItem(K_CFG)}catch(e2){}   // snoozes are kept: they are not settings
+    endPreview(); syncControls(); check();
+  }
+  if(t.dataset.ebs==='preview'){
+    previewUntil=Date.now()+20000; idx=0; sig=''; hold=false;
+    clearTimeout(previewTimer); previewTimer=setTimeout(()=>{endPreview(); check()},20000);   // ends by itself after 20 seconds
+    check();
+  }
+}catch(err){}});
+window.__mmExpirySettingsHtml=settingsHtml;
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)check(); else{clearTimeout(timer); timer=null}});
 window.__mmExpiryCheck=check;
 setTimeout(check,3500); setInterval(check,60000);

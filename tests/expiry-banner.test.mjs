@@ -23,8 +23,8 @@ const block = html.slice(a, b);
 assert.ok(!/fetch|sheetCall|XMLHttpRequest|localStorage|sessionStorage|sendBeacon|document\.|window\.|LS\./.test(block), 'core has no network, storage or page access');
 
 const ctx = vm.createContext({ Date, Math, JSON, Object, Array, String, Number, parseInt, isNaN });
-vm.runInContext(block + '\nthis.api={EB_DEFAULTS,ebNormalize,ebItems,ebNext,ebPrune,ebSnooze,ebDaysBetween,ebDayKey,ebWhen,ebKey};', ctx);
-const { ebNormalize, ebItems: rawItems, ebNext, ebPrune, ebSnooze, ebDaysBetween, ebDayKey, ebWhen, ebKey } = ctx.api;
+vm.runInContext(block + '\nthis.api={EB_DEFAULTS,ebNormalize,ebItems,ebNext,ebPrune,ebSnooze,ebDaysBetween,ebDayKey,ebWhen,ebKey,ebPatch,ebSampleItems};', ctx);
+const { ebNormalize, ebItems: rawItems, ebNext, ebPrune, ebSnooze, ebDaysBetween, ebDayKey, ebWhen, ebKey, ebPatch, ebSampleItems } = ctx.api;
 
 const plain = x => JSON.parse(JSON.stringify(x));
 const ebItems = (...args) => plain(rawItems(...args));   // plain copies, so deepEqual is not confused by objects made in the vm context
@@ -181,4 +181,55 @@ test('amounts and text come through for display; the UI is read-only and escapes
   assert.ok(!/fetch\(|sheetCall|XMLHttpRequest|sendBeacon|store\.set|LS\.set|apps-script/.test(ui), 'UI has no sheet or network writes');
   assert.ok(/esc2\(it\.name\)|esc2\(head\)/.test(ui) && /esc2\(bits\.join/.test(ui), 'sheet text is escaped before it goes into the page');
   assert.ok(/prefers-reduced-motion|transitionDuration/.test(ui), 'reduced motion / animation speed are respected');
+});
+
+// ---- Part 2 PR 2: Settings UI ----
+test('settings: one option changes at a time and the result is always cleaned', () => {
+  assert.deepEqual(plain(ebPatch(null, 'enabled', false)), { enabled: false, position: 'bottom', size: 'medium', depDays: 3, loanDays: 3, speed: 6, pause: true });
+  assert.equal(ebPatch(null, 'size', 'large').size, 'large');
+  assert.equal(ebPatch(null, 'size', 'huge').size, 'medium', 'a bad size falls back');
+  assert.equal(ebPatch(null, 'depDays', '99').depDays, 60, 'days are clamped');
+  assert.equal(ebPatch(null, 'depDays', '').depDays, 3, 'an empty box falls back');
+  assert.equal(ebPatch(null, 'loanDays', '-2').loanDays, 0);
+  assert.equal(ebPatch(null, 'speed', '2').speed, 3);
+  assert.equal(ebPatch(null, 'speed', '31').speed, 30);
+  assert.equal(ebPatch(null, 'pause', false).pause, false);
+  assert.equal(ebPatch(null, 'position', 'left').position, 'bottom', 'only Bottom exists until the positions PR');
+  // keeps the other settings, ignores unknown names, never throws
+  const base = { enabled: true, size: 'small', depDays: 5, loanDays: 9, speed: 10, pause: false };
+  const next = plain(ebPatch(base, 'depDays', 7));
+  assert.deepEqual(next, { enabled: true, position: 'bottom', size: 'small', depDays: 7, loanDays: 9, speed: 10, pause: false });
+  assert.deepEqual(plain(ebPatch(base, 'evil', 1)), plain(ebNormalize(base)));
+  assert.deepEqual(plain(ebPatch(base, '__proto__', { enabled: false })), plain(ebNormalize(base)));
+  assert.equal(({}).enabled, undefined, 'the global object prototype is untouched');
+  assert.deepEqual(plain(ebPatch('junk', 'size', 'large')), plain(ebNormalize({ size: 'large' })));
+  assert.deepEqual(plain(ebPatch(base, 'depDays', 7)), next, 'same input, same answer');
+  assert.equal(base.depDays, 5, 'input not changed');
+});
+
+test('preview items: one overdue and one due soon, so both colors and rotation can be seen', () => {
+  const r = plain(ebSampleItems());
+  assert.equal(r.length, 2);
+  assert.deepEqual(r.map(x => x.level), ['overdue', 'pending']);
+  assert.deepEqual(r.map(x => x.kind).sort(), ['dep', 'loan']);
+  assert.ok(r.every(x => x.key.startsWith('preview:') && x.name && x.what && x.amount > 0 && x.when));
+  assert.deepEqual(plain(ebSampleItems()), r, 'same every time');
+});
+
+test('settings UI: lives under In-App, saves only on this device, reset keeps snoozes, preview saves nothing', () => {
+  const ui = html.slice(b, html.indexOf("setTimeout(()=>flush(true),2500);"));
+  for (const id of ['eb-on', 'eb-pos', 'eb-size', 'eb-dep', 'eb-loan', 'eb-speed', 'eb-pause']) {
+    assert.equal(ui.split('id="' + id + '"').length - 1, 1, id + ' appears exactly once');
+    assert.ok(new RegExp("'" + id + "':'").test(ui), id + ' is wired to a setting');
+  }
+  assert.ok(/data-ebs="preview"/.test(ui) && /data-ebs="reset"/.test(ui), 'Preview and Reset buttons');
+  assert.ok(/__mmExpirySettingsHtml\(\)/.test(html), 'card is added to the Settings page');
+  assert.ok(html.indexOf('__mmNotifSettingsHtml()') < html.indexOf('__mmExpirySettingsHtml()'), 'card sits next to the weekly reminder');
+  const writes = ui.match(/localStorage\.(set|remove)Item\(\s*[A-Za-z_'"]+/g) || [];
+  assert.ok(writes.every(w => /K_CFG|K_SN/.test(w)), 'only the banner settings and snooze keys are written: ' + writes.join(' | '));
+  const reset = ui.slice(ui.indexOf("t.dataset.ebs==='reset'"), ui.indexOf("t.dataset.ebs==='preview'"));
+  assert.ok(/removeItem\(K_CFG\)/.test(reset) && !/K_SN/.test(reset), 'reset clears settings but not snoozes');
+  const click = ui.slice(ui.indexOf("if(previewing()){endPreview()"), ui.indexOf("/* ----- Settings card"));
+  assert.ok(click.indexOf('previewing()') < click.indexOf('saveSn('), 'a preview Snooze/Dismiss returns before anything is saved');
+  assert.ok(/pointerenter/.test(ui) && /touchstart/.test(ui), 'pause on hover and tap still wired');
 });
