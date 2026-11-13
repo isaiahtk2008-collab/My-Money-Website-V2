@@ -7585,6 +7585,201 @@ setTimeout(notifCheck,3000); setInterval(notifCheck,60000);
 window.__mmNotifSettingsHtml=notifSettingsHtml;
 }catch(err){console.error('Reminder module failed to start (site unaffected):',err)}})();
 
+/* ================= EXPIRY BANNER (in-app only; device-local; read-only: never writes to the sheet or calls the network) ================= */
+/* ===== EXPIRY BANNER CORE START ===== */
+/* Pure logic. No storage, network or page access, so tests can load this block on its own. */
+const EB_DEFAULTS={enabled:true,position:'bottom',size:'medium',depDays:3,loanDays:3,speed:6,pause:true};
+const EB_SIZES=['small','medium','large'], EB_POSITIONS=['bottom'];   // more positions are added in a later PR
+function ebInt(v,lo,hi,d){const n=parseInt(v,10);return isNaN(n)?d:Math.max(lo,Math.min(hi,n))}
+function ebFlag(v){return !(v===false||v==='false'||v===0||v==='0')}
+function ebNormalize(raw){
+  const r=(raw&&typeof raw==='object'&&!Array.isArray(raw))?raw:{};
+  return{
+    enabled:ebFlag(r.enabled),
+    position:EB_POSITIONS.indexOf(r.position)>=0?r.position:EB_DEFAULTS.position,
+    size:EB_SIZES.indexOf(r.size)>=0?r.size:EB_DEFAULTS.size,
+    depDays:ebInt(r.depDays,0,60,EB_DEFAULTS.depDays),
+    loanDays:ebInt(r.loanDays,0,60,EB_DEFAULTS.loanDays),
+    speed:ebInt(r.speed,3,30,EB_DEFAULTS.speed),
+    pause:ebFlag(r.pause)
+  };
+}
+function ebValidDate(d){return d instanceof Date&&!isNaN(d.getTime())}
+function ebDayKey(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function ebAddDays(d,n){return new Date(d.getFullYear(),d.getMonth(),d.getDate()+n)}
+/* Whole calendar days from a to b. Uses UTC day numbers, so a daylight-saving change (a 23 or 25 hour day) never shifts the answer. */
+function ebDaysBetween(a,b){return Math.round((Date.UTC(b.getFullYear(),b.getMonth(),b.getDate())-Date.UTC(a.getFullYear(),a.getMonth(),a.getDate()))/864e5)}
+function ebKey(kind,r){
+  const id=r&&r.id!=null?String(r.id).trim():'';
+  return kind+':'+(id!==''?id:'row'+(r&&r.row!=null?r.row:'?')+'-'+String((r&&r.name)||'').trim().toLowerCase());
+}
+function ebWhen(n){
+  if(n<0)return(-n)+' day'+(n===-1?'':'s')+' overdue';
+  if(n===0)return'due today';
+  if(n===1)return'due tomorrow';
+  return'due in '+n+' days';
+}
+/* Open deposits and loans that are due within the threshold (or already past due) and are not snoozed. Overdue first, then soonest. Never changes its input. */
+function ebItems(owed,cfg,today,snoozes){
+  const out=[];
+  try{
+    if(!cfg||cfg.enabled===false||!owed||!ebValidDate(today))return out;
+    const todayKey=ebDayKey(today);
+    const sn=(snoozes&&typeof snoozes==='object')?snoozes:{};
+    const add=(list,kind,limit)=>{
+      if(!Array.isArray(list))return;
+      for(let i=0;i<list.length;i++){
+        const r=list[i];
+        if(!r||!r.open)continue;
+        const due=kind==='loan'?r.due:r.pickup;
+        if(!ebValidDate(due))continue;
+        const daysLeft=ebDaysBetween(today,due);
+        if(daysLeft>limit)continue;
+        const key=ebKey(kind,r);
+        const until=Object.prototype.hasOwnProperty.call(sn,key)?sn[key]:null;
+        if(typeof until==='string'&&until>todayKey)continue;
+        out.push({key:key,kind:kind,name:String(r.name||''),what:String(kind==='loan'?(r.item||''):(r.device||'')),amount:Number(kind==='loan'?r.owed:r.balance)||0,daysLeft:daysLeft,when:ebWhen(daysLeft),level:daysLeft<0?'overdue':'pending'});
+      }
+    };
+    add(owed.deps,'dep',ebInt(cfg.depDays,0,60,EB_DEFAULTS.depDays));
+    add(owed.loans,'loan',ebInt(cfg.loanDays,0,60,EB_DEFAULTS.loanDays));
+    out.sort((a,b)=>(a.level===b.level?0:(a.level==='overdue'?-1:1))||a.daysLeft-b.daysLeft||(a.key<b.key?-1:a.key>b.key?1:0));
+  }catch(e){return[]}
+  return out;
+}
+/* Rotation: next index, wrapping. A bad index or count gives 0. */
+function ebNext(i,n){n=parseInt(n,10);i=parseInt(i,10);if(!(n>1))return 0;if(isNaN(i)||i<0)return 0;return(i+1)%n}
+/* Snoozes: {itemKey: 'YYYY-MM-DD'} hides that item until that day arrives. Old and malformed entries are dropped; at most 200 are kept. */
+function ebPrune(map,todayKey){
+  const out={};
+  try{
+    if(!map||typeof map!=='object'||Array.isArray(map))return out;
+    const keys=Object.keys(map);
+    for(let i=0;i<keys.length&&Object.keys(out).length<200;i++){
+      const v=map[keys[i]];
+      if(typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&v>todayKey)out[keys[i]]=v;
+    }
+  }catch(e){}
+  return out;
+}
+function ebSnooze(map,key,today,days){
+  const out=ebPrune(map,ebDayKey(today));
+  if(typeof key==='string'&&key)out[key]=ebDayKey(ebAddDays(today,ebInt(days,1,30,1)));
+  return out;
+}
+/* ===== EXPIRY BANNER CORE END ===== */
+
+(()=>{try{
+const K_CFG='mm.expiry', K_SN='mm.expiry.snooze';
+let idx=0, items=[], sig='', timer=null, hold=false, holdTimer=null, tries=0;
+const esc2=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money=n=>typeof mny==='function'?mny(n):'$'+(Math.round(n*100)/100);
+function load(){try{return ebNormalize(JSON.parse(localStorage.getItem(K_CFG)))}catch(e){return ebNormalize(null)}}
+function loadSn(){try{const o=JSON.parse(localStorage.getItem(K_SN));return(o&&typeof o==='object'&&!Array.isArray(o))?o:{}}catch(e){return{}}}
+function saveSn(o){try{localStorage.setItem(K_SN,JSON.stringify(o))}catch(e){}}
+function owedNow(){
+  try{
+    const raw=(typeof store!=='undefined'&&store)?(store.base||store.raw):null;
+    if(!raw)return null;
+    const t=new Date(), today=new Date(t.getFullYear(),t.getMonth(),t.getDate());   // fresh every time, so it stays right if the app is left open past midnight
+    const m=owedModel(raw,today);
+    return(m&&m.hasOwed)?m:null;
+  }catch(e){return null}
+}
+function css(){
+  if(document.getElementById('eb-css'))return;
+  const s=document.createElement('style'); s.id='eb-css';
+  s.textContent=
+'.eb{position:fixed;left:max(16px,env(safe-area-inset-left,0px));right:96px;bottom:calc(24px + env(safe-area-inset-bottom,0px));z-index:60;pointer-events:none;display:flex;justify-content:flex-start}'+
+'@media (max-width:720px){.eb{bottom:calc(88px + env(safe-area-inset-bottom,0px));right:84px}}'+
+'@media print{.eb{display:none}}'+
+'.eb-card{pointer-events:auto;box-sizing:border-box;width:100%;max-width:420px;padding:10px 12px;border-radius:14px;border:1px solid var(--line,#2a303b);background:var(--surface,#14181f);color:var(--ink,var(--text,#e9ecf1));box-shadow:0 8px 30px rgba(0,0,0,.28);font-size:13px;line-height:1.35;opacity:1;transform:none;transition:opacity .28s ease,transform .28s ease}'+
+':root[data-ap3-anim] .eb-card{transition-duration:var(--ap3-td) !important}'+
+'.eb-card.eb-out{opacity:0;transform:translateY(8px)}'+
+'.eb-pending{border-color:var(--ss-yellow);background:color-mix(in srgb,var(--ss-yellow-soft) 85%,var(--surface,#14181f))}'+
+'.eb-overdue{border-color:var(--bad);background:color-mix(in srgb,var(--bad-soft) 85%,var(--surface,#14181f));box-shadow:0 0 0 2px var(--bad),0 0 8px var(--bad);animation:ss-blink 1.4s ease-in-out infinite}'+
+'.eb-tag{display:inline-block;padding:1px 8px;border-radius:9999px;font-size:11px;font-weight:700;margin-right:6px;vertical-align:1px}'+
+'.eb-pending .eb-tag{background:var(--ss-yellow-solid);color:var(--ss-yellow-ink)}'+
+'.eb-overdue .eb-tag{background:var(--bad);color:#fff;border-radius:5px}'+
+'.eb-t{font-weight:700;overflow-wrap:anywhere}'+
+'.eb-d{margin-top:2px;color:var(--muted,inherit);overflow-wrap:anywhere}'+
+'.eb-f{display:flex;align-items:center;gap:6px;margin-top:8px}'+
+'.eb-n{margin-right:auto;font-size:11px;color:var(--muted,inherit)}'+
+'.eb-b{font:inherit;font-size:12px;padding:4px 10px;border-radius:9px;border:1px solid var(--line,#2a303b);background:transparent;color:inherit;cursor:pointer}'+
+'.eb-s-small .eb-card{font-size:12px;padding:7px 10px}.eb-s-large .eb-card{font-size:15px;padding:14px 16px}';
+  document.head.appendChild(s);
+}
+function pauseOn(){const c=load(); if(!c.pause)return; hold=true; clearTimeout(timer); timer=null}
+/* Removing the banner can swallow its mouse-leave / focus-out events, so the pause is cleared here too, or rotation would stay stuck for the next banner. */
+function gone(b){if(b)b.remove(); hold=false; clearTimeout(holdTimer); clearTimeout(timer); timer=null; sig=''}
+function pauseOff(){hold=false; clearTimeout(holdTimer); schedule()}
+function bar(){
+  let b=document.getElementById('expiry-banner');
+  if(!b){
+    css();
+    b=document.createElement('div'); b.id='expiry-banner';
+    b.setAttribute('role','region'); b.setAttribute('aria-label','Deposit and loan deadlines');
+    b.innerHTML='<div class="eb-card"></div>';
+    b.addEventListener('pointerenter',e=>{if(e.pointerType==='mouse')pauseOn()});
+    b.addEventListener('pointerleave',e=>{if(e.pointerType==='mouse')pauseOff()});
+    b.addEventListener('focusin',pauseOn);
+    b.addEventListener('focusout',pauseOff);
+    b.addEventListener('touchstart',()=>{pauseOn(); clearTimeout(holdTimer); holdTimer=setTimeout(pauseOff,8000)},{passive:true});
+    document.body.appendChild(b);
+  }
+  return b;
+}
+function paint(card,it,n){
+  card.className='eb-card eb-'+it.level;
+  const head=it.kind==='loan'?'Loan return':'Deposit pickup';
+  const bits=[it.what,(it.kind==='loan'?'owes ':'balance ')+money(it.amount),it.when].filter(Boolean);
+  card.innerHTML=
+    '<div class="eb-t"><span class="eb-tag">'+(it.level==='overdue'?'Overdue':'Due soon')+'</span>'+esc2(head)+(it.name?' · '+esc2(it.name):'')+'</div>'+
+    '<div class="eb-d">'+esc2(bits.join(' · '))+'</div>'+
+    '<div class="eb-f"><span class="eb-n">'+(n>1?(idx+1)+' of '+n:'')+'</span>'+
+    '<button type="button" class="eb-b" data-eb="snooze">Snooze</button><button type="button" class="eb-b" data-eb="dismiss">Dismiss</button></div>';
+}
+function show(animate){
+  const b=bar(), card=b.firstChild, it=items[idx];
+  if(!it)return;
+  const ms=animate?(parseFloat(getComputedStyle(card).transitionDuration)||0)*1000:0;   // follows the Animation speed setting; 0 under reduced motion
+  if(!ms){paint(card,it,items.length);return}
+  card.classList.add('eb-out');
+  setTimeout(()=>{const cur=items[idx]; if(cur)paint(card,cur,items.length)},ms);
+}
+function schedule(){
+  clearTimeout(timer); timer=null;
+  if(items.length<2||hold||document.hidden)return;
+  timer=setTimeout(()=>{idx=ebNext(idx,items.length); show(true); schedule()},load().speed*1000);
+}
+function check(){
+  try{
+    const c=load(), b0=document.getElementById('expiry-banner');
+    if(!c.enabled){gone(b0); items=[]; return}
+    const owed=owedNow();
+    if(!owed&&tries++<12)setTimeout(check,5000);   // the sheet data can arrive after start-up
+    const now=new Date();
+    items=ebItems(owed,c,now,ebPrune(loadSn(),ebDayKey(now)));
+    if(!items.length){gone(b0); return}
+    const s=items.map(i=>i.key+'|'+i.level+'|'+i.daysLeft).join(';')+'|'+c.size;
+    const b=bar(); b.className='eb eb-'+c.position+' eb-s-'+c.size;
+    if(idx>=items.length)idx=0;
+    if(s!==sig){sig=s; show(false)}
+    schedule();
+  }catch(e){}
+}
+document.addEventListener('click',e=>{try{
+  const t=e.target&&e.target.closest?e.target.closest('[data-eb]'):null; if(!t)return;
+  const it=items[idx]; if(!it)return;
+  const now=new Date();
+  saveSn(ebSnooze(loadSn(),it.key,now,t.dataset.eb==='dismiss'?3:1));   // Snooze = back tomorrow, Dismiss = back in 3 days
+  sig=''; check();
+}catch(err){}});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)check(); else{clearTimeout(timer); timer=null}});
+window.__mmExpiryCheck=check;
+setTimeout(check,3500); setInterval(check,60000);
+}catch(err){console.error('Expiry banner failed to start (site unaffected):',err)}})();
+
 setTimeout(()=>flush(true),2500);
 setInterval(()=>{if(qn()&&!document.hidden)flush(true)},60000);
 }catch(err){console.error('Log module failed to start (site unaffected):',err)}
