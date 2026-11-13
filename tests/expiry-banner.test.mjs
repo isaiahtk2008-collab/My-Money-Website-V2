@@ -41,7 +41,7 @@ test('the test runs in America/Toronto', () => {
 });
 
 test('settings: on by default, bad values fall back, numbers are clamped', () => {
-  assert.deepEqual(plain(ebNormalize(null)), { enabled: true, position: 'bottom', size: 'medium', depDays: 3, loanDays: 3, speed: 6, pause: true });
+  assert.deepEqual(plain(ebNormalize(null)), { enabled: true, position: 'bottom', size: 'medium', depDays: 3, loanDays: 3, speed: 6, pause: true, invest: true });
   assert.deepEqual(plain(ebNormalize('junk')), plain(ebNormalize(undefined)));
   assert.deepEqual(plain(ebNormalize([])), plain(ebNormalize(null)));
   assert.equal(ebNormalize({ enabled: false }).enabled, false);
@@ -188,7 +188,7 @@ test('amounts and text come through for display; the UI is read-only and escapes
 
 // ---- Part 2 PR 2: Settings UI ----
 test('settings: one option changes at a time and the result is always cleaned', () => {
-  assert.deepEqual(plain(ebPatch(null, 'enabled', false)), { enabled: false, position: 'bottom', size: 'medium', depDays: 3, loanDays: 3, speed: 6, pause: true });
+  assert.deepEqual(plain(ebPatch(null, 'enabled', false)), { enabled: false, position: 'bottom', size: 'medium', depDays: 3, loanDays: 3, speed: 6, pause: true, invest: true });
   assert.equal(ebPatch(null, 'size', 'large').size, 'large');
   assert.equal(ebPatch(null, 'size', 'huge').size, 'medium', 'a bad size falls back');
   assert.equal(ebPatch(null, 'depDays', '99').depDays, 60, 'days are clamped');
@@ -203,7 +203,7 @@ test('settings: one option changes at a time and the result is always cleaned', 
   // keeps the other settings, ignores unknown names, never throws
   const base = { enabled: true, size: 'small', depDays: 5, loanDays: 9, speed: 10, pause: false };
   const next = plain(ebPatch(base, 'depDays', 7));
-  assert.deepEqual(next, { enabled: true, position: 'bottom', size: 'small', depDays: 7, loanDays: 9, speed: 10, pause: false });
+  assert.deepEqual(next, { enabled: true, position: 'bottom', size: 'small', depDays: 7, loanDays: 9, speed: 10, pause: false, invest: true });
   assert.deepEqual(plain(ebPatch(base, 'evil', 1)), plain(ebNormalize(base)));
   assert.deepEqual(plain(ebPatch(base, '__proto__', { enabled: false })), plain(ebNormalize(base)));
   assert.equal(({}).enabled, undefined, 'the global object prototype is untouched');
