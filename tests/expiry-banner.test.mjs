@@ -228,8 +228,8 @@ test('settings UI: lives under In-App, saves only on this device, reset keeps sn
     assert.ok(new RegExp("'" + id + "':'").test(ui), id + ' is wired to a setting');
   }
   assert.ok(/data-ebs="preview"/.test(ui) && /data-ebs="reset"/.test(ui), 'Preview and Reset buttons');
-  assert.ok(/__mmExpirySettingsHtml\(\)/.test(html), 'card is added to the Settings page');
-  assert.ok(html.indexOf('__mmNotifSettingsHtml()') < html.indexOf('__mmExpirySettingsHtml()'), 'card sits next to the weekly reminder');
+  assert.ok(/__mmExpiryBodyHtml\(\)/.test(html), 'expiry controls are drawn inside the In-App Reminders card');
+  assert.ok(/__mmNotifSettingsHtml\(\)/.test(html) && !/__mmExpirySettingsHtml\(\)/.test(html.slice(html.indexOf('function secHtml'), html.indexOf('function renderSecurity'))), 'Settings page has one combined card, not a separate expiry card');
   const writes = ui.match(/localStorage\.(set|remove)Item\(\s*[A-Za-z_'"]+/g) || [];
   assert.ok(writes.every(w => /K_CFG|K_SN|K_STY/.test(w)), 'only the banner settings, style and snooze keys are written: ' + writes.join(' | '));
   const reset = ui.slice(ui.indexOf("t.dataset.ebs==='reset'"), ui.indexOf("t.dataset.ebs==='preview'"));
