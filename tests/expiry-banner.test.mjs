@@ -231,7 +231,7 @@ test('settings UI: lives under In-App, saves only on this device, reset keeps sn
   assert.ok(/__mmExpirySettingsHtml\(\)/.test(html), 'card is added to the Settings page');
   assert.ok(html.indexOf('__mmNotifSettingsHtml()') < html.indexOf('__mmExpirySettingsHtml()'), 'card sits next to the weekly reminder');
   const writes = ui.match(/localStorage\.(set|remove)Item\(\s*[A-Za-z_'"]+/g) || [];
-  assert.ok(writes.every(w => /K_CFG|K_SN/.test(w)), 'only the banner settings and snooze keys are written: ' + writes.join(' | '));
+  assert.ok(writes.every(w => /K_CFG|K_SN|K_STY/.test(w)), 'only the banner settings, style and snooze keys are written: ' + writes.join(' | '));
   const reset = ui.slice(ui.indexOf("t.dataset.ebs==='reset'"), ui.indexOf("t.dataset.ebs==='preview'"));
   assert.ok(/removeItem\(K_CFG\)/.test(reset) && !/K_SN/.test(reset), 'reset clears settings but not snoozes');
   const click = ui.slice(ui.indexOf("if(previewing()){endPreview()"), ui.indexOf("/* ----- Settings card"));

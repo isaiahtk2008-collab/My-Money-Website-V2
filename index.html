@@ -7734,6 +7734,9 @@ function ebAnnounce(items){
 
 (()=>{try{
 const K_CFG='mm.expiry', K_SN='mm.expiry.snooze';
+/* Banner look. Stored on its own (device-local) so the banner settings and their logic are untouched. Only changes how the banner is drawn: same items, buttons, snooze, dismiss and rotation. Anything unknown means 'card' (the original look). */
+const K_STY='mm.expiry.style', EB_STYLES=['card','bar','pill','minimal'];
+function loadStyle(){try{const v=localStorage.getItem(K_STY);return EB_STYLES.indexOf(v)>=0?v:'card'}catch(e){return'card'}}
 let idx=0, items=[], sig='', liveSig='', timer=null, hold=false, holdTimer=null, tries=0, previewUntil=0, previewTimer=null;
 const esc2=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>typeof mny==='function'?mny(n):'$'+(Math.round(n*100)/100);
@@ -7783,7 +7786,30 @@ function css(){
 '@media (max-width:720px){.eb-top{left:max(12px,env(safe-area-inset-left,0px));right:12px}.eb-left{left:max(12px,env(safe-area-inset-left,0px))}.eb-left,.eb-right{bottom:calc(156px + env(safe-area-inset-bottom,0px))}}'+
 /* The fade-out slides toward the edge the banner lives on. */
 '.eb-top .eb-card.eb-out{transform:translateY(-8px)}.eb-left .eb-card.eb-out{transform:translateX(-8px)}.eb-right .eb-card.eb-out{transform:translateX(8px)}'+
-'@media (prefers-reduced-motion:reduce){.eb-card,:root[data-ap3-anim] .eb-card{transition:none !important}.eb-overdue{animation:none !important}}';
+'@media (prefers-reduced-motion:reduce){.eb-card,:root[data-ap3-anim] .eb-card{transition:none !important}.eb-overdue{animation:none !important}}'+
+/* ----- Banner looks. Appearance only. 'card' (the original) has no rules here, so it looks exactly as before. Every selector starts with .eb.eb-st-NAME. ----- */
+/* Top bar: full-width strip across the top of the page area, one row, always at the top (the script adds eb-top for this look). */
+'.eb.eb-st-bar{left:var(--rail,76px);right:0}'+
+'.eb.eb-st-bar .eb-card{max-width:none;width:100%;display:flex;align-items:center;gap:12px;padding:8px 16px;border-radius:0;border-width:0 0 var(--ap3-w,1px) 0;box-shadow:none}'+
+'.eb.eb-st-bar .eb-t{flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'+
+'.eb.eb-st-bar .eb-d{flex:1 1 0;min-width:0;margin-top:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'+
+'.eb.eb-st-bar .eb-f{flex:0 0 auto;margin-top:0}'+
+'.eb.eb-st-bar .eb-n{margin-right:6px}'+
+'.eb.eb-st-bar.eb-s-small .eb-card{padding:5px 12px}.eb.eb-st-bar.eb-s-large .eb-card{padding:12px 18px}'+
+'@media (max-width:720px){.eb.eb-st-bar{left:0}.eb.eb-st-bar .eb-card{flex-wrap:wrap;gap:4px 10px;padding:8px 12px}.eb.eb-st-bar .eb-t{flex:1 0 100%;white-space:normal}.eb.eb-st-bar .eb-d{flex:1 0 100%;white-space:normal}.eb.eb-st-bar .eb-f{flex:1 0 100%;justify-content:flex-end}}'+
+/* Pill: compact rounded capsule that shrinks to its text, one row. Follows the chosen Position. On the slim side positions it wraps so it still fits. */
+'.eb.eb-st-pill .eb-card{width:auto;max-width:100%;display:flex;align-items:center;gap:8px;padding:6px 8px 6px 12px;border-radius:9999px}'+
+'.eb.eb-st-pill .eb-t,.eb.eb-st-pill .eb-d{min-width:0;margin-top:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'+
+'.eb.eb-st-pill .eb-f{flex:0 0 auto;margin-top:0;gap:4px}'+
+'.eb.eb-st-pill .eb-n{margin-right:4px}'+
+'.eb.eb-st-pill .eb-b{border-radius:9999px;padding:3px 10px}'+
+'.eb.eb-st-pill.eb-s-small .eb-card{padding:4px 6px 4px 10px}.eb.eb-st-pill.eb-s-large .eb-card{padding:9px 10px 9px 16px}'+
+'.eb.eb-st-pill.eb-left .eb-card,.eb.eb-st-pill.eb-right .eb-card{width:220px;flex-wrap:wrap;border-radius:18px;padding:8px 12px}.eb.eb-st-pill.eb-left .eb-t,.eb.eb-st-pill.eb-right .eb-t,.eb.eb-st-pill.eb-left .eb-d,.eb.eb-st-pill.eb-right .eb-d{flex:1 0 100%;white-space:normal}.eb.eb-st-pill.eb-left .eb-f,.eb.eb-st-pill.eb-right .eb-f{flex:1 0 100%;justify-content:flex-end}'+
+'@media (max-width:720px){.eb.eb-st-pill .eb-card{flex-wrap:wrap;border-radius:18px;padding:8px 12px}.eb.eb-st-pill .eb-t,.eb.eb-st-pill .eb-d{flex:1 0 100%;white-space:normal}.eb.eb-st-pill .eb-f{flex:1 0 100%;justify-content:flex-end}}'+
+/* Minimal: flat, quiet card with a status stripe on its left edge. Overdue keeps the original blink, so it is just as hard to miss. */
+'.eb.eb-st-minimal .eb-card{border-radius:6px;border-width:0 0 0 4px;box-shadow:none;background:var(--surface,#14181f)}'+
+'.eb.eb-st-minimal .eb-card.eb-pending{border-left-color:var(--ss-yellow);background:var(--surface,#14181f)}'+
+'.eb.eb-st-minimal .eb-card.eb-overdue{border-left-color:var(--bad);background:var(--surface,#14181f)}';
   document.head.appendChild(s);
 }
 function pauseOn(){const c=load(); if(!c.pause)return; hold=true; clearTimeout(timer); timer=null}
@@ -7847,8 +7873,9 @@ function check(){
       items=ebWithInvest(items,c,!!(api&&api.due()),now,sn);   // the weekly investment reminder rides along (after deposits and loans)
     }
     if(!items.length){gone(b0); return}
-    const s=items.map(i=>i.key+'|'+i.level+'|'+i.daysLeft).join(';')+'|'+c.size+'|'+c.position;
-    const b=bar(); b.className='eb eb-'+c.position+' eb-s-'+c.size+(pv?' eb-pv':'');
+    const st=loadStyle(), pos=st==='bar'?'top':c.position;   // the top bar always sits at the top
+    const s=items.map(i=>i.key+'|'+i.level+'|'+i.daysLeft).join(';')+'|'+c.size+'|'+c.position+'|'+st;
+    const b=bar(); b.className='eb eb-'+pos+' eb-s-'+c.size+' eb-st-'+st+(pv?' eb-pv':'');
     if(idx>=items.length)idx=0;
     if(s!==sig){sig=s; show(false)}
     const ls=items.map(i=>i.key+'|'+i.level).join(';'), live=document.getElementById('eb-live');
@@ -7889,6 +7916,7 @@ function settingsHtml(){
 <section class="m3-card" id="eb-card">
   <div class="m3-card-head"><span class="m3-icon" aria-hidden="true">event_upcoming</span><div><div class="m3-card-title">Expiry banner</div><div class="m3-card-sub">Warns you when a deposit pickup or a loan return is close or overdue. Shown inside the app while it is open. Stays on this device.</div></div></div>
   <div class="m3-row"><div><b>Expiry banner</b><small style="display:block">Show a banner for deposits and loans that are due soon</small></div><label><input type="checkbox" id="eb-on" ${c.enabled?'checked':''}> On</label></div>
+  <div class="lg-f"><label class="lg-l" for="eb-style">Banner style</label><select class="lg-set" id="eb-style"><option value="card"${sel(loadStyle(),'card')}>Card (default)</option><option value="bar"${sel(loadStyle(),'bar')}>Top bar</option><option value="pill"${sel(loadStyle(),'pill')}>Pill</option><option value="minimal"${sel(loadStyle(),'minimal')}>Minimal</option></select><small style="display:block;color:var(--muted)">Only changes how the banner looks. Picking one shows a short preview. The Top bar always sits at the top.</small></div>
   <div class="lg-f"><label class="lg-l" for="eb-pos">Position</label><select class="lg-set" id="eb-pos"><option value="bottom"${sel(c.position,'bottom')}>Bottom</option><option value="top"${sel(c.position,'top')}>Top</option><option value="left"${sel(c.position,'left')}>Left</option><option value="right"${sel(c.position,'right')}>Right</option></select><small style="display:block;color:var(--muted)">Left and Right show a slim side card.</small></div>
   <div class="lg-f"><label class="lg-l" for="eb-size">Size</label><select class="lg-set" id="eb-size"><option value="small"${sel(c.size,'small')}>Small</option><option value="medium"${sel(c.size,'medium')}>Medium</option><option value="large"${sel(c.size,'large')}>Large</option></select></div>
   <div class="lg-f"><label class="lg-l" for="eb-dep">Deposits: show this many days before pickup (0 = only today and overdue)</label><input type="number" class="lg-set" id="eb-dep" min="0" max="60" step="1" inputmode="numeric" value="${c.depDays}"></div>
@@ -7902,6 +7930,7 @@ function settingsHtml(){
 }
 function syncControls(){
   const c=load(), set=(id,fn)=>{const el=document.getElementById(id); if(el)fn(el)};
+  set('eb-style',e=>{e.value=loadStyle()});
   set('eb-on',e=>{e.checked=c.enabled}); set('eb-pos',e=>{e.value=c.position}); set('eb-size',e=>{e.value=c.size});
   set('eb-dep',e=>{e.value=c.depDays}); set('eb-loan',e=>{e.value=c.loanDays});
   set('eb-speed',e=>{e.value=c.speed}); set('eb-speed-v',e=>{e.textContent=SPEED_TXT(c.speed)});
@@ -7911,6 +7940,15 @@ const FIELD={'eb-on':'enabled','eb-pos':'position','eb-size':'size','eb-dep':'de
 document.addEventListener('input',e=>{try{
   const t=e.target; if(!t||t.id!=='eb-speed')return;
   const v=document.getElementById('eb-speed-v'); if(v)v.textContent=SPEED_TXT(ebPatch(null,'speed',t.value).speed);
+}catch(err){}});
+/* Banner style picker: saves only mm.expiry.style, then previews the new look for 20 seconds (made-up items, nothing real is changed). */
+document.addEventListener('change',e=>{try{
+  const t=e.target; if(!t||t.id!=='eb-style')return;
+  const v=EB_STYLES.indexOf(t.value)>=0?t.value:'card';
+  localStorage.setItem(K_STY,v); syncControls();
+  previewUntil=Date.now()+20000; idx=0; sig=''; hold=false;
+  clearTimeout(previewTimer); previewTimer=setTimeout(()=>{endPreview(); check()},20000);
+  check();
 }catch(err){}});
 document.addEventListener('change',e=>{try{
   const t=e.target; if(!t||!t.id||!Object.prototype.hasOwnProperty.call(FIELD,t.id))return;
@@ -7924,6 +7962,7 @@ document.addEventListener('click',e=>{try{
   const t=e.target&&e.target.closest?e.target.closest('[data-ebs]'):null; if(!t)return;
   if(t.dataset.ebs==='reset'){
     try{localStorage.removeItem(K_CFG)}catch(e2){}   // snoozes are kept: they are not settings
+    try{localStorage.removeItem(K_STY)}catch(e2){}   // the banner look goes back to the original card
     endPreview(); syncControls(); check();
     if(window.__mmNotifApi)window.__mmNotifApi.check();
   }
