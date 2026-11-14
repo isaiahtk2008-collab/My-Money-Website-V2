@@ -2001,6 +2001,12 @@ html.mm-fold-on.mm-fold-c-bl .mm-folded,html.mm-fold-on.mm-fold-c-br .mm-folded{
 #hfx-card .ap3-row input[type=range]{width:100%;accent-color:var(--accent);margin:6px 0 2px}
 #hfx-card .ap3-row .hint{display:block}
 #hfx-card .ap3-drawer-actions{display:grid;grid-template-columns:1fr;gap:8px;margin-top:12px}
+/* precise sliders: a -/+ button on each side of every Fine tuning slider (tap = 1 step, hold = repeat) so every single value can be reached */
+#hfx-card .ap3-sl{display:flex;align-items:center;gap:8px;margin:4px 0 2px}
+#hfx-card .ap3-sl input[type=range]{flex:1 1 auto;min-width:0;width:auto;margin:0;height:32px;touch-action:pan-y}
+#hfx-card .ap3-step{flex:none;width:32px;height:32px;padding:0;border-radius:50%;border:var(--ap3-w,1px) solid var(--line);background:var(--surface);color:var(--ink);font:700 18px/1 var(--font,inherit);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;touch-action:manipulation;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+#hfx-card .ap3-step:active{background:var(--accent-soft,var(--surface2))}
+#hfx-card .ap3-step:disabled{opacity:.4;cursor:default}
 
 /* theme chips + AMOLED */
 #hfx-card .ap3-theme .lg-chips{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
@@ -8913,7 +8919,7 @@ setInterval(()=>{if(qn()&&!document.hidden)flush(true)},60000);
     var THEMES = [['auto', 'Match device'], ['light', 'Light'], ['dark', 'Dark']];
     var COPY = {
       round: ['Corner roundness', 'Squarer or rounder cards and buttons. 100% is the current look.'],
-      line: ['Line thickness', 'Thinner or thicker borders on cards, inputs, buttons and the banner. 100% is the current look, 0 removes them. Focus rings stay as they are.'],
+      line: ['Line thickness', 'Thinner or thicker borders on cards, inputs, buttons and the banner. 100% is the current look, 0 removes them. Focus rings stay as they are. Browsers draw lines in whole screen pixels, so small steps may look the same until the next pixel.'],
       text: ['Interface size', 'Makes text and controls bigger or smaller together. Applies when you let go.'],
       enl: ['Hover enlarge', 'How much things grow under the pointer, up to 500%. 0 keeps the glow but stops the growing. Computers only.'],
       bg: ['Card transparency', 'Lower makes cards see-through with a frosted look. 100% is solid.'],
@@ -8977,11 +8983,27 @@ setInterval(()=>{if(qn()&&!document.hidden)flush(true)},60000);
       h += '<small class="hint">AMOLED black makes the dark background true black. It only shows in dark mode and can save battery on OLED phones.</small></div>';
       return h;
     }
+    /* wraps a range input with a -/+ button on each side (one step per tap, hold to repeat). "key" is the slider's own name: round, line, text, enl, bg, anim or glow */
+    function stepBtn(key, dir, label) {
+      return '<button type="button" class="ap3-step" data-ap3-step="' + dir + '" data-ap3-for="' + key + '" aria-label="' + (dir < 0 ? 'Decrease ' : 'Increase ') + label + ' by 1">' + (dir < 0 ? '−' : '+') + '</button>';
+    }
+    function wrapSlider(key, label, inputHtml) {
+      return '<div class="ap3-sl">' + stepBtn(key, -1, label) + inputHtml + stepBtn(key, 1, label) + '</div>';
+    }
     function rowHtml(n) {
       var r = RANGE[n], f = fmt(n, cur[n]);
       return '<div class="lg-f ap3-row"><div class="ap3-rowhead"><label class="lg-l" for="ap3-' + n + '">' + COPY[n][0] + '</label><output id="ap3-' + n + '-v" for="ap3-' + n + '">' + f + '</output></div>' +
-        '<input type="range" id="ap3-' + n + '" data-ap3-n="' + n + '" min="' + r[0] + '" max="' + r[1] + '" step="1" value="' + cur[n] + '" aria-label="' + COPY[n][0] + '" aria-valuetext="' + f + '">' +
+        wrapSlider(n, COPY[n][0], '<input type="range" id="ap3-' + n + '" data-ap3-n="' + n + '" min="' + r[0] + '" max="' + r[1] + '" step="1" value="' + cur[n] + '" aria-label="' + COPY[n][0] + '" aria-valuetext="' + f + '">') +
         '<small class="hint">' + COPY[n][1] + '</small></div>';
+    }
+    /* the Glow strength slider (0 to 100) gets the same buttons; if its markup is not found it is left exactly as it was */
+    function wrapGlow(glow) {
+      try {
+        if (typeof glow !== 'string' || !glow) return glow;
+        var m = glow.match(/<input type="range" id="hfx-s"[^>]*>/);
+        if (!m) return glow;
+        return glow.replace(m[0], wrapSlider('glow', 'Glow strength', m[0]));
+      } catch (e) { return glow; }
     }
     /* the Glow strength slider moves from the top of the card into the Fine tuning drawer (same element ids, so its existing behavior is unchanged) */
     function pullGlow(out) {
@@ -9052,7 +9074,7 @@ setInterval(()=>{if(qn()&&!document.hidden)flush(true)},60000);
       var h = '<details class="hfx-drawer ap3-drawer" id="ap3-drawer"' + (open ? ' open' : '') + '>';
       h += '<summary class="hfx-drawer-sum"><span class="hfx-drawer-t">Fine tuning</span><span class="hfx-drawer-s">Glow, roundness, lines, size, hover, transparency, speed</span></summary>';
       h += '<div class="hfx-drawer-body">';
-      if (typeof glowHtml === 'string' && glowHtml) h += glowHtml;
+      if (typeof glowHtml === 'string' && glowHtml) h += wrapGlow(glowHtml);
       for (var i = 0; i < NAMES.length; i++) h += rowHtml(NAMES[i]);
       h += '<div class="ap3-drawer-actions"><button type="button" class="chip-b" data-ap3-resetfine="1">Reset fine tuning</button></div>';
       h += '</div></details>';
@@ -9171,6 +9193,59 @@ setInterval(()=>{if(qn()&&!document.hidden)flush(true)},60000);
         var v = parseInt(t.value, 10); if (isNaN(v)) return;
         cur.text = Math.max(RANGE.text[0], Math.min(RANGE.text[1], v)); C.apply(); C.saveNum('text');
         say('Saved', false);
+      } catch (err) {}
+    });
+    /* -/+ buttons: nudge a slider by exactly 1. They set the slider's value and fire the same "input" event a drag does, so saving, syncing and the live preview all work the same way. */
+    var hold = { delay: null, rep: null, key: null, dir: 0, moved: false, t0: 0 };
+    function sliderFor(key) { var c = card(); return c ? c.querySelector(key === 'glow' ? '#hfx-s' : '#ap3-' + key) : null; }
+    function boundsFor(key) { return key === 'glow' ? [0, 100] : (RANGE[key] || null); }
+    function stepOnce(key, dir) {
+      try {
+        var el = sliderFor(key), b = boundsFor(key); if (!el || !b) return false;
+        var v = parseInt(el.value, 10); if (isNaN(v)) return false;
+        var nv = Math.max(b[0], Math.min(b[1], v + dir)); if (nv === v) return false;
+        el.value = String(nv);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+      } catch (err) { return false; }
+    }
+    function finishStep(key) {   /* Interface size only applies when you let go, so a button press ends with the same "change" a drag ends with */
+      try { if (key === 'text') { var el = sliderFor('text'); if (el) el.dispatchEvent(new Event('change', { bubbles: true })); } } catch (err) {}
+    }
+    function stopHold() {
+      try {
+        if (hold.delay) { clearTimeout(hold.delay); hold.delay = null; }
+        if (hold.rep) { clearInterval(hold.rep); hold.rep = null; }
+        if (hold.key) { var k = hold.key; hold.key = null; if (hold.moved) finishStep(k); }
+        hold.moved = false;
+      } catch (err) {}
+    }
+    document.addEventListener('pointerdown', function (e) {
+      try {
+        var b = e.target && e.target.closest ? e.target.closest('#hfx-card .ap3-step') : null; if (!b) return;
+        if (e.button !== undefined && e.button > 0) return;
+        var key = b.getAttribute('data-ap3-for'), dir = parseInt(b.getAttribute('data-ap3-step'), 10);
+        if (!boundsFor(key) || (dir !== 1 && dir !== -1)) return;
+        stopHold();
+        hold.key = key; hold.dir = dir; hold.moved = false; hold.t0 = Date.now();
+        if (stepOnce(key, dir)) hold.moved = true;
+        hold.delay = setTimeout(function () {   /* hold: repeat, and speed up after a second */
+          hold.rep = setInterval(function () {
+            if (stepOnce(hold.key, hold.dir)) hold.moved = true;
+            if (Date.now() - hold.t0 > 1500 && hold.rep) { clearInterval(hold.rep); hold.rep = setInterval(function () { if (stepOnce(hold.key, hold.dir)) hold.moved = true; }, 30); }
+          }, 90);
+        }, 380);
+      } catch (err) {}
+    });
+    ['pointerup', 'pointercancel'].forEach(function (ev) { document.addEventListener(ev, stopHold, true); });
+    window.addEventListener('blur', stopHold);
+    document.addEventListener('contextmenu', function (e) { try { if (e.target && e.target.closest && e.target.closest('#hfx-card .ap3-step')) e.preventDefault(); } catch (err) {} });
+    document.addEventListener('click', function (e) {   /* keyboard (Enter or Space) on a focused button: a mouse or touch press was already handled on pointerdown */
+      try {
+        var b = e.target && e.target.closest ? e.target.closest('#hfx-card .ap3-step') : null; if (!b || e.detail !== 0) return;
+        var key = b.getAttribute('data-ap3-for'), dir = parseInt(b.getAttribute('data-ap3-step'), 10);
+        if (!boundsFor(key) || (dir !== 1 && dir !== -1)) return;
+        if (stepOnce(key, dir)) finishStep(key);
       } catch (err) {}
     });
     document.addEventListener('toggle', function (e) {
