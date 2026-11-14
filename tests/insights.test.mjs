@@ -28,7 +28,9 @@ function fnBlock(name) {
   throw new Error('unbalanced braces in ' + name);
 }
 const consts = ['esc', 'nf0', 'nf2', 'mny', 'sgn', 'SM', 'pct', 'MO', 'DOW', 'DAY', 'sod', 'addD', 'diffD', 'fd', 'dkey', 'sum', 'avg', 'median', 'groupBy', 'plural', 'kindWord', 'inR'].map(constLine);
-const funcs = ['spendRows', 'tally', 'bucketsFor', 'autoGran', 'spendingStats', 'soldItems', 'resellingStats', 'inventoryStats', 'investingStats', 'insightsLegacy'].map(n => {
+const extraConsts = [html.match(/^const pd=[\s\S]*?(?=^const rel=)/m)[0], constLine('num')];
+const owedStrLine = html.match(/^const owedStr = .*$/m)[0];
+const funcs = ['trStr', 'trBlankRow', 'trAsset', 'trDir', 'trStatus', 'owedModel', 'tradingModel', 'ipoStage', 'ipoNext', 'preIpoModel', 'spendRows', 'tally', 'bucketsFor', 'autoGran', 'spendingStats', 'soldItems', 'resellingStats', 'inventoryStats', 'investingStats', 'insightsLegacy'].map(n => {
   // insightsLegacy is the old function kept as a fallback
   return fnBlock(n);
 });
@@ -37,7 +39,7 @@ if (!bm) throw new Error('INSIGHTS-LIB markers not found in index.html');
 
 const ctx = vm.createContext({ console, Intl, Math, Date, Set, Map, Array, Object, JSON, Number, String, RegExp, setInterval: () => 0, document: { hidden: false } });
 vm.runInContext(
-  [...consts, ...funcs, bm[0], 'globalThis.__t={INSIGHT_LIB,INSIGHT_ORDER,insightCtx,insightPool,pickInsights,insights,insightsLegacy,insightQuota,insightDayNum,insightCursor,spendingStats,resellingStats,inventoryStats,investingStats,addD,sod,esc};'].join('\n'),
+  [...consts, ...extraConsts, owedStrLine, ...funcs, bm[0], 'globalThis.__t={INSIGHT_LIB,INSIGHT_ORDER,insightCtx,insightPool,pickInsights,insights,insightsLegacy,insightQuota,insightDayNum,insightCursor,spendingStats,resellingStats,inventoryStats,investingStats,addD,sod,esc};'].join('\n'),
   ctx
 );
 const T = ctx.__t;
@@ -119,10 +121,26 @@ function rangeOf(len) {
   const start = T.addD(NOW, -(len - 1));
   return { start, end: NOW, len, pStart: T.addD(start, -len), pEnd: T.addD(start, -1) };
 }
+const dd = k => new Date(NOW.getFullYear(), NOW.getMonth(), NOW.getDate() + k);
+const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+function makeRaw(evil) {
+  const nm = evil ? '<img src=x onerror=alert(1)>' : 'Sam';
+  const loan = (p, tot, paid, out, due, st) => ({ Type: 'Loan', Person: p, 'Item / Device': 'Phone', 'Total Amount': tot, 'Amount Paid': paid, 'Date Out': iso(dd(out)), 'Due Date': due == null ? '' : iso(dd(due)), Status: st || 'Out' });
+  const dep = (p, tot, paid, due, st) => ({ Type: 'Deposit', Person: p, 'Item / Device': 'Laptop', 'Total Amount': tot, 'Amount Paid': paid, 'Date Out': iso(dd(-5)), 'Due Date': iso(dd(due)), Status: st || 'Waiting' });
+  const tr = (sym, at, ent, ex, fee, opened, st, extra) => Object.assign({ 'Date Opened': iso(dd(opened)), 'Asset Type': at, Symbol: sym, Direction: 'Long', Status: st, Quantity: 10, 'Entry Price': ent, 'Exit Price': ex, Fees: fee, Currency: 'CAD', 'Date Closed': ex == null ? '' : iso(dd(opened + 3)) }, extra || {});
+  const ipo = (c, st, bid, ipoD, lock, cp) => ({ Company: c, Status: st, 'Date Submitted': iso(dd(-20)), 'Bid Closes': iso(dd(bid)), 'IPO Date': iso(dd(ipoD)), 'Lockup Expiry': iso(dd(lock)), 'Shares Requested': 100, 'Shares Allocated': st === 'Not allocated' ? '' : 50, 'Price Low': 10, 'Price High': 12, 'Final Price': 11, 'Current Price': cp, Currency: 'USD' });
+  return {
+    Owed: { rows: [loan(nm, 300, 50, -30, -3), loan('Ben', 120, 0, -10, null), loan('Cy', 80, 80, -40, -20, 'Returned'), dep('Dee', 500, 100, 4), dep('Eli', 400, 400, -2, 'Picked Up'), dep('Fay', 300, 300, -9, 'Picked Up')] },
+    Trades: { rows: [tr(evil ? nm : 'AAPL', 'Stock', 10, 14, 1, -60, 'Closed'), tr('MSFT', 'Stock', 10, 8, 1, -50, 'Closed'), tr('NVDA', 'Stock', 10, 15, 1, -45, 'Closed'), tr('BTC', 'Crypto', 10, 12, 1, -40, 'Closed'), tr('ETH', 'Crypto', 10, 7, 1, -35, 'Closed'), tr('SOL', 'Crypto', 10, 13, 1, -30, 'Closed'), tr('TSLA', 'Stock', 10, null, 0, -40, 'Open'), tr('SPY', 'Option', 2, null, 0, -5, 'Open', { Expiry: iso(dd(6)) })] },
+    PreIPO: { rows: [ipo('Acme', 'Bidding', 3, 9, 100, ''), ipo('Beta', 'Listed', -20, -10, 12, 14), ipo('Gamma', 'Allocated', -5, 2, 60, 12), ipo('Delta', 'Not allocated', -30, -20, 0, ''), ipo('Eps', 'Not allocated', -30, -20, 0, '')] }
+  };
+}
 function build(opts, len = 30) {
   const D = makeData(opts), R = rangeOf(len);
+  if (!opts.empty && !opts.sparse) { D.items.forEach((it, i) => { if (i % 5 === 0) { it.isTrade = true; it.isTradeIn = true; it.tradeValue = 100; } }); }
+  const raw = (opts.empty || opts.sparse) ? null : makeRaw(opts.evil);
   const ss = T.spendingStats(D, R, {}, 'week'), rs = T.resellingStats(D, R, 'All');
-  return { D, R, ss, rs, c: T.insightCtx(D, R, ss, rs, NOW) };
+  return { D, R, ss, rs, c: T.insightCtx(D, R, ss, rs, NOW, raw) };
 }
 const variants = {
   rich30: build({ seed: 1 }, 30),
@@ -137,11 +155,12 @@ const variants = {
 
 /* ---------- tests ---------- */
 console.log('Insights library');
+const N_LIB = T.INSIGHT_LIB.length;
 
-test('library has exactly 70 insights with unique ids', () => {
-  assert.equal(T.INSIGHT_LIB.length, 70);
-  assert.equal(new Set(T.INSIGHT_LIB.map(d => d.id)).size, 70);
-  assert.equal(T.INSIGHT_ORDER.length, 70);
+test('library has the full insight library with unique ids', () => {
+  assert.equal(T.INSIGHT_LIB.length, N_LIB);
+  assert.equal(new Set(T.INSIGHT_LIB.map(d => d.id)).size, N_LIB);
+  assert.equal(T.INSIGHT_ORDER.length, N_LIB);
   T.INSIGHT_LIB.forEach(d => { assert.equal(typeof d.run, 'function', d.id); assert.ok(d.cat, d.id + ' has no category'); });
 });
 
@@ -157,7 +176,7 @@ test('every returned insight is well formed and text is clean', () => {
       assert.ok(typeof it.t === 'string' && it.t.length > 8, it._k + ' text on ' + name);
       assert.ok(!/NaN|undefined|Infinity|\bnull\b/.test(it.t), it._k + ' bad text: ' + it.t);
       assert.ok(['goto', 'open'].includes(it.act), it._k);
-      assert.ok(['spending', 'reselling', 'inventory', 'investing', 'data'].includes(it.v), it._k + ' view ' + it.v);
+      assert.ok(['spending', 'reselling', 'inventory', 'investing', 'data', 'owed', 'trading'].includes(it.v), it._k + ' view ' + it.v);
       assert.ok(['spend', 'clock', 'up', 'down', 'user', 'alert', 'bulb', 'tag', 'cart', 'invest'].includes(it.i), it._k + ' icon');
       if (it.act === 'open') assert.ok(it.id, it._k + ' open without id');
     }
@@ -175,7 +194,7 @@ test('user-supplied text is escaped (no raw HTML from the sheet)', () => {
   assert.ok(sawEscaped, 'expected at least one insight to show the escaped hostile name');
 });
 
-test('across data scenarios all 70 insights can fire', () => {
+test('across data scenarios every insight can fire', () => {
   const fired = new Set();
   for (const v of Object.values(variants)) for (const k of T.insightPool(v.c).keys()) fired.add(k);
   const missing = T.INSIGHT_LIB.map(d => d.id).filter(id => !fired.has(id));
@@ -203,7 +222,7 @@ const poolRich = T.insightPool(variants.rich90.c);
 
 test('rich data gives a pool big enough for the rotation (at least 30 eligible)', () => {
   assert.ok(poolRich.size >= 30, 'pool size ' + poolRich.size);
-  console.log('       eligible insights with the rich test data: ' + poolRich.size + ' of 70');
+  console.log('       eligible insights with the rich test data: ' + poolRich.size + ' of ' + N_LIB);
 });
 
 test('every day shows between 4 and 8 insights (400 consecutive days)', () => {
