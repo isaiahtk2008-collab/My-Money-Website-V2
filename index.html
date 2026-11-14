@@ -7737,6 +7737,18 @@ const K_CFG='mm.expiry', K_SN='mm.expiry.snooze';
 /* Banner look. Stored on its own (device-local) so the banner settings and their logic are untouched. Only changes how the banner is drawn: same items, buttons, snooze, dismiss and rotation. Anything unknown means 'card' (the original look). */
 const K_STY='mm.expiry.style', EB_STYLES=['card','bar','pill','minimal'];
 function loadStyle(){try{const v=localStorage.getItem(K_STY);return EB_STYLES.indexOf(v)>=0?v:'card'}catch(e){return'card'}}
+/* Top bar only: while it shows, tell the page how tall it is (--eb-bar-h) so everything else starts below it. Kept in sync if the bar's height changes (long text, phone width). Off for every other look and whenever the banner is gone. */
+let barRo=null, barEl=null;
+function barSpace(on){
+  try{
+    const h=document.documentElement;
+    if(!on){h.classList.remove('mm-eb-bar'); h.style.removeProperty('--eb-bar-h'); if(barRo){barRo.disconnect(); barRo=null} barEl=null; return}
+    const card=document.querySelector('#expiry-banner .eb-card'); if(!card)return;
+    const set=()=>{const r=card.getBoundingClientRect(); h.style.setProperty('--eb-bar-h',Math.round(r.height)+'px')};
+    h.classList.add('mm-eb-bar'); set();
+    if(barEl!==card){ if(barRo){barRo.disconnect(); barRo=null} barEl=card; if(typeof ResizeObserver==='function'){barRo=new ResizeObserver(set); barRo.observe(card)} }
+  }catch(e){}
+}
 let idx=0, items=[], sig='', liveSig='', timer=null, hold=false, holdTimer=null, tries=0, previewUntil=0, previewTimer=null;
 const esc2=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>typeof mny==='function'?mny(n):'$'+(Math.round(n*100)/100);
@@ -7788,15 +7800,22 @@ function css(){
 '.eb-top .eb-card.eb-out{transform:translateY(-8px)}.eb-left .eb-card.eb-out{transform:translateX(-8px)}.eb-right .eb-card.eb-out{transform:translateX(8px)}'+
 '@media (prefers-reduced-motion:reduce){.eb-card,:root[data-ap3-anim] .eb-card{transition:none !important}.eb-overdue{animation:none !important}}'+
 /* ----- Banner looks. Appearance only. 'card' (the original) has no rules here, so it looks exactly as before. Every selector starts with .eb.eb-st-NAME. ----- */
-/* Top bar: full-width strip across the top of the page area, one row, always at the top (the script adds eb-top for this look). */
-'.eb.eb-st-bar{left:var(--rail,76px);right:0}'+
-'.eb.eb-st-bar .eb-card{max-width:none;width:100%;display:flex;align-items:center;gap:12px;padding:8px 16px;border-radius:0;border-width:0 0 var(--ap3-w,1px) 0;box-shadow:none}'+
+/* Top bar: a full-width strip pinned to the very top of the window, above everything (like the guest-link bar, and it sits just under that one if both show). One row, always at the top (the script adds eb-top for this look).
+   While it shows, the script adds the mm-eb-bar class and its measured height, so the page, side rail, sticky header and pop-up panels start below it instead of being covered. */
+'.eb.eb-st-bar,.eb.eb-st-bar.eb-pv{top:0;left:0;right:0;bottom:auto;z-index:99980}'+
+'html.mm-guest .eb.eb-st-bar{top:calc(34px + env(safe-area-inset-top,0px))}'+
+'html.mm-eb-bar{--eb-off:var(--eb-bar-h,0px)}html.mm-guest.mm-eb-bar{--eb-off:calc(34px + env(safe-area-inset-top,0px) + var(--eb-bar-h,0px))}'+
+'html.mm-eb-bar body{padding-top:var(--eb-off)}'+
+'html.mm-eb-bar .top{top:calc(var(--eb-off) + env(safe-area-inset-top,0px))}'+
+'html.mm-eb-bar .overlay{top:var(--eb-off)}'+
+'@media (min-width:721px){html.mm-eb-bar .rail{top:var(--eb-off);height:calc(100vh - var(--eb-off))}}'+
+'.eb.eb-st-bar .eb-card{max-width:none;width:100%;display:flex;align-items:center;gap:12px;padding:calc(8px + env(safe-area-inset-top,0px)) 16px 8px;border-radius:0;border-width:0 0 var(--ap3-w,1px) 0;box-shadow:none}'+
 '.eb.eb-st-bar .eb-t{flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'+
 '.eb.eb-st-bar .eb-d{flex:1 1 0;min-width:0;margin-top:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'+
 '.eb.eb-st-bar .eb-f{flex:0 0 auto;margin-top:0}'+
 '.eb.eb-st-bar .eb-n{margin-right:6px}'+
-'.eb.eb-st-bar.eb-s-small .eb-card{padding:5px 12px}.eb.eb-st-bar.eb-s-large .eb-card{padding:12px 18px}'+
-'@media (max-width:720px){.eb.eb-st-bar{left:0}.eb.eb-st-bar .eb-card{flex-wrap:wrap;gap:4px 10px;padding:8px 12px}.eb.eb-st-bar .eb-t{flex:1 0 100%;white-space:normal}.eb.eb-st-bar .eb-d{flex:1 0 100%;white-space:normal}.eb.eb-st-bar .eb-f{flex:1 0 100%;justify-content:flex-end}}'+
+'.eb.eb-st-bar.eb-s-small .eb-card{padding:calc(5px + env(safe-area-inset-top,0px)) 12px 5px}.eb.eb-st-bar.eb-s-large .eb-card{padding:calc(12px + env(safe-area-inset-top,0px)) 18px 12px}'+
+'@media (max-width:720px){.eb.eb-st-bar .eb-card{flex-wrap:wrap;gap:4px 10px;padding:calc(8px + env(safe-area-inset-top,0px)) 12px 8px}.eb.eb-st-bar .eb-t{flex:1 0 100%;white-space:normal}.eb.eb-st-bar .eb-d{flex:1 0 100%;white-space:normal}.eb.eb-st-bar .eb-f{flex:1 0 100%;justify-content:flex-end}}'+
 /* Pill: compact rounded capsule that shrinks to its text, one row. Follows the chosen Position. On the slim side positions it wraps so it still fits. */
 '.eb.eb-st-pill .eb-card{width:auto;max-width:100%;display:flex;align-items:center;gap:8px;padding:6px 8px 6px 12px;border-radius:9999px}'+
 '.eb.eb-st-pill .eb-t,.eb.eb-st-pill .eb-d{min-width:0;margin-top:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'+
@@ -7814,7 +7833,7 @@ function css(){
 }
 function pauseOn(){const c=load(); if(!c.pause)return; hold=true; clearTimeout(timer); timer=null}
 /* Removing the banner can swallow its mouse-leave / focus-out events, so the pause is cleared here too, or rotation would stay stuck for the next banner. */
-function gone(b){if(b)b.remove(); hold=false; clearTimeout(holdTimer); clearTimeout(timer); timer=null; sig=''; liveSig=''}
+function gone(b){if(b)b.remove(); barSpace(false); hold=false; clearTimeout(holdTimer); clearTimeout(timer); timer=null; sig=''; liveSig=''}
 function pauseOff(){hold=false; clearTimeout(holdTimer); schedule()}
 function bar(){
   let b=document.getElementById('expiry-banner');
@@ -7878,6 +7897,7 @@ function check(){
     const b=bar(); b.className='eb eb-'+pos+' eb-s-'+c.size+' eb-st-'+st+(pv?' eb-pv':'');
     if(idx>=items.length)idx=0;
     if(s!==sig){sig=s; show(false)}
+    barSpace(st==='bar');
     const ls=items.map(i=>i.key+'|'+i.level).join(';'), live=document.getElementById('eb-live');
     if(ls!==liveSig){liveSig=ls; const msg=ebAnnounce(items); if(live)setTimeout(()=>{const l=document.getElementById('eb-live'); if(l)l.textContent=msg},200)}   // a little later, because screen readers often skip text that is set the moment a live region is created
     place();

@@ -52,7 +52,7 @@ test('check() applies the style class; the top bar is forced to the top; the sty
 
 test('CSS: card has no rules (original look untouched); every new rule is scoped to its own style', () => {
   assert.ok(!/\.eb-st-card/.test(ui), 'no rules for the original card look');
-  const cssStart = ui.indexOf("'.eb.eb-st-bar{");
+  const cssStart = ui.indexOf("'.eb.eb-st-bar,.eb.eb-st-bar.eb-pv{");
   const cssEnd = ui.indexOf("document.head.appendChild(s)");
   const block = ui.slice(cssStart, cssEnd);
   for (const name of ['bar', 'pill', 'minimal']) assert.ok(block.includes('.eb.eb-st-' + name), name + ' has rules');
@@ -77,4 +77,24 @@ test('settings: style picker has four options, saves only mm.expiry.style, and r
 test('nothing outside the banner changed: no sheet, network or script code in the new parts', () => {
   const added = ui.slice(ui.indexOf('const K_STY'), ui.indexOf('let idx=0,'));
   assert.ok(!/fetch|sheetCall|XMLHttpRequest|APPS_SCRIPT/.test(added));
+});
+
+test('top bar is pinned to the very top of the window and the page is pushed down by its measured height', () => {
+  assert.ok(/'\.eb\.eb-st-bar,\.eb\.eb-st-bar\.eb-pv\{top:0;left:0;right:0;bottom:auto;z-index:99980\}'/.test(ui), 'full width from the very top, above everything (also during a preview)');
+  assert.ok(/html\.mm-guest \.eb\.eb-st-bar\{top:calc\(34px/.test(ui), 'sits just under the guest-link bar when both show');
+  assert.ok(/html\.mm-eb-bar body\{padding-top:var\(--eb-off\)\}/.test(ui), 'page content starts below the bar');
+  assert.ok(/html\.mm-eb-bar \.top\{top:calc\(var\(--eb-off\)/.test(ui), 'sticky header starts below the bar');
+  assert.ok(/html\.mm-eb-bar \.overlay\{top:var\(--eb-off\)\}/.test(ui), 'settings panel and pop-ups start below the bar, so their close buttons stay reachable');
+  assert.ok(/@media \(min-width:721px\)\{html\.mm-eb-bar \.rail\{top:var\(--eb-off\);height:calc\(100vh - var\(--eb-off\)\)\}\}/.test(ui), 'side rail starts below the bar on desktop only; the phone dock is untouched');
+  assert.ok(/html\.mm-guest\.mm-eb-bar\{--eb-off:calc\(34px/.test(ui), 'guest bar plus banner bar add up');
+});
+
+test('the page offset is only on while the top bar shows, and is always cleared when it goes away', () => {
+  const gone = ui.match(/function gone\(b\)\{[^\n]*\}/)[0];
+  assert.ok(/barSpace\(false\)/.test(gone), 'banner removed -> offset removed');
+  assert.ok(/barSpace\(st==='bar'\);/.test(ui), 'every redraw sets it on for the bar and off for every other look');
+  const fn = ui.slice(ui.indexOf('function barSpace('), ui.indexOf('let idx=0'));
+  assert.ok(/classList\.remove\('mm-eb-bar'\)/.test(fn) && /removeProperty\('--eb-bar-h'\)/.test(fn), 'off removes the class and the height');
+  assert.ok(/ResizeObserver/.test(fn) && /disconnect\(\)/.test(fn), 'follows height changes and cleans up');
+  assert.ok(/try\{/.test(fn) && /catch\(e\)\{\}/.test(fn), 'can never throw into the page');
 });
