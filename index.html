@@ -1217,6 +1217,8 @@ button.ins:hover{outline:var(--ap3-w,1px) solid var(--accent)}
 .ins .ic svg{width:18px;height:18px}
 .ins p{line-height:1.45}
 .ins p b{font-weight:700}
+/* Wide screens: all insights sit in ONE row (up to 6 cards), icon above the text. Narrower screens wrap as before. */
+@media(min-width:1100px){.insights{grid-template-columns:repeat(var(--n,6),minmax(0,1fr))}.insights .ins{flex-direction:column;gap:10px}.insights .ins p{font-size:13.5px;line-height:1.4;min-width:0;overflow-wrap:break-word}}
 .list{display:flex;flex-direction:column}
 .li{display:flex;gap:12px;align-items:center;padding:10px 4px;border-top:var(--ap3-w,1px) solid var(--ap3-lc,var(--line));text-align:left;width:100%}
 .li:first-child{border-top:0}
@@ -1312,6 +1314,9 @@ tr.grp:hover td{background:var(--surface2)}
 .pr .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pr .t small{color:var(--muted);margin-left:8px}
 .pr .a{font-weight:700}
+.pdym{margin:6px 10px 2px;padding:8px 10px;border-radius:10px;background:var(--accent-soft);color:var(--muted);font-size:14px}
+.pdym button{font-weight:700;color:var(--accent);text-decoration:underline;padding:0 2px}
+.pdym small{display:block;margin-top:2px;color:var(--faint);font-size:12px}
 #toasts{position:fixed;left:0;right:0;bottom:calc(16px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;align-items:center;gap:8px;z-index:90;pointer-events:none}
 .toast{background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.3);animation:rise .2s ease}
 .toast{display:flex;align-items:center;gap:12px;pointer-events:auto}
@@ -4095,22 +4100,105 @@ function cmdList(){
     {g:'Actions',t:'Switch theme (auto / light / dark)',a:cycleTheme},{g:'Actions',t:(S.privacy?'Show':'Hide')+' amounts (privacy mode)',a:togglePrivacy},
     {g:'Actions',t:'Show keyboard shortcuts',a:openHelp},{g:'Actions',t:'Open Data & sync',a:()=>go('data')},{g:'Actions',t:'Reset filters',a:()=>{S.F={};S.rstat='All';S.rtrade='All';S.kind='All';render();toast('Filters reset')}}];
 }
-function palEntries(q){
-  const D=store.D,words=q.toLowerCase().split(/\s+/).filter(Boolean);const out=[];
-  const ok=t=>words.every(w=>t.includes(w));
-  if(!words.length)return cmdList().map(c=>({...c}));
-  cmdList().forEach(c=>{if(ok(c.t.toLowerCase()))out.push(c)});
-  D.items.forEach(i=>{const t=[i.name,i.buyer,i.seller,i.notes,i.kind,i.condition].filter(Boolean).join(' ').toLowerCase()+' '+itemSearchText(i);if(ok(t))out.push({g:'Inventory',t:i.name,s:(i.sold?'Sold '+fd(i.sellDate)+(i.buyer?' to '+i.buyer:''):'In stock')+(i.seller&&!i.sold?' · from '+i.seller:''),amt:i.sold?SM(i.profit):M(i.buyPrice),a:()=>openDetail(i.id)})});
-  D.expenses.forEach(e=>{const t=[e.item,e.place,e.category,e.notes,e.payment].filter(Boolean).join(' ').toLowerCase();if(ok(t))out.push({g:'Expenses',t:e.item,s:(e.place||'')+' · '+fd(e.date),amt:M(e.amount),a:()=>openDetail(e.id)})});
-  return out;
-}
+/* PALSEARCH:START (read-only search across everything loaded from the sheet; never writes to the sheet) */
+const PAL_MONTHS=['january','february','march','april','may','june','july','august','september','october','november','december'];
+const palNorm=s=>String(s==null?'':s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+/* Edit distance (counts a swapped pair of letters as one slip). Gives up early once it passes max. */
+function palEdit(a,b,max){
+  const la=a.length,lb=b.length;if(Math.abs(la-lb)>max)return max+1;
+  let p2=null,p1=[],cur,i,j;for(j=0;j<=lb;j++)p1[j]=j;
+  for(i=1;i<=la;i++){cur=[i];let min=i;
+    for(j=1;j<=lb;j++){const c=a.charCodeAt(i-1)===b.charCodeAt(j-1)?0:1;let v=Math.min(p1[j]+1,cur[j-1]+1,p1[j-1]+c);
+      if(p2&&i>1&&j>1&&a.charCodeAt(i-1)===b.charCodeAt(j-2)&&a.charCodeAt(i-2)===b.charCodeAt(j-1))v=Math.min(v,p2[j-2]+1);
+      cur[j]=v;if(v<min)min=v}
+    if(min>max)return max+1;p2=p1;p1=cur}
+  return p1[lb]}
+/* A number written the ways people type it: 1200 -> "1200 1200.00" (the $ and commas are dropped from the query too). */
+function palNums(v){if(typeof v!=='number'||!isFinite(v))return '';const a=Math.abs(v);return String(a)+' '+a.toFixed(2)+(Number.isInteger(a)?'':' '+Math.round(a))}
+function palDate(d){if(Object.prototype.toString.call(d)!=='[object Date]'||isNaN(d))return '';const m=d.getMonth(),dd=d.getDate(),y=d.getFullYear();
+  return MO[m]+' '+PAL_MONTHS[m]+' '+dd+' '+y+' '+y+'-'+String(m+1).padStart(2,'0')+'-'+String(dd).padStart(2,'0')}
+function palQWord(w){let x=palNorm(w).replace(/^\$/,'');if(/^[\d,]*\.?\d+$/.test(x)&&x.indexOf(',')>=0)x=x.replace(/,/g,'');return x}
+const palTok=s=>palNorm(s).match(/[a-z0-9]+(?:\.[0-9]+)?/g)||[];
+/* One searchable record: every value in the row plus the names of its fields (so "cpu", "price" or "notes" find rows that have one). */
+function palMake(o){
+  const parts=o.parts.filter(p=>p!==null&&p!==undefined&&p!=='').map(String),raw=parts.join(' ');
+  let text=palNorm(raw);const tight=text.replace(/(\d)\s+(gb|tb|mb|ghz|mhz|hz|w|inch)(?![a-z])/g,'$1$2');if(tight!==text)text+=' '+tight;
+  const toks=new Set(palTok(text));
+  return {g:o.g,t:o.t||'Untitled',s:o.s||'',amt:o.amt||'',a:o.a,text,toks,tokArr:[...toks],name:palNorm(o.t||''),disp:raw}}
+function palRowTitle(r,keys){let pick=null;for(const k of keys){if(/name|item|device|model|who|person|buyer|from|asset|ticker|company|description/i.test(k)&&r[k]!=null&&String(r[k]).trim()){pick=String(r[k]).trim();break}}
+  if(pick)return pick;for(const k of keys){const v=r[k];if(v!=null&&typeof v!=='object'&&String(v).trim())return String(v).trim()}return ''}
+const palCache={D:null,raw:null,idx:null};
+function palIndex(D,raw){
+  if(palCache.idx&&palCache.D===D&&palCache.raw===raw)return palCache.idx;
+  const docs=[],safe=f=>{try{f()}catch(e){}};
+  (D.items||[]).forEach(i=>safe(()=>{const sp=i.specs||{},keys=Object.keys(sp).filter(k=>sp[k]!==null&&sp[k]!==undefined&&sp[k]!=='');
+    const parts=[i.name,i.kind,kindWord(i.kind),i.label,i.type,i.condition,i.buyer,i.seller,i.notes,i.tradeId,i.serial,i.sold?'sold':'in stock instock',...keys,...keys.map(k=>sp[k]),
+      typeof itemSearchText==='function'?itemSearchText(i):'',
+      i.buyPrice!=null||i.sellPrice!=null?'price':'',palNums(i.buyPrice),palNums(i.sellPrice),i.profit!=null?'profit '+palNums(i.profit):'',i.roi!=null?'roi '+Math.round(Math.abs(i.roi)*100):'',
+      i.notes?'notes':'',i.buyer?'buyer':'',i.seller?'seller':'',i.condition?'condition':'',i.days!=null?'days '+i.days:'',i.age!=null?'age '+i.age:'',i.clicks!=null?'clicks '+i.clicks:'',palDate(i.buyDate),palDate(i.sellDate)];
+    docs.push(palMake({g:'Inventory',t:i.name,s:(i.sold?'Sold '+fd(i.sellDate)+(i.buyer?' to '+i.buyer:''):'In stock')+(i.seller&&!i.sold?' · from '+i.seller:''),amt:i.sold?SM(i.profit):M(i.buyPrice),a:()=>openDetail(i.id),parts}))}));
+  (D.expenses||[]).forEach(e=>safe(()=>{
+    docs.push(palMake({g:'Expenses',t:e.item,s:(e.place||'')+' · '+fd(e.date),amt:M(e.amount),a:()=>openDetail(e.id),
+      parts:[e.item,e.place,e.category,e.payment,e.tag,e.notes,'expense price amount',e.category?'category':'',e.payment?'payment':'',e.notes?'notes':'',e.isRefund?'refund return':'',palNums(e.amount),palDate(e.date)]}))}));
+  (D.investments||[]).forEach(v=>safe(()=>{
+    docs.push(palMake({g:'Investing',t:v.portfolio,s:fd(v.date)+(v.type?' · '+v.type:''),amt:v.value!=null?M(v.value):'',a:()=>go('investing'),
+      parts:[v.portfolio,v.type,v.notes,'investment portfolio value',v.notes?'notes':'',palNums(v.value),palNums(v.flow),v.pct!=null?palNums(v.pct):'',palDate(v.date)]}))}));
+  /* Other tabs (Owed, Trades, Pre-IPO): every cell is searchable, and picking a row opens that tab. */
+  [['Owed','Owed','owed'],['Trades','Trades','inventory'],['PreIPO','Pre-IPO','trading']].forEach(([k,label,view])=>safe(()=>{
+    const tab=raw&&raw[k];if(!tab||!Array.isArray(tab.rows))return;
+    tab.rows.slice(0,3000).forEach(r=>safe(()=>{if(!r||typeof r!=='object')return;const keys=Object.keys(r),vals=[];
+      keys.forEach(h=>{const v=r[h];if(v===null||v===undefined||v==='')return;vals.push(h);vals.push(Object.prototype.toString.call(v)==='[object Date]'?palDate(v):typeof v==='number'?palNums(v)+' '+v:String(v))});
+      if(!vals.length)return;
+      const more=keys.map(h=>r[h]).filter(v=>v!=null&&v!==''&&typeof v!=='object').map(String);const title=palRowTitle(r,keys)||label;
+      docs.push(palMake({g:label,t:title,s:more.filter(x=>x!==title).slice(0,2).join(' · '),a:()=>go(view),parts:vals}))}))}));
+  const vocab=new Map();
+  docs.forEach(d=>{palTok(d.disp).forEach(w=>{const e=vocab.get(w);if(e)e.n++;else vocab.set(w,{n:1,d:w})})});
+  /* Remember how a word was first written (so "cpu" is offered back as "CPU", not "cpu"). */
+  docs.forEach(d=>{(d.disp.match(/[A-Za-z0-9À-ɏ]+/g)||[]).forEach(w=>{const e=vocab.get(palNorm(w));if(e&&e.d===palNorm(w)&&w!==e.d)e.d=w})});
+  cmdList().forEach(c=>palTok(c.t).forEach(w=>{if(!vocab.has(w))vocab.set(w,{n:1,d:w})}));
+  return(palCache.D=D,palCache.raw=raw,palCache.idx={docs,vocab})}
+/* How well a record matches every word typed. null means at least one word is missing. */
+function palScore(doc,words){let sc=0;
+  for(const w of words){let s=0;
+    if(doc.toks.has(w))s=4;else{for(let i=0;i<doc.tokArr.length;i++)if(doc.tokArr[i].startsWith(w)){s=3;break}
+      if(!s&&doc.text.indexOf(w)>=0)s=1.5}
+    if(!s)return null;if(doc.name.indexOf(w)>=0)s+=2;sc+=s}
+  return sc}
+function palMatch(idx,words){const by={},order=[];
+  idx.docs.forEach(d=>{const s=palScore(d,words);if(s===null)return;(by[d.g]||(by[d.g]=(order.push(d.g),[]))).push({d,s})});
+  const out=[];order.forEach(g=>{by[g].sort((a,b)=>b.s-a.s).slice(0,12).forEach(x=>out.push(x.d))});return out}
+/* Best guess for a word that is not in the sheet: close in spelling, same first letter, and common. */
+function palFix(w,vocab){
+  if(w.length<3||/^[\d.]+$/.test(w)||vocab.has(w))return null;
+  const max=w.length>=6?2:1;let best=null;
+  vocab.forEach((e,k)=>{if(k.length<3||/^[\d.]+$/.test(k)||Math.abs(k.length-w.length)>max)return;if(k.indexOf(w)===0)return;
+    const dist=palEdit(w,k,max);if(dist>max)return;
+    const key=dist*1000-(k[0]===w[0]?400:0)-Math.min(e.n,300);if(!best||key<best.key)best={key,w:k,d:e.d}});
+  return best}
+function palSearch(q,D,raw){
+  const words=q.split(/\s+/).map(palQWord).filter(Boolean),cmds=cmdList();
+  if(!words.length)return{list:cmds.map(c=>({...c})),did:null,corrected:false};
+  const idx=palIndex(D,raw),okc=c=>{const t=palNorm(c.t);return words.every(w=>t.includes(w))};
+  const plainCmds=cmds.filter(okc),plain=palMatch(idx,words);
+  const fixes=words.map(w=>palFix(w,idx.vocab));let did=null,list=[...plainCmds,...plain],corrected=false;
+  if(fixes.some(Boolean)){
+    const fw=words.map((w,i)=>fixes[i]?fixes[i].w:w),shown=words.map((w,i)=>fixes[i]?fixes[i].d:w).join(' ');
+    did={q:shown,n:fw.length};
+    if(plain.length<5){const seen=new Set(list),more=[...cmds.filter(c=>words.length&&fw.every(w=>palNorm(c.t).includes(w))),...palMatch(idx,fw)].filter(x=>!seen.has(x));
+      corrected=!plain.length&&more.length>0;list=[...list,...more]}
+    else did.weak=true}
+  return{list,did,corrected}}
+/* PALSEARCH:END */
+function palEntries(q){return palSearch(q,store.D,store.base||store.raw).list}
 function openPalette(){
-  S.palIdx=0;openOverlay(`<div class="palbox" role="dialog" aria-modal="true" aria-label="Search"><input id="palq" type="text" placeholder="Search purchases, devices, buyers, places, or type a command" autocomplete="off" data-focus><div class="palres" id="palres" role="listbox"></div></div>`,'pal');
+  S.palIdx=0;openOverlay(`<div class="palbox" role="dialog" aria-modal="true" aria-label="Search"><input id="palq" type="text" placeholder="Search anything: price, CPU, GPU, notes, buyer, place, date, or type a command" autocomplete="off" spellcheck="false" data-focus><div class="palres" id="palres" role="listbox"></div></div>`,'pal');
   const inp=$('#palq');inp.focus();paint();inp.addEventListener('input',()=>{S.palIdx=0;paint()});
   function paint(){
-    const list=palEntries(inp.value).slice(0,40);window._pal=list;let g='',h='';
+    let r;try{r={...palSearch(inp.value,store.D,store.base||store.raw)}}catch(e){console.error(e);r={list:cmdList().filter(c=>c.t.toLowerCase().includes(inp.value.trim().toLowerCase())),did:null,corrected:false}}
+    const list=r.list.slice(0,60);window._pal=list;window._palDid=r.did?r.did.q:null;let g='',h='';
+    if(r.did)h+=`<div class="pdym" role="status">Did you mean: <button type="button" data-act="palfix" data-fix="${esc(r.did.q)}">${esc(r.did.q)}</button><small>${r.corrected?'Showing results for it. ':''}Press Tab to use it.</small></div>`;
     list.forEach((e,i)=>{if(e.g!==g){g=e.g;h+=`<h4>${esc(g)}</h4>`}h+=`<button class="pr" role="option" aria-selected="${i===S.palIdx}" data-act="palrun" data-i="${i}"><span class="t">${esc(e.t)}${e.s?`<small>${esc(e.s)}</small>`:''}</span>${e.amt?`<span class="a">${e.amt}</span>`:''}</button>`});
-    $('#palres').innerHTML=h||'<div class="empty">No matches. Try a merchant, model or buyer name.</div>';
+    $('#palres').innerHTML=h||'<div class="empty">No matches. Try a merchant, model, buyer, price or date.</div>';
   }
   window._palPaint=paint;
 }
@@ -4319,7 +4407,8 @@ const INSIGHT_ORDER=(()=>{const by={};INSIGHT_LIB.forEach(d=>{(by[d.cat]=by[d.ca
   Object.values(by).forEach(ids=>{ids.sort((a,b)=>insightHash('ord:'+a)-insightHash('ord:'+b)||(a<b?-1:1));ids.forEach((id,i)=>keyed.push({id,k:(i+.5)/ids.length,t:insightHash('tie:'+id)}))});
   return keyed.sort((a,b)=>a.k-b.k||a.t-b.t||(a.id<b.id?-1:1)).map(x=>x.id)})();
 const insightDayNum=d=>Math.floor(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())/864e5);
-const insightQuota=dn=>4+insightHash('q:'+dn)%5; /* 4 to 8 per day */
+const INSIGHT_MAX=6;
+const insightQuota=dn=>INSIGHT_MAX; /* always up to 6 per day (the Insights box is one row of 6) */
 /* Running total of every earlier day's quota: each day's window starts exactly where the previous day's ended,
    so the whole library is walked through evenly and nothing is skipped for weeks. Cached only as a speed-up. */
 let _insCur=null;
@@ -4334,7 +4423,7 @@ function insightPool(c){const pool=new Map();
     const act=r.act==='open'?'open':'goto';if(act==='open'&&!r.id)return;
     pool.set(d.id,{...r,id:act==='open'?r.id:'',act,v:r.v||INSIGHT_VIEW[d.cat]||'spending',i:INSIGHT_ICONS.includes(r.i)?r.i:'bulb',_k:d.id,_cat:d.cat})}catch(e){}});
   return pool}
-/* Picks the day's 4 to 8 insights. Pure: depends only on the calendar date and which insights have data. */
+/* Picks the day's insights (at most 6). Pure: depends only on the calendar date and which insights have data. */
 function pickInsights(pool,today){
   const dn=insightDayNum(today),want=insightQuota(dn),ids=INSIGHT_ORDER.filter(id=>pool.has(id)),n=ids.length;if(!n)return[];
   const start=insightCursor(dn)%n,out=[];
@@ -4604,7 +4693,7 @@ function vHome(){
     ${kpi({label:'Invested',val:M(inv.total),delta:undefined,spark:ts.map(x=>x.v),sub:`<span class="${inv.gain>=0?'pos':'neg'}">${SM(inv.gain)}</span> all-time`,tip:'Latest logged value of every portfolio. Gain = value − everything you added.',act:'goto',v:'investing'})}
     ${kpi({label:'Cash tied up in stock',val:M(st.cash),sub:plural(st.stock.length,'item')+avgAge,tip:st.tradeValue>0?'Real cash paid for devices that have not sold yet. Trade-in value is not counted as cash.':'What you paid for devices that have not sold yet.',act:'goto',v:'inventory'})}
   </div>
-  ${card('Insights',ins.length?`<div class="insights">${ins.map(x=>`<button class="ins" data-act="${x.act}" data-v="${x.v||''}" data-k="${x.k||''}" data-x="${esc(x.x||'')}" data-id="${x.id||''}"><span class="ic">${ICON[x.i]||ICON.bulb}</span><p>${x.t}</p></button>`).join('')}</div>`:'<div class="empty">Insights appear once there is enough history.</div>','<span class="hint">Fresh picks every day</span>','mm3-ins')}
+  ${card('Insights',ins.length?`<div class="insights" style="--n:${Math.min(ins.length,6)}">${ins.slice(0,6).map(x=>`<button class="ins" data-act="${x.act}" data-v="${x.v||''}" data-k="${x.k||''}" data-x="${esc(x.x||'')}" data-id="${x.id||''}"><span class="ic">${ICON[x.i]||ICON.bulb}</span><p>${x.t}</p></button>`).join('')}</div>`:'<div class="empty">Insights appear once there is enough history.</div>','<span class="hint">Fresh picks every day</span>','mm3-ins')}
   <div class="grid g21 mm3-g21">
     <div class="mm3-chartcard">${card('Money in and out, last 12 months',chartBox('homeChart'),homeControls())}</div>
     <div class="grid mm3-attw" style="align-content:start">
@@ -6567,6 +6656,7 @@ document.addEventListener('click',e=>{
     case 'help':openHelp();break;
     case 'close':closeOverlay();break;
     case 'copysum':copyText(d.v,'Summary copied');break;
+    case 'palfix':{const inp=$('#palq');if(inp){inp.value=d.fix||'';S.palIdx=0;window._palPaint&&window._palPaint();inp.focus()}break}
     case 'palrun':{const it=(window._pal||[])[+d.i];if(it){closeOverlay();it.a()}break}
     case 'connect':connectSheet();break;
     case 'useemb':{LS.set('sheetId','');store.load(EmbeddedSource).then(()=>toast('Using the embedded snapshot'));break}
@@ -6594,6 +6684,7 @@ document.addEventListener('keydown',e=>{
   if($('#palq')){
     const n=(window._pal||[]).length;
     if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();S.palIdx=(S.palIdx+(e.key==='ArrowDown'?1:-1)+n)%Math.max(n,1);window._palPaint();const s=$('.pr[aria-selected="true"]');s&&s.scrollIntoView({block:'nearest'})}
+    if(e.key==='Tab'&&!e.shiftKey&&window._palDid){e.preventDefault();const inp=$('#palq');inp.value=window._palDid;S.palIdx=0;window._palPaint();return}
     if(e.key==='Enter'){const it=(window._pal||[])[S.palIdx];if(it){e.preventDefault();closeOverlay();it.a()}}
     return;
   }

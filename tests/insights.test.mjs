@@ -1,6 +1,6 @@
 // Run with: node tests/insights.test.mjs
 // Loads the REAL helpers, stats functions and insights library out of index.html (no copies), then checks:
-// library size, every insight never throws, text is safe, rotation is deterministic and yields 4-8 per day,
+// library size, every insight never throws, text is safe, rotation is deterministic and yields 6 per day (the box is one row of 6),
 // every insight eventually appears, nothing mutates the data, and the original 6 insights still match.
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -225,14 +225,13 @@ test('rich data gives a pool big enough for the rotation (at least 30 eligible)'
   console.log('       eligible insights with the rich test data: ' + poolRich.size + ' of ' + N_LIB);
 });
 
-test('every day shows between 4 and 8 insights (400 consecutive days)', () => {
+test('every day shows exactly 6 insights, never more (400 consecutive days)', () => {
   const counts = {};
   for (let k = 0; k < 400; k++) {
     const n = T.pickInsights(poolRich, day(k)).length;
-    assert.ok(n >= 4 && n <= 8, 'day +' + k + ' showed ' + n);
+    assert.ok(n === 6, 'day +' + k + ' showed ' + n);
     counts[n] = (counts[n] || 0) + 1;
   }
-  assert.ok(Object.keys(counts).length >= 4, 'quota barely varies: ' + JSON.stringify(counts));
   console.log('       insights per day over 400 days: ' + JSON.stringify(counts));
 });
 
@@ -283,12 +282,12 @@ test('sparse and empty data degrade gracefully (fewer or none, never a crash)', 
   const e = T.insights(variants.empty.D, variants.empty.R, variants.empty.ss, variants.empty.rs);
   assert.ok(Array.isArray(e));
   const s = T.insights(variants.sparse.D, variants.sparse.R, variants.sparse.ss, variants.sparse.rs);
-  assert.ok(Array.isArray(s) && s.length <= 8);
+  assert.ok(Array.isArray(s) && s.length <= 6);
 });
 
 test('insights() returns render-ready objects for the Home card', () => {
   const out = T.insights(variants.rich30.D, variants.rich30.R, variants.rich30.ss, variants.rich30.rs);
-  assert.ok(out.length >= 4 && out.length <= 8, 'real-date run returned ' + out.length);
+  assert.ok(out.length >= 1 && out.length <= 6, 'real-date run returned ' + out.length);
   out.forEach(x => { assert.ok(x.t && x.i && x.act && 'v' in x && 'id' in x); });
 });
 
