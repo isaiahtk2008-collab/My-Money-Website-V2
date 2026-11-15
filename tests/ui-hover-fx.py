@@ -73,6 +73,13 @@ def close_overlay(page):
 
 def open_panel(page):
     page.click('.logo[data-sec=open]')
+    page.wait_for_selector('#hfx-card', state='attached')
+    # closing the settings menu folds every section shut, so reopen the Appearance section like a person would
+    page.wait_for_timeout(250)
+    if page.locator('#hfx-card.mm-sc-open').count() == 0:
+        page.click('#hfx-card .m3-card-head')
+    if page.locator('#ap3-drawer[open]').count() == 0:   # the Glow strength slider lives in Fine tuning, which also starts closed now
+        page.click('#ap3-drawer > summary')
     page.wait_for_selector('#hfx-card')
 
 def set_strength(page, n):
@@ -352,6 +359,8 @@ with sync_playwright() as p:
             hover_state(page, 'button.card.kpi:visible')
             check(f'No sideways scrolling: KPI card, {d}, full strength', overflow_x(page) <= base_overflow, str(overflow_x(page)))
         open_panel(page)
+        if page.locator('#overlay .m3-scope > .m3-card:has([data-sec=sheet]).mm-sc-open').count() == 0:   # sections start closed after the menu was closed
+            page.click('#overlay .m3-scope > .m3-card:has([data-sec=sheet]) .m3-card-head')
         hover_state(page, '[data-sec=sheet]')
         dr = page.evaluate("(()=>{const d=document.querySelector('#overlay .drawer.lg');return d?d.scrollWidth-d.clientWidth:0})()")
         check(f'No sideways scrollbar in the settings panel, {d}, full strength', dr <= 0, str(dr))

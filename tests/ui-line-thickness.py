@@ -42,7 +42,7 @@ with sync_playwright() as p:
 
     check('Line thickness row exists once', page.locator('#ap3-line').count() == 1 and page.locator('#ap3-line-v').count() == 1)
     check('it sits in Fine tuning, right after Corner roundness', page.evaluate("(()=>{const r=[...document.querySelectorAll('#ap3-drawer .ap3-row input[type=range]')].map(e=>e.id);return r.indexOf('ap3-line')===r.indexOf('ap3-round')+1&&r.indexOf('ap3-round')>=0})()"))
-    check('range is 0 to 300 and starts at 100%', page.get_attribute('#ap3-line', 'min') == '0' and page.get_attribute('#ap3-line', 'max') == '300' and page.input_value('#ap3-line') == '100' and page.inner_text('#ap3-line-v') == '100%')
+    check('range is 0 to 600 and starts at 100%', page.get_attribute('#ap3-line', 'min') == '0' and page.get_attribute('#ap3-line', 'max') == '600' and page.input_value('#ap3-line') == '100' and page.inner_text('#ap3-line-v') == '100%')
     check('helper text is shown', 'Thinner or thicker borders' in page.inner_text('#ap3-drawer'))
     check('100% sets no gate and no variable', page.evaluate("document.documentElement.hasAttribute('data-ap3-line')||document.documentElement.style.getPropertyValue('--ap3-w')!==''") is False)
     check('100%: nothing is saved', page.evaluate("localStorage.getItem('mm.hfx.line')") is None)
@@ -116,6 +116,48 @@ with sync_playwright() as p:
         if SHOTS: page.screenshot(path=os.path.join(SHOTS, 'phone-settings-%d.png' % v))
         check('phone %d%%: no page errors' % v, not errors, errors)
         page.context.close()
+
+    # very thin lines: the line stays 1 screen pixel wide and fades (a browser can not draw less), so it really looks thinner; 6px is the thick end
+    page, errors = new_page(b, 1100, 800)
+    page.click('.logo[data-sec=open]'); page.wait_for_selector('#hfx-card')
+    ALPHA = "(sel)=>{const c=getComputedStyle(document.querySelector(sel)).borderTopColor;const m=c.match(/[\\d.]+/g)||[];if(/^color\\(/.test(c)){return m.length>=4?+m[m.length-1]:1}return m.length>=4?+m[3]:1}"
+    page.evaluate(SET, 100); full = page.evaluate(ALPHA, '.card')
+    page.evaluate(SET, 100); w100 = page.evaluate(BW, '.card')[0]
+    page.evaluate(SET, 10)
+    check('10%: still one screen pixel wide, not hidden', page.evaluate(BW, '.card')[0] == '1px' and page.inner_text('#ap3-line-v') == '10%')
+    a10 = page.evaluate(ALPHA, '.card')
+    page.evaluate(SET, 50); a50 = page.evaluate(ALPHA, '.card')
+    check('10% is fainter than 50%, and 50% is fainter than 100%', a10 < a50 < full, (a10, a50, full))
+    check('Material settings cards fade too', page.evaluate(ALPHA, '#hfx-card') < full)
+    page.evaluate(SET, 1)
+    check('1% is very faint but still there', 0 < page.evaluate(ALPHA, '.card') < a10)
+    page.evaluate(SET, 0)
+    check('0% is still None (no line at all)', page.evaluate(BW, '.card')[0] == '0px' and page.inner_text('#ap3-line-v') == 'None')
+    page.evaluate(SET, 100)
+    check('back at 100%: full strength and no fade gate left behind', page.evaluate(ALPHA, '.card') == full and page.evaluate("document.documentElement.hasAttribute('data-ap3-fade')||document.documentElement.style.getPropertyValue('--ap3-lc')!==''") is False)
+    page.evaluate(SET, 600)
+    check('600%: lines are 6px (extremely thick)', page.evaluate(BW, '.card')[0] == '6px' and page.inner_text('#ap3-line-v') == '600%')
+    page.evaluate(SET, 20); page.set_viewport_size({'width': 1300, 'height': 800}); page.wait_for_timeout(100)
+    check('a window resize keeps a thin setting applied', page.evaluate("document.documentElement.hasAttribute('data-ap3-fade')") is True)
+    check('no page errors (thin and thick)', not errors, errors)
+    page.context.close()
+
+    # settings menu: every section and sub-section is closed again after the menu is closed and reopened
+    page, errors = new_page(b, 1100, 800)
+    page.click('.logo[data-sec=open]'); page.wait_for_selector('#hfx-card')
+    check('menu opened with the sections the test saved as open', page.locator('#hfx-card .hfx-pv-wrap').is_visible() and page.locator('#ap3-drawer[open]').count() == 1)
+    page.keyboard.press('Escape'); page.wait_for_timeout(200)
+    if page.locator('#overlay .overlay').count(): page.evaluate("document.querySelector('#overlay').innerHTML=''"); page.wait_for_timeout(100)
+    check('closing the menu clears the remembered open sections', page.evaluate("localStorage.getItem('mm.setfold')") is None and page.evaluate("localStorage.getItem('mm.ap.drawer3')") is None and page.evaluate("localStorage.getItem('mm.ap.drawer')") is None)
+    check('closing the menu keeps the line setting itself', page.evaluate("localStorage.getItem('mm.hfx.line')") is None)
+    page.click('.logo[data-sec=open]'); page.wait_for_selector('#hfx-card', state='attached'); page.wait_for_timeout(250)
+    check('reopened: every section is closed', page.evaluate("document.querySelectorAll('#overlay .m3-scope > .m3-card.mm-sc-open').length") == 0 and page.locator('#hfx-card .hfx-pv-wrap').is_visible() is False)
+    page.click('#hfx-card .m3-card-head'); page.wait_for_selector('#hfx-card .hfx-pv-wrap')
+    check('reopened: Fine tuning and Colors and looks are closed too', page.evaluate("document.querySelectorAll('#hfx-card details[open]').length") == 0)
+    page.click('#hfx-card .m3-card-head'); page.wait_for_timeout(100)
+    check('a section can still be opened and closed by hand', page.locator('#hfx-card .hfx-pv-wrap').is_visible() is False)
+    check('no page errors (auto-close)', not errors, errors)
+    page.context.close()
 
     if SHOTS:
         for v in (0, 100, 300):
