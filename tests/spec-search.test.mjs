@@ -79,5 +79,5 @@ test('output is lowercase and does not change the item', () => {
 test('index.html wires it into the items table, stock table and command palette', () => {
   assert.ok(/text:r=>\[r\.name,r\.kind,r\.buyer,r\.seller,r\.notes,r\.condition,r\.tradeId\]\.join\(' '\)\+' '\+itemSearchText\(r\)/.test(html));
   assert.ok(/s\.stock\},text:r=>\[r\.name,r\.kind,r\.seller,r\.condition,r\.notes,r\.tradeId\]\.join\(' '\)\+' '\+itemSearchText\(r\)/.test(html));
-  assert.ok(/toLowerCase\(\)\+' '\+itemSearchText\(i\);if\(ok\(t\)\)/.test(html));
+  assert.ok(/function palIndex\([\s\S]*?itemSearchText\(i\)/.test(html));
 });
