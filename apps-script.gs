@@ -85,7 +85,18 @@ function authOk_(token) {
    edit, delete, change settings, or make/revoke guest links. To end every guest link at once, run revokeAllGuests() from the editor. */
 const GUESTS_KEY = 'mm.guests';
 const MAX_GUESTS = 20;                                         // live (not yet ended) guest links at one time
-const GUEST_MINUTES = [30, 60, 360, 720, 1440, 2880, 10080];   // 30 min, 1 h, 6 h, 12 h, 24 h, 48 h, 7 days. Nothing else is accepted.
+const GUEST_MINUTES = [30, 60, 120, 240, 360, 720, 1440, 2880, 10080];   // 30 min, 1 h, 2 h, 4 h, 6 h, 12 h, 24 h, 48 h, 7 days. Nothing else is accepted.
+/* Who has looked at which link, and for how long. A guest tab says hello (a random id for that tab + a short device name like "iPhone/iPad · Safari")
+   about once a minute while it is open. Guests are anonymous: this shows WHICH link was opened, on what kind of device, when, and for how long,
+   not a name. The live "who is on right now" picture lives in the script cache (it never writes to the sheet or to the guest list, so a visit can
+   never undo a revoke). A short history is also kept in its own Script property (mm.guestlog, newest 60 visits) so it survives the cache. */
+const GUESTLOG_KEY = 'mm.guestlog';
+const GUESTLOG_MAX = 60;            // visits kept in the history
+const GUESTLOG_CHARS = 8000;        // a Script property holds at most ~9 KB; the history is trimmed to stay under this
+const GUEST_LIVE_MS = 150000;       // a guest tab counts as "on right now" if it said hello in the last 2.5 minutes (it pings every 60 s)
+const GUEST_VISIT_GAP_MS = 1800000; // quiet for 30 minutes, then back: that is counted as a new visit
+const GUEST_FLUSH_MS = 300000;      // the history property is refreshed at most every 5 minutes per visit
+const GUEST_MAX_VIEWERS = 30;       // tabs tracked per link; more can still read, they just are not listed
 // Tabs a preset hides come back with the same headers and NO rows. Masked columns show (hidden) instead of the value.
 const GUEST_HIDE_TABS = ['Expenses', 'Investments', 'Owed', 'Trades', 'Pre-IPO'];
 const GUEST_MASK_COLS = ['Sold To', 'Sold to', 'Bought From', 'Found By', 'Bought By', 'Sale By', 'IMEI', 'Device Label', 'Notes', 'Notes (Bought)', 'Notes (Sold)', 'Sale Notes', 'Establishment'];
@@ -114,10 +125,69 @@ function pruneGuests_(all, now) {
 function guestLookup_(token) {
   token = typeof token === 'string' ? token : '';
   if (!token) return { ok: false };
-  const g = loadGuests_()[sha256_(token)];
+  const hash = sha256_(token);
+  const g = loadGuests_()[hash];
   if (!g || typeof g !== 'object') return { ok: false };
   if (!(typeof g.exp === 'number' && g.exp > Date.now())) return { ok: false, expired: true };
-  return { ok: true, preset: GUEST_PRESETS[g.preset] ? g.preset : 'sales', exp: g.exp };   // an unknown preset fails closed to the strictest one
+  return { ok: true, preset: GUEST_PRESETS[g.preset] ? g.preset : 'sales', exp: g.exp, id: hash.slice(0, 10), label: String(g.label || '').slice(0, 20) };   // an unknown preset fails closed to the strictest one
+}
+
+/* ---- who is on a guest link (tracking only: never changes the guest list, the sheet or what a guest can see) ---- */
+function loadGuestLog_() {
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty(GUESTLOG_KEY);
+    const a = raw ? JSON.parse(raw) : [];
+    return Array.isArray(a) ? a.filter(x => x && typeof x === 'object' && typeof x.l === 'string' && typeof x.s === 'number') : [];
+  } catch (err) { return []; }
+}
+function saveGuestLog_(a) {
+  a = a.slice(-GUESTLOG_MAX);
+  let s = JSON.stringify(a);
+  while (s.length > GUESTLOG_CHARS && a.length > 1) { a.shift(); s = JSON.stringify(a); }
+  PropertiesService.getScriptProperties().setProperty(GUESTLOG_KEY, s);
+}
+// Insert or update one visit (found by link id + tab id + start time). The caller must already hold the script lock.
+function upsertGuestVisit_(log, id, label, vid, dev, rec) {
+  let hit = null;
+  for (let i = log.length - 1; i >= 0; i--) { const x = log[i]; if (x.l === id && x.v === vid && x.s === rec.s) { hit = x; break; } }
+  if (!hit) { hit = { l: id, n: String(label || '').slice(0, 20), v: vid, d: dev || '', s: rec.s, e: rec.e, c: rec.n }; log.push(hit); }
+  hit.e = rec.e; hit.c = rec.n; if (dev && !hit.d) hit.d = dev;
+  return log;
+}
+const guestDev_ = s => String(s === undefined || s === null ? '' : s).replace(/[^A-Za-z0-9 ·\/.\-]/g, '').slice(0, 40).trim();
+function guestViewers_(id) {
+  try { const raw = CacheService.getScriptCache().get('gv:' + id); const m = raw ? JSON.parse(raw) : {}; return m && typeof m === 'object' && !Array.isArray(m) ? m : {}; }
+  catch (err) { return {}; }
+}
+// Called for every guest read and every guest "hello". It can NEVER make a guest request fail: any problem here is swallowed.
+function recordGuestSeen_(g, body) {
+  try {
+    if (!g || !g.id) return;
+    const now = Date.now();
+    const vid = typeof body.vid === 'string' && /^[0-9a-f]{16}$/.test(body.vid) ? body.vid : 'anon';
+    const dev = guestDev_(body.dev);
+    const cache = CacheService.getScriptCache();
+    const map = guestViewers_(g.id);
+    let rec = map[vid];
+    if (rec && typeof rec === 'object' && now - Number(rec.e) > GUEST_VISIT_GAP_MS) rec = null;   // back after a long quiet spell = a new visit
+    if (!rec || typeof rec !== 'object') {
+      if (Object.keys(map).length >= GUEST_MAX_VIEWERS && !(vid in map)) return;
+      rec = { s: now, e: now, d: dev, n: 0, f: 0 };
+    }
+    rec.e = now; rec.n = (Number(rec.n) || 0) + 1; if (dev && !rec.d) rec.d = dev;
+    map[vid] = rec;
+    let flushed = false;
+    if (!(rec.f > 0) || now - rec.f >= GUEST_FLUSH_MS) {
+      // Own short lock for the history only; if the sheet is busy with a real change we simply skip and try again at the next hello.
+      const lock = LockService.getScriptLock();
+      if (lock.tryLock(300)) {
+        try { saveGuestLog_(upsertGuestVisit_(loadGuestLog_(), g.id, g.label, vid, rec.d, rec)); flushed = true; }
+        finally { lock.releaseLock(); }
+      }
+    }
+    if (flushed) rec.f = now;
+    cache.put('gv:' + g.id, JSON.stringify(map), 21600);
+  } catch (err) { /* tracking is best effort */ }
 }
 // Makes a guest key. Returns { ok:true, key, id, exp, preset } (the key is shown ONCE and cannot be recovered) or { ok:false, error }.
 function createGuest_(minutes, preset, label) {
@@ -140,21 +210,58 @@ function listGuests_() {
   const now = Date.now();
   const all = pruneGuests_(loadGuests_(), now);
   saveGuests_(all);
-  const out = Object.keys(all).map(h => ({ id: h.slice(0, 10), exp: all[h].exp, preset: GUEST_PRESETS[all[h].preset] ? all[h].preset : 'sales', label: all[h].label || '', created: all[h].created || 0 }));
+  const out = Object.keys(all).map(h => ({ id: h.slice(0, 10), exp: all[h].exp, preset: GUEST_PRESETS[all[h].preset] ? all[h].preset : 'sales', label: all[h].label || '', created: all[h].created || 0, live: 0, visits: 0, seconds: 0 }));
   out.sort((a, b) => a.exp - b.exp);
-  return { ok: true, guests: out, now: now };
+  // Who is on right now + the visit history. Owner only (the owner's request already holds the script lock). Never fails the list.
+  let visits = [];
+  try {
+    let log = loadGuestLog_();
+    const liveKey = {};
+    out.forEach(x => {
+      const map = guestViewers_(x.id);
+      Object.keys(map).forEach(vid => {
+        const r = map[vid];
+        if (!r || typeof r !== 'object' || typeof r.s !== 'number' || typeof r.e !== 'number') return;
+        log = upsertGuestVisit_(log, x.id, x.label, vid, r.d, r);     // bring the history up to date from the live picture
+        if (now - r.e <= GUEST_LIVE_MS) { x.live++; liveKey[x.id + '|' + vid + '|' + r.s] = true; }
+      });
+    });
+    saveGuestLog_(log);
+    log.forEach(v => {
+      const x = out.find(o => o.id === v.l);
+      if (x) { x.visits++; x.seconds += Math.max(0, Math.round((v.e - v.s) / 1000)); }
+    });
+    visits = log.slice(-40).reverse().map(v => ({ id: v.l, label: v.n || '', dev: v.d || '', start: v.s, last: v.e, hellos: v.c || 0, live: !!liveKey[v.l + '|' + v.v + '|' + v.s], ended: v.x || 0 }));
+  } catch (err) { visits = []; }
+  return { ok: true, guests: out, visits: visits, now: now };
 }
 function revokeGuest_(id, all) {
   const cur = loadGuests_();
   let n = 0;
-  if (all === true || id === 'all') { n = Object.keys(cur).length; saveGuests_({}); return { ok: true, revoked: n }; }
+  if (all === true || id === 'all') {
+    const ids = Object.keys(cur).map(h => h.slice(0, 10));
+    n = ids.length; saveGuests_({}); markGuestsEnded_(ids, true);
+    return { ok: true, revoked: n };
+  }
   id = String(id || '');
   if (!/^[0-9a-f]{10}$/.test(id)) return { ok: false, error: 'bad id' };
   Object.keys(cur).forEach(h => { if (h.slice(0, 10) === id) { delete cur[h]; n++; } });
   saveGuests_(cur);
+  if (n) markGuestsEnded_([id], false);
   return { ok: true, revoked: n };
 }
-function revokeAllGuests() { saveGuests_({}); }
+// After a link is ended by the owner: forget who was "on" it and note in the history that it was ended early. Never throws.
+function markGuestsEnded_(ids, everything) {
+  try {
+    const now = Date.now();
+    const cache = CacheService.getScriptCache();
+    ids.forEach(i => { try { cache.remove('gv:' + i); } catch (e) {} });
+    const log = loadGuestLog_();
+    log.forEach(v => { if (!v.x && (everything || ids.indexOf(v.l) >= 0)) v.x = now; });
+    saveGuestLog_(log);
+  } catch (err) { /* the link is already ended; the history note is optional */ }
+}
+function revokeAllGuests() { const ids = Object.keys(loadGuests_()).map(h => h.slice(0, 10)); saveGuests_({}); markGuestsEnded_(ids, true); }
 // Fallback if the website is not handy: run createGuestLink from the Apps Script editor, then read the key from View > Logs.
 // Link = https://<your site>/#guest=<script id>~<key>~<ends at, ms>  (the website's Guest access card builds it for you).
 function createGuestLink(minutes, preset) {
@@ -1089,7 +1196,9 @@ function doPost(e) {
       if (!g.ok) return json(g.expired ? { ok: false, error: 'auth', reason: 'guest-expired' } : { ok: false, error: 'auth' });
       // A guest can ONLY read. Everything else is refused with "view-only" (not "auth", so the website does not sign them out).
       // This return comes before every path that writes, edits, deletes or changes settings, so a guest key can never reach them.
-      if (body.action === 'read') return json(readReply_(body, g));
+      if (body.action === 'read') { recordGuestSeen_(g, body); return json(readReply_(body, g)); }
+      // "guest_ping" is the guest tab saying it is still open (and finding out within a minute if the link was ended). It returns no sheet data.
+      if (body.action === 'guest_ping') { recordGuestSeen_(g, body); return json({ ok: true, exp: g.exp }); }
       return json({ ok: false, error: 'view-only' });
     }
 
