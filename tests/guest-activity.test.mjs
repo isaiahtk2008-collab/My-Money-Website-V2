@@ -321,3 +321,85 @@ test('filtering is unchanged: tracking does not change what each preset shows', 
   assert.equal(r.guest.preset, 'business');
   assert.deepEqual(Object.keys(r.guest).sort(), ['exp', 'preset']);  // the guest is never told its link id or label
 });
+
+/* ---------------- Demo link: "show off the site with none of my data" ---------------- */
+function makeTrap() {
+  const c = make();
+  let reads = 0;
+  c.readAll = () => { reads++; return TABS(); };       // the real tabs, with a recognisable marker in them
+  c.__reads = () => reads;
+  return c;
+}
+const demoRead = (c, g) => post(c, { action: 'read', secret: g.key });
+
+test('a demo link can be made and is listed with its own name', () => {
+  const c = makeTrap();
+  const g = mk(c, 120, 'demo', 'Investor');
+  assert.equal(g.preset, 'demo');
+  const l = list(c);
+  assert.equal(l.guests[0].preset, 'demo'); assert.equal(l.guests[0].label, 'Investor');
+});
+
+test('a demo guest gets NO sheet data and the script never even reads the sheet', () => {
+  const c = makeTrap();
+  const g = mk(c, 60, 'demo');
+  const r = demoRead(c, g);
+  assert.equal(r.ok, true);
+  assert.equal(c.__reads(), 0);                                  // the sheet was never read for this guest
+  assert.equal(r.guest.demo, true); assert.equal(r.guest.preset, 'demo');
+  for (const t of Object.values(r.tabs)) { assert.deepEqual(t.rows, []); assert.deepEqual(t.headers, []); }
+  const text = JSON.stringify(r);
+  assert.ok(!text.includes('iPhone'));
+  assert.ok(!text.includes('Rent'));
+});
+
+test('a demo guest cannot get real data any other way (flat reads, repeated reads, fresh flag)', () => {
+  const c = makeTrap();
+  const g = mk(c, 60, 'demo');
+  // warm the shared read cache with real data as the owner, then read as the demo guest
+  assert.equal(own(c, { action: 'read' }).ok, true);
+  const flat = post(c, { action: 'read', secret: g.key, flat: '1', fresh: true });
+  assert.equal(flat.ok, true);
+  assert.ok(!JSON.stringify(flat).includes('iPhone'));
+  assert.ok(Array.isArray(flat.data) && flat.data.every(x => !x || !JSON.stringify(x).includes('Rent')));
+  for (const action of ['check', 'settings_get']) assert.equal(post(c, { action, secret: g.key }).error, 'view-only');
+});
+
+test('even if real tabs were handed to the filter, a demo preset returns none of them', () => {
+  const c = make();
+  const out = c.filterForGuest_(TABS(), 'demo');
+  for (const t of Object.values(out)) { assert.equal(t.rows.length, 0); assert.equal(t.headers.length, 0); }
+  assert.ok(!JSON.stringify(out).includes('iPhone'));
+});
+
+test('a check-in from a demo guest says so, and from any other guest it does not', () => {
+  const c = makeTrap();
+  const d = mk(c, 60, 'demo'), n = mk(c, 60, 'business');
+  assert.equal(hello(c, d).demo, true);
+  assert.equal(hello(c, n).demo, undefined);
+  assert.equal(demoRead(c, n).guest.demo, undefined);
+  assert.equal(c.__reads(), 1);                                  // only the business guest's read touched the sheet
+});
+
+test('a demo guest is still read-only and is tracked like any other link', () => {
+  const c = makeTrap();
+  const g = mk(c, 120, 'demo', 'Investor');
+  for (const action of ['edit', 'delete', 'add', 'trade', 'backfill', 'guest_create', 'guest_list', 'guest_revoke']) assert.equal(post(c, { action, secret: g.key, all: true }).error, 'view-only', action);
+  hello(c, g);
+  const r = list(c);
+  assert.equal(r.guests[0].live, 1); assert.equal(r.visits[0].label, 'Investor');
+  own(c, { action: 'guest_revoke', all: true });
+  assert.equal(demoRead(c, g).error, 'auth');
+});
+
+test('unknown presets still fail closed to the strictest real-data preset, never to the demo or "all"', () => {
+  const c = makeTrap();
+  assert.equal(own(c, { action: 'guest_create', minutes: 60, preset: 'DEMO' }).ok, false);
+  assert.equal(own(c, { action: 'guest_create', minutes: 60, preset: 'constructor' }).ok, false);
+  const g = mk(c, 60, 'sales');
+  const store = JSON.parse(c.__props['mm.guests']);
+  for (const h of Object.keys(store)) store[h].preset = 'garbage';
+  c.__props['mm.guests'] = JSON.stringify(store);
+  const r = demoRead(c, g);
+  assert.equal(r.guest.preset, 'sales'); assert.equal(r.guest.demo, undefined);
+});
