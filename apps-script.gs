@@ -103,8 +103,16 @@ const GUEST_MASK_COLS = ['Sold To', 'Sold to', 'Bought From', 'Found By', 'Bough
 const GUEST_PRESETS = {
   all:      { name: 'Everything (read-only)', hideTabs: [], maskCols: [] },
   business: { name: 'Business only (no expenses, investments or owed)', hideTabs: GUEST_HIDE_TABS, maskCols: [] },
-  sales:    { name: 'Sales and stock without personal details', hideTabs: GUEST_HIDE_TABS, maskCols: GUEST_MASK_COLS }
+  sales:    { name: 'Sales and stock without personal details', hideTabs: GUEST_HIDE_TABS, maskCols: GUEST_MASK_COLS },
+  // "Show off the site": the script NEVER reads the sheet for this one. It answers with empty tabs, and the website fills the screens with its own made-up sample data.
+  demo:     { name: 'Demo: made-up sample data only (none of my data)', hideTabs: [], maskCols: [], demo: true }
 };
+const guestIsDemo_ = k => !!(GUEST_PRESETS[k] && GUEST_PRESETS[k].demo === true);
+function emptyDemoTabs_() {
+  const out = {};
+  Object.keys(READ_TABS).forEach(k => { out[k] = { sheet: READ_TABS[k].tab, headers: [], rows: [] }; });
+  return out;
+}
 const gnorm_ = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
 
 function loadGuests_() {
@@ -272,6 +280,7 @@ function createGuestLink(minutes, preset) {
 // Applies a preset to what readAll() returned. Hidden tabs keep their headers but lose every row; masked columns lose their values.
 function filterForGuest_(tabs, presetKey) {
   const p = GUEST_PRESETS[presetKey] || GUEST_PRESETS.sales;
+  if (p.demo === true) return emptyDemoTabs_();   // belt and braces: even if real tabs are passed in, a demo guest never gets any of them
   const mask = {}; p.maskCols.forEach(c => { mask[gnorm_(c)] = true; });
   const out = {};
   Object.keys(tabs).forEach(key => {
@@ -721,8 +730,10 @@ function readReply_(body, guest) {
   try {
     if (guest) {
       if (body.action !== 'read') return { ok: false, error: 'view-only' };   // belt and braces: settings and check are never shown to guests
-      const gtabs = filterForGuest_(readAllCached_(), guest.preset);   // a guest never gets to skip the cache
+      const demo = guestIsDemo_(guest.preset);
+      const gtabs = demo ? emptyDemoTabs_() : filterForGuest_(readAllCached_(), guest.preset);   // a guest never gets to skip the cache; a demo guest never touches the sheet at all
       const greply = { ok: true, version: 3, at: new Date().toISOString(), tabs: gtabs, guest: { preset: guest.preset, exp: guest.exp } };
+      if (demo) greply.guest.demo = true;
       if (body.flat === '1' || body.flat === 1 || body.flat === true) greply.data = flatten(gtabs);
       return greply;
     }
@@ -1198,7 +1209,7 @@ function doPost(e) {
       // This return comes before every path that writes, edits, deletes or changes settings, so a guest key can never reach them.
       if (body.action === 'read') { recordGuestSeen_(g, body); return json(readReply_(body, g)); }
       // "guest_ping" is the guest tab saying it is still open (and finding out within a minute if the link was ended). It returns no sheet data.
-      if (body.action === 'guest_ping') { recordGuestSeen_(g, body); return json({ ok: true, exp: g.exp }); }
+      if (body.action === 'guest_ping') { recordGuestSeen_(g, body); const pr = { ok: true, exp: g.exp }; if (guestIsDemo_(g.preset)) pr.demo = true; return json(pr); }
       return json({ ok: false, error: 'view-only' });
     }
 

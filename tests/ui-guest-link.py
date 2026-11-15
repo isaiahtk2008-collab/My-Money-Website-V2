@@ -57,8 +57,9 @@ class Fake:
         elif tok in self.guests:
             if act in ('read', 'guest_ping') and body.get('vid'):
                 r = self.seen.setdefault((self.guests[tok]['id'], body['vid']), {'s': now - 120000, 'e': now, 'd': body.get('dev', '')}); r['e'] = now
-            if act == 'read': out = {'ok': True, 'tabs': tabs(), 'guest': {'preset': self.guests[tok]['preset'], 'exp': self.guests[tok]['exp']}}
-            elif act == 'guest_ping': out = {'ok': True, 'exp': self.guests[tok]['exp']}
+            demo = self.guests[tok]['preset'] == 'demo'
+            if act == 'read': out = {'ok': True, 'tabs': tabs(), 'guest': dict({'preset': self.guests[tok]['preset'], 'exp': self.guests[tok]['exp']}, **({'demo': True} if demo else {}))}
+            elif act == 'guest_ping': out = dict({'ok': True, 'exp': self.guests[tok]['exp']}, **({'demo': True} if demo else {}))
             else: out = {'ok': False, 'error': 'view-only'}
         else: out = {'ok': False, 'error': 'auth'}
         route.fulfill(status=200, content_type='application/json', body=json.dumps(out), headers=h)
@@ -179,7 +180,7 @@ with sync_playwright() as p:
     durs = o.evaluate("[...document.querySelectorAll('#gst-dur option')].map(o=>Number(o.value))")
     check('C1: durations are exactly 30 min, 1 h, 2 h, 4 h, 6 h, 12 h, 24 h, 48 h, 7 d', durs == [30, 60, 120, 240, 360, 720, 1440, 2880, 10080], str(durs))
     vis = o.evaluate("[...document.querySelectorAll('#gst-vis option')].map(o=>o.value)")
-    check('C1: visibility choices are the three presets', sorted(vis) == ['all', 'business', 'sales'], str(vis))
+    check('C1: visibility choices are the three real-data presets plus Demo', sorted(vis) == ['all', 'business', 'demo', 'sales'], str(vis))
     check('C1: nothing is listed yet', 'No active guest links' in (o.text_content('#gst-list') or ''), o.text_content('#gst-list') or '')
     o.select_option('#gst-dur', '360'); o.select_option('#gst-vis', 'business')
     o.click('[data-guest="create"]'); o.wait_for_timeout(1500)
@@ -236,6 +237,31 @@ with sync_playwright() as p:
     check('D7: the guest who was on is cut off and shown "This guest link has expired"', 'This guest link has expired' in (gp.text_content('#guest-ended') or ''))
     check('D8: no page errors on either side', not [e for e in o2.errs + gp.errs if 'gst' in e or 'guest' in e.lower() or 'ping' in e.lower()], str(o2.errs[:2] + gp.errs[:2]))
     ctx2.close()
+
+    # ---------- Demo link: the page shows its own made-up sample data; the script sends none ----------
+    fake3 = Fake(); ctx3 = new_ctx(b, fake3); o3 = owner_page(ctx3)
+    o3.click('[data-sec="open"]'); o3.wait_for_timeout(1200); o3.click('#gst-card .m3-card-head'); o3.wait_for_timeout(400)
+    vis3 = o3.evaluate("[...document.querySelectorAll('#gst-vis option')].map(o=>[o.value,o.textContent])")
+    check('F1: the owner can pick a Demo option (sample data only, none of my data)', ['demo', 'Demo: sample data only (none of my data)'] in vis3, str(vis3))
+    o3.fill('#gst-label', 'Investor'); o3.select_option('#gst-vis', 'demo'); o3.select_option('#gst-dur', '120')
+    o3.click('[data-guest="create"]'); o3.wait_for_timeout(1300)
+    link3 = o3.evaluate("(document.getElementById('gst-link')||{}).value||''")
+    check('F1: creating it sends the demo preset', any(x.get('action') == 'guest_create' and x.get('preset') == 'demo' for x in fake3.log))
+    check('F1: it is listed with the Demo name', 'Demo: sample data only' in (o3.text_content('#gst-list') or ''), o3.text_content('#gst-list') or '')
+    dg = page_in(ctx3); dg.goto(PAGE.as_uri() + '#' + link3.split('#', 1)[1]); dg.wait_for_timeout(3500)
+    banner = dg.text_content('#guest-banner') or ''
+    sub3 = dg.text_content('#sub') or ''
+    check('F2: the home subtitle says Demo data, not Google Sheet', 'Demo data' in sub3 and 'Google Sheet' not in sub3, sub3)
+    check('F2: the guest banner says it is a demo with made-up data', 'Demo' in banner and 'made-up' in banner and 'read-only' in banner, banner)
+    body = dg.evaluate("document.body.innerText")
+    reads3 = [x for x in fake3.log if x.get('action') == 'read' and x.get('secret') != OWNER]
+    check('F2: the demo guest page did load (asked the script once or more)', len(reads3) >= 1)
+    dg.evaluate("(()=>{const b=[...document.querySelectorAll('button,a,[role=tab]')].find(e=>/reselling/i.test(e.textContent||'')&&e.offsetParent);if(b)b.click()})()"); dg.wait_for_timeout(1500)
+    body = dg.evaluate("document.body.innerText")
+    check('F2: the page shows the built-in sample data (made-up names, never real ones)', ('Demo Phone' in body) or ('DEMO-P' in body) or ('Sample Buyer' in body), body[:300])
+    check('F3: a demo guest page sent only read and check-in requests', all(x.get('action') in ('read', 'guest_ping') for x in fake3.log if x.get('secret') != OWNER))
+    check('F3: no page errors on the demo guest page', not [e for e in dg.errs if 'guest' in e.lower() or 'demo' in e.lower() or 'MM_RAW' in e], str(dg.errs[:3]))
+    ctx3.close()
     b.close()
 
 print(f'\n{passed} passed, {len(fails)} failed')
