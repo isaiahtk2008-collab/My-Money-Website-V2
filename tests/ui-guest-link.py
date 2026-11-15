@@ -25,7 +25,7 @@ def tabs():
     return t
 
 class Fake:
-    def __init__(self): self.guests = {}; self.log = []
+    def __init__(self): self.guests = {}; self.log = []; self.seen = {}
     def handle(self, route):
         req = route.request
         h = {'access-control-allow-origin': '*', 'access-control-allow-headers': '*'}
@@ -40,10 +40,13 @@ class Fake:
             elif act == 'settings_get': out = {'ok': True, 'settings': {}}
             elif act == 'guest_create':
                 key = secrets.token_hex(32); exp = now + int(body['minutes']) * 60000
-                self.guests[key] = {'exp': exp, 'preset': body['preset'], 'id': key[:10]}
+                self.guests[key] = {'exp': exp, 'preset': body['preset'], 'id': key[:10], 'label': str(body.get('label') or '')[:20]}
                 out = {'ok': True, 'key': key, 'id': key[:10], 'exp': exp, 'preset': body['preset']}
             elif act == 'guest_list':
-                out = {'ok': True, 'now': now, 'guests': [{'id': g['id'], 'exp': g['exp'], 'preset': g['preset'], 'label': ''} for g in self.guests.values() if g['exp'] > now]}
+                live = lambda i: sum(1 for (gi, v), r in self.seen.items() if gi == i and now - r['e'] <= 150000)
+                out = {'ok': True, 'now': now,
+                       'guests': [{'id': g['id'], 'exp': g['exp'], 'preset': g['preset'], 'label': g.get('label', ''), 'live': live(g['id']), 'visits': sum(1 for (gi, v) in self.seen if gi == g['id']), 'seconds': sum((r['e'] - r['s']) // 1000 for (gi, v), r in self.seen.items() if gi == g['id'])} for g in self.guests.values() if g['exp'] > now],
+                       'visits': [{'id': gi, 'label': next((g.get('label', '') for g in self.guests.values() if g['id'] == gi), ''), 'dev': r['d'], 'start': r['s'], 'last': r['e'], 'hellos': 1, 'live': now - r['e'] <= 150000, 'ended': 0} for (gi, v), r in self.seen.items()]}
             elif act == 'guest_revoke':
                 if body.get('all'): n = len(self.guests); self.guests = {}
                 else:
@@ -52,7 +55,11 @@ class Fake:
                 out = {'ok': True, 'revoked': n}
             else: out = {'ok': True}
         elif tok in self.guests:
-            out = {'ok': True, 'tabs': tabs(), 'guest': {'preset': self.guests[tok]['preset'], 'exp': self.guests[tok]['exp']}} if act == 'read' else {'ok': False, 'error': 'view-only'}
+            if act in ('read', 'guest_ping') and body.get('vid'):
+                r = self.seen.setdefault((self.guests[tok]['id'], body['vid']), {'s': now - 120000, 'e': now, 'd': body.get('dev', '')}); r['e'] = now
+            if act == 'read': out = {'ok': True, 'tabs': tabs(), 'guest': {'preset': self.guests[tok]['preset'], 'exp': self.guests[tok]['exp']}}
+            elif act == 'guest_ping': out = {'ok': True, 'exp': self.guests[tok]['exp']}
+            else: out = {'ok': False, 'error': 'view-only'}
         else: out = {'ok': False, 'error': 'auth'}
         route.fulfill(status=200, content_type='application/json', body=json.dumps(out), headers=h)
 
@@ -99,7 +106,10 @@ with sync_playwright() as p:
     check('G2: add/log button and sync pill are hidden', not visible(g, '.lg-fab') and not visible(g, '#syncpill'))
     reads = [x for x in fake.log if x.get('secret') == gkey]
     check('G3: guest page loaded data with the guest key', any(x.get('action') == 'read' for x in reads), str(fake.log[-3:]))
-    check('G3: guest page sent ONLY read requests (no settings sync, no writes)', reads and all(x.get('action') == 'read' for x in reads), str([x.get('action') for x in reads]))
+    check('G3: guest page sent ONLY read and check-in requests (no settings sync, no writes)', reads and all(x.get('action') in ('read', 'guest_ping') for x in reads), str([x.get('action') for x in reads]))
+    pings = [x for x in reads if x.get('action') == 'guest_ping']
+    check('G3: the guest page checks in (so the owner can see who is on)', len(pings) >= 1)
+    check('G3: a check-in carries only the key, a random tab id and a device name', all(set(x) == {'action', 'secret', 'vid', 'dev'} and re.fullmatch(r'[0-9a-f]{16}', x['vid']) and len(x['dev']) <= 40 for x in pings), str(pings[:1]))
     # owner screens cannot be opened even by force
     g.evaluate("(()=>{const b=document.createElement('button');b.dataset.sec='open';b.id='forced';b.textContent='x';b.style.cssText='position:fixed;top:60px;left:60px;z-index:200000';document.body.appendChild(b);b.click()})()")
     g.wait_for_timeout(500)
@@ -145,11 +155,18 @@ with sync_playwright() as p:
     f = Fake(); k = secrets.token_hex(32); e = int(time.time() * 1000) + 3600_000; f.guests[k] = {'exp': e, 'preset': 'all', 'id': k[:10]}
     c = new_ctx(b, f); pg = page_in(c); pg.goto(PAGE.as_uri() + link_for(k, e)); pg.wait_for_timeout(1500)
     check('E4: link works while live', visible(pg, '#guest-banner'))
-    del f.guests[k]; pg.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
-    pg.evaluate("window.mmGuest.exp=Date.now()-1"); pg.evaluate("document.dispatchEvent(new Event('visibilitychange'))"); pg.wait_for_timeout(2000)
-    check('E4: when time is up the page switches to "This guest link has expired"', 'This guest link has expired' in (pg.text_content('#guest-ended') or ''))
+    # the owner ends the link: the open guest tab finds out as soon as it is shown / checks in (no waiting for the clock)
+    del f.guests[k]; pg.evaluate("document.dispatchEvent(new Event('visibilitychange'))"); pg.wait_for_timeout(2500)
+    check('E4: when the owner ends the link the open page switches to "This guest link has expired"', 'This guest link has expired' in (pg.text_content('#guest-ended') or ''))
     pg.evaluate("document.querySelector('#guest-ended button').click()"); pg.wait_for_timeout(1500)
     check('E4: the owner button goes to the normal sign-in screen', modal_open(pg))
+    c.close()
+
+    # a link that simply runs out of time while the page is open
+    f = Fake(); k = secrets.token_hex(32); e = int(time.time() * 1000) + 3600_000; f.guests[k] = {'exp': e, 'preset': 'all', 'id': k[:10]}
+    c = new_ctx(b, f); pg = page_in(c); pg.goto(PAGE.as_uri() + link_for(k, e)); pg.wait_for_timeout(1500)
+    pg.evaluate("window.mmGuest.exp=Date.now()-1"); pg.evaluate("document.dispatchEvent(new Event('visibilitychange'))"); pg.wait_for_timeout(2500)
+    check('E4b: when time is up the page switches to "This guest link has expired"', 'This guest link has expired' in (pg.text_content('#guest-ended') or ''))
     c.close()
 
     # ---------- owner side: Guest access card ----------
@@ -160,7 +177,7 @@ with sync_playwright() as p:
     o.click('#gst-card .m3-card-head'); o.wait_for_timeout(400)
     check('C1: the Guest access card is in Security & Settings', o.evaluate("!!document.getElementById('gst-card')") and 'Guest access' in (o.text_content('#gst-card') or ''))
     durs = o.evaluate("[...document.querySelectorAll('#gst-dur option')].map(o=>Number(o.value))")
-    check('C1: durations are exactly 30 min, 1 h, 6 h, 12 h, 24 h, 48 h, 7 d', durs == [30, 60, 360, 720, 1440, 2880, 10080], str(durs))
+    check('C1: durations are exactly 30 min, 1 h, 2 h, 4 h, 6 h, 12 h, 24 h, 48 h, 7 d', durs == [30, 60, 120, 240, 360, 720, 1440, 2880, 10080], str(durs))
     vis = o.evaluate("[...document.querySelectorAll('#gst-vis option')].map(o=>o.value)")
     check('C1: visibility choices are the three presets', sorted(vis) == ['all', 'business', 'sales'], str(vis))
     check('C1: nothing is listed yet', 'No active guest links' in (o.text_content('#gst-list') or ''), o.text_content('#gst-list') or '')
@@ -186,6 +203,39 @@ with sync_playwright() as p:
     check('C4: list is empty afterwards', 'No active guest links' in (o.text_content('#gst-list') or ''))
     check('C5: no page errors on the owner side', not [e for e in o.errs if 'gst' in e or 'guest' in e.lower()], str(o.errs[:3]))
     ctx.close()
+
+    # ---------- owner side: several labelled links, who is on, history, End all ----------
+    fake2 = Fake(); ctx2 = new_ctx(b, fake2); o2 = owner_page(ctx2)
+    o2.click('[data-sec="open"]'); o2.wait_for_timeout(1200); o2.click('#gst-card .m3-card-head'); o2.wait_for_timeout(400)
+    check('D1: there is a "Who it is for" box with a 20 character limit', o2.evaluate("(document.getElementById('gst-label')||{}).maxLength") == 20)
+    links = []
+    for label, mins, pre in [('Mike', '120', 'sales'), ('Sara', '240', 'business')]:
+        o2.fill('#gst-label', label); o2.select_option('#gst-dur', mins); o2.select_option('#gst-vis', pre)
+        o2.click('[data-guest="create"]'); o2.wait_for_timeout(1300)
+        links.append(o2.evaluate("(document.getElementById('gst-link')||{}).value||''"))
+    made = [x for x in fake2.log if x.get('action') == 'guest_create']
+    check('D1: each link is created with its own label and its own duration', [(x['label'], x['minutes']) for x in made] == [('Mike', 120), ('Sara', 240)], str(made))
+    lst = o2.text_content('#gst-list') or ''
+    check('D2: both links are listed at once, each with its own name and end time', 'Mike' in lst and 'Sara' in lst and lst.count('End now') == 2, lst)
+    check('D2: the list shows how long each has left', 'left' in lst, lst)
+    check('D2: nobody is on yet', 'Nobody is on a guest link right now' in lst and 'not opened yet' in lst, lst)
+    check('D3: a big red "End all guest links" button is always there while links exist', o2.evaluate("!!document.querySelector('#gst-list [data-guest=\"revokeall\"]')"))
+    gp = page_in(ctx2); gp.goto(PAGE.as_uri() + '#' + links[0].split('#', 1)[1]); gp.wait_for_timeout(2000)
+    check('D4: the guest opens Mike\'s link', visible(gp, '#guest-banner'))
+    o2.wait_for_timeout(16500)   # the card refreshes itself every 15 seconds
+    lst = o2.text_content('#gst-list') or ''
+    check('D4: the owner sees one person on right now', '1 person is on a guest link right now' in lst, lst)
+    check('D4: it is Mike\'s link that shows them on, not Sara\'s', '1 on now' in lst and lst.count('Nobody on now') == 1, lst)
+    check('D5: recent visits show the link name, device and time on the page', 'Recent visits' in lst and 'Mike' in lst and 'on the page' in lst and 'on now' in lst, lst)
+    check('D5: the owner is told guests are anonymous', 'anonymous' in lst)
+    check('D6: typing in the label box is not wiped by the live refresh', (o2.fill('#gst-label', 'Dave') or True) and (o2.wait_for_timeout(16500) or True) and o2.input_value('#gst-label') == 'Dave')
+    o2.once('dialog', lambda d: d.accept())
+    o2.click('[data-guest="revokeall"]'); o2.wait_for_timeout(1500)
+    check('D7: End all ends every link', not fake2.guests and 'No active guest links' in (o2.text_content('#gst-list') or ''))
+    gp.evaluate("document.dispatchEvent(new Event('visibilitychange'))"); gp.wait_for_timeout(2500)
+    check('D7: the guest who was on is cut off and shown "This guest link has expired"', 'This guest link has expired' in (gp.text_content('#guest-ended') or ''))
+    check('D8: no page errors on either side', not [e for e in o2.errs + gp.errs if 'gst' in e or 'guest' in e.lower() or 'ping' in e.lower()], str(o2.errs[:2] + gp.errs[:2]))
+    ctx2.close()
     b.close()
 
 print(f'\n{passed} passed, {len(fails)} failed')
