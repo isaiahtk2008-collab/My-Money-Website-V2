@@ -5300,29 +5300,117 @@ function owedPatchRaw(raw, tabKey, rowId, patch) {
   return Object.assign({}, raw, { [tabKey]: Object.assign({}, raw[tabKey], { rows }) });
 }
 
+/* Full edit of one Owed entry (open or closed). Pure: returns {error} or {changes, expect, patch}. Only fields that really changed are sent.
+   Type and Row ID are never changed. The expect block holds what the page last saw, so the script refuses if the sheet row changed meanwhile. */
+function owedEditChanges(item, kind, input, today = TODAY) {
+  const isLoan = kind === 'loan';
+  const i = input || {};
+  const person = owedStr(i.person);
+  if (!person) return { error: 'Enter a name' };
+  const tot = owedStr(i.total);
+  const totN = tot === '' ? null : num(tot);
+  if (totN == null || totN < 0) return { error: 'Enter a total amount of 0 or more' };
+  const paidTxt = owedStr(i.paid);
+  const paidN = paidTxt === '' ? null : num(paidTxt);
+  if (paidTxt !== '' && (paidN == null || paidN < 0)) return { error: 'Enter an amount paid of 0 or more' };
+  const dateOk = d => d === '' || (/^\d{4}-\d{2}-\d{2}$/.test(d) && Boolean(pd(d)) && isoDay(pd(d)) === d);   // round trip: 2026-13-45 would otherwise roll over into a real date
+  const due = owedStr(i.due), dateOut = owedStr(i.dateOut);
+  if (!dateOk(due)) return { error: isLoan ? 'Enter a valid return date' : 'Enter a valid pickup date' };
+  if (!dateOk(dateOut)) return { error: 'Enter a valid date' };
+  const statuses = isLoan ? OWED_LOAN_STATUSES : OWED_DEP_STATUSES;
+  const status = statuses.find(s => s.toLowerCase() === owedStr(i.status).toLowerCase()) || statuses[0];
+  const changes = {}, patch = {};
+  const setText = (col, nu, old) => { const n = owedStr(nu), o = owedStr(old); if (n !== o) { changes[col] = n === '' ? null : n; patch[col] = n === '' ? null : n; } };
+  setText('Person', person, item.name);
+  setText('Item / Device', i.item, isLoan ? item.item : item.device);
+  setText('Phone / Email', i.contact, item.contact);
+  setText('Notes', i.notes, item.notes);
+  const oldTot = isLoan ? item.loaned : item.total, oldPaid = isLoan ? item.repaid : item.paid;
+  if (totN !== oldTot) { changes['Total Amount'] = totN; patch['Total Amount'] = totN; }
+  const hadPaid = isLoan ? item._hadRepaid : item._hadPaid;
+  if (paidN === null ? hadPaid : paidN !== oldPaid) { changes['Amount Paid'] = paidN; patch['Amount Paid'] = paidN; }
+  const oldDue = isLoan ? item.due : item.pickup, oldDueIso = oldDue ? isoDay(oldDue) : '';
+  if (due !== oldDueIso) { changes['Due Date'] = due === '' ? null : { $date: due }; patch['Due Date'] = due === '' ? null : due; }
+  const oldOutIso = item.dateOut ? isoDay(item.dateOut) : '';
+  if (dateOut !== '' && dateOut !== oldOutIso) { changes['Date Out'] = { $date: dateOut }; patch['Date Out'] = dateOut; }
+  const curStatus = owedStr(item.status);
+  const curNorm = curStatus === '' || curStatus.toLowerCase() === 'open' ? statuses[0].toLowerCase() : curStatus.toLowerCase();
+  if (status.toLowerCase() !== curNorm) { changes['Status'] = status; patch['Status'] = status; }
+  const nowOpen = status === statuses[0];
+  const todayIso = isoDay(today);
+  if (item.open && !nowOpen) { changes['Date Closed'] = { $date: todayIso }; patch['Date Closed'] = todayIso; }
+  else if (!item.open && nowOpen) { changes['Date Closed'] = null; patch['Date Closed'] = null; }
+  if (!Object.keys(changes).length) return { error: 'No changes to save' };
+  const expect = {};
+  if (item.id) expect['Row ID'] = item.id;
+  expect['Type'] = isLoan ? 'Loan' : 'Deposit';
+  expect['Person'] = item.name;
+  if (isLoan ? item._hadLoaned : item._hadTotal) expect['Total Amount'] = oldTot;
+  if (hadPaid) expect['Amount Paid'] = oldPaid;
+  if (item.status) expect['Status'] = item.status;
+  return { changes, expect, patch };
+}
+
+/* Open deposits matched to an unsold device (read-only; uses the existing deposit-to-device link). */
+function owedDeviceFor(dep) {
+  try {
+    const items = (store.D && store.D.items) || [];
+    return items.find(it => it && !it.sold && it.pendingDep && dep.id && it.pendingDep.id === dep.id) || null;
+  } catch (e) { return null; }
+}
+
+function owedDetailGrid(x, isLoan) {
+  const d = v => (v ? fdy(v) : '—');
+  const rows = isLoan
+    ? [['Amount loaned', mny(x.loaned)], ['Repaid', mny(x.repaid)], ['Balance left', mny(x.owed)], ['Date loaned', d(x.dateOut)], ['Return by', d(x.due)], ['Date closed', d(x.closed)], ['Status', x.status || 'Out'], ['Phone / Email', x.contact || '—'], ['Notes', x.notes || '—']]
+    : [['Total price', mny(x.total)], ['Deposit paid', mny(x.paid)], ['Balance', mny(x.balance)], ['Deposit taken', d(x.dateIn)], ['Pickup by', d(x.pickup)], ['Date closed', d(x.closed)], ['Status', x.status || 'Waiting'], ['Phone / Email', x.contact || '—'], ['Notes', x.notes || '—']];
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 16px;margin:8px 0">`
+    + rows.map(r => `<div><div class="hint">${esc(r[0])}</div><div>${esc(r[1])}</div></div>`).join('') + `</div>`;
+}
+
 function owedRows(items, kind, openN) {
-  const open = items.filter(x => x.open).slice(0, 50), closed = items.filter(x => !x.open);
+  const open = items.filter(x => x.open).slice(0, 50);
+  const closed = items.filter(x => !x.open).sort((a, b) => ((b.closed ? b.closed.getTime() : 0) - (a.closed ? a.closed.getTime() : 0)) || ((b.row || 0) - (a.row || 0)));
   const isLoan = kind === 'loan';
   const line = 'display:flex;border-bottom:var(--ap3-w,1px) solid var(--ap3-lc,var(--line));padding:12px 0;gap:12px;flex-wrap:wrap;justify-content:space-between;align-items:center';
+  const editBtn = x => x.id ? `<button type="button" class="btn sec" data-owed-full="${kind}" data-oid="${esc(x.id)}">Edit</button>` : '';
   let html = open.length ? open.map(x => {
     const due = owedDue(x);
     const meta = isLoan
       ? [x.daysOut != null ? `Out ${x.daysOut} day${x.daysOut === 1 ? '' : 's'}` : '', `borrowed ${mny(x.loaned)}`, `repaid ${mny(x.repaid)}`, x.due ? `Return by ${fdy(x.due)}` : '']
       : [`Deposit ${mny(x.paid)} of ${mny(x.total)}`, x.dateIn ? `taken ${fdy(x.dateIn)}` : '', x.pickup ? `Pick up by ${fdy(x.pickup)}` : ''];
-    const act = x.id ? `<button type="button" class="btn sec" data-owed-edit="${kind}" data-oid="${esc(x.id)}">Update</button>` : `<span class="hint">Needs a Row ID</span>`;
+    const act = x.id ? `<button type="button" class="btn sec" data-owed-edit="${kind}" data-oid="${esc(x.id)}">Update</button>${editBtn(x)}` : `<span class="hint">Needs a Row ID</span>`;
+    const sell = (!isLoan && x.id && owedDeviceFor(x)) ? `<button type="button" class="btn" data-owed-sell="${esc(x.id)}">Mark sold</button>` : '';
     return `<div style="${line}"><div style="min-width:220px;flex:1"><div><b>${esc(x.name)}</b>${(isLoan ? x.item : x.device) ? ` <span class="hint" style="color:var(--muted)">· ${esc(isLoan ? x.item : x.device)}</span>` : ''}</div>`
       + `<div class="hint">${esc(meta.filter(Boolean).join(' · '))}</div></div>`
-      + `<div style="display:flex;align-items:center;gap:10px"><div style="text-align:right"><div>${M(isLoan ? x.owed : x.balance)}</div><div class="hint">${isLoan ? 'balance' : 'to pay'}</div></div>`
-      + `<span class="chip ${due.tone}${due.tone==='bad'?' glow-urgent':''}">${esc(due.text)}</span>${act}</div></div>`;
+      + `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div style="text-align:right"><div>${M(isLoan ? x.owed : x.balance)}</div><div class="hint">${isLoan ? 'balance' : 'to pay'}</div></div>`
+      + `<span class="chip ${due.tone}${due.tone==='bad'?' glow-urgent':''}">${esc(due.text)}</span>${sell}${act}</div></div>`;
   }).join('') : `<div class="empty"><b>Nothing here</b>${isLoan ? 'No open loans right now.' : 'No deposits waiting for pickup.'}</div>`;
   if (closed.length) {
     html += `<details style="margin-top:14px"><summary style="cursor:pointer;color:var(--muted);font-weight:600">Closed (${closed.length})</summary><div style="margin-top:8px">`
-      + closed.slice(0, 10).map(x => {
+      + closed.map(x => {
         const dt = x.closed ? fdy(x.closed) : '';
-        return `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:var(--ap3-w,1px) solid var(--ap3-lc,var(--line));font-size:13px"><span>${esc(x.name)}${(isLoan ? x.item : x.device) ? ` <span class="hint" style="color:var(--muted)">(${esc(isLoan ? x.item : x.device)})</span>` : ''}</span><span class="hint">${esc(x.status || 'Closed')}${dt ? ' · ' + esc(dt) : ''}</span></div>`;
+        const who = `${esc(x.name)}${(isLoan ? x.item : x.device) ? ` <span class="hint" style="color:var(--muted)">(${esc(isLoan ? x.item : x.device)})</span>` : ''}`;
+        return `<details style="border-bottom:var(--ap3-w,1px) solid var(--ap3-lc,var(--line));padding:6px 0;font-size:13px"><summary style="cursor:pointer;display:flex;justify-content:space-between;gap:10px"><span>${who}</span><span class="hint">${esc(x.status || 'Closed')}${dt ? ' · ' + esc(dt) : ''}</span></summary>`
+          + `${owedDetailGrid(x, isLoan)}<div>${editBtn(x) || '<span class="hint">Needs a Row ID</span>'}</div></details>`;
       }).join('') + `</div></details>`;
   }
   return html;
+}
+
+/* One line under the KPIs: is every loan and deposit safely in the sheet? Read-only. Waiting = entries still in this device's send queue. */
+function owedBackupHtml(m) {
+  let q = [];
+  try { q = JSON.parse(LS.get('lg.q') || '[]'); } catch (e) { q = []; }
+  const waiting = (Array.isArray(q) ? q : []).filter(it => it && it.tab === 'Owed').length;
+  const all = m.loans.concat(m.deps);
+  const noId = all.filter(x => !x.id).length;
+  const connected = Boolean(LS.get('lgUrl'));
+  const box = (tone, msg, btn) => `<div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between;border:var(--ap3-w,1px) solid var(--ap3-lc,var(--line));border-radius:12px;padding:10px 14px"><span class="hint" style="color:var(--${tone})">${msg}</span>${btn || ''}</div>`;
+  if (!connected) return box('warn', 'Not connected to your sheet. New loans and deposits are saved on this device only until you connect it (Log, then Sheet connection).', `<button type="button" class="btn sec" data-lg="settings">Connection</button>`);
+  if (waiting) return box('warn', `${waiting} loan or deposit ${waiting === 1 ? 'is' : 'are'} waiting to be sent to your sheet. ${waiting === 1 ? 'It is' : 'They are'} safe on this device and will send on their own.`, `<button type="button" class="btn sec" data-lg="pill">Send now</button>`);
+  if (noId) return box('warn', `${noId} ${noId === 1 ? 'entry has' : 'entries have'} no Row ID, so ${noId === 1 ? 'it' : 'they'} cannot be edited here. They are still in your sheet.`, `<button type="button" class="btn sec" data-act="idfill">Fill missing IDs</button>`);
+  return box('good', `All ${all.length} loan${all.length === 1 ? '' : 's'} and deposit${all.length === 1 ? '' : 's'} are saved in your sheet.`, '');
 }
 
 /* ===== TRADING + PRE-IPO MODELS (pure functions; no DOM, no writes) =====
@@ -5948,7 +6036,7 @@ function vOwed() {
   const loanCard = card('Loans out', m.hasLoans ? owedRows(m.loans, 'loan') : missing('Loans', 'Loans'), `<button type="button" class="btn sec" data-lg="open" data-id="loan">Add loan</button>`);
   const depCard = card('Deposits waiting', m.hasDeps ? owedRows(m.deps, 'dep') : missing('Deposits', 'Deposits'), `<button type="button" class="btn sec" data-lg="open" data-id="dep">Add deposit</button>`);
   const untypedNote = m.untyped ? `<p class="hint" style="margin-top:12px">${m.untyped} row${m.untyped === 1 ? '' : 's'} in the Owed tab ${m.untyped === 1 ? 'has' : 'have'} a name but no Type (Loan or Deposit), so ${m.untyped === 1 ? 'it is' : 'they are'} not shown here.</p>` : '';
-  return { html: `${kpis}${untypedNote}<div style="display:flex;flex-direction:column;gap:20px;margin-top:20px">${loanCard}${depCard}</div>` };
+  return { html: `${kpis}${owedBackupHtml(m)}${untypedNote}<div style="display:flex;flex-direction:column;gap:20px;margin-top:20px">${loanCard}${depCard}</div>` };
 }
 
 function owedOpenEdit(kind, id) {
@@ -6002,6 +6090,91 @@ document.addEventListener('submit', e => {
   if (!f) return;
   e.preventDefault();
   owedSave(f.dataset.owedform, f.dataset.oid);
+});
+
+function owedOpenFull(kind, id) {
+  const m = owedModel(store.base || store.raw), isLoan = kind === 'loan';
+  const item = (isLoan ? m.loans : m.deps).find(x => x.id === id);
+  if (!item) { toast('That entry is no longer there. Press Refresh.'); return; }
+  const statuses = isLoan ? OWED_LOAN_STATUSES : OWED_DEP_STATUSES;
+  const cs = owedStr(item.status), cur = (cs === '' || cs.toLowerCase() === 'open' ? statuses[0] : cs).toLowerCase();
+  const opts = statuses.map(s => `<option value="${esc(s)}"${s.toLowerCase() === cur ? ' selected' : ''}>${esc(s)}</option>`).join('');
+  const dv = d => (d ? isoDay(d) : '');
+  const n = v => (v == null ? '' : String(v));
+  const f = (idn, label, val, extra = '') => `<div class="ed-f"><label for="${idn}">${label}</label><input type="${extra || 'text'}" id="${idn}" value="${esc(val)}"${extra ? '' : ' autocomplete="off"'}></div>`;
+  const title = isLoan ? 'Edit loan' : 'Edit deposit';
+  openOverlay(`<form class="palbox" style="padding:20px;max-height:90vh;overflow-y:auto" role="dialog" aria-modal="true" aria-label="${title}" data-owedfull="${kind}" data-oid="${esc(id)}" novalidate>
+    <div class="dh"><div><h2>${title}</h2><p class="hint" style="color:var(--muted)">Changes are written to your sheet and recorded in its Edit Log.</p></div><button type="button" class="ibtn" data-act="close" aria-label="Close">${ICON.x}</button></div>
+    <div class="ed-grid">
+      ${f('of-person', isLoan ? 'Borrower' : 'Customer', item.name)}
+      ${f('of-item', isLoan ? 'Item / Device' : 'Device', isLoan ? item.item : item.device)}
+      ${f('of-total', isLoan ? 'Amount loaned' : 'Total price', n(isLoan ? item.loaned : item.total))}
+      ${f('of-paid', isLoan ? 'Repaid so far' : 'Deposit paid', n(isLoan ? item.repaid : item.paid))}
+      ${f('of-out', isLoan ? 'Date loaned' : 'Deposit taken', dv(item.dateOut), 'date')}
+      ${f('of-due', isLoan ? 'Return by' : 'Pick up by', dv(isLoan ? item.due : item.pickup), 'date')}
+      ${f('of-contact', 'Phone / Email', item.contact)}
+    </div>
+    <div class="ed-f"><label for="of-status">Status</label><select id="of-status">${opts}</select></div>
+    <div class="ed-f"><label for="of-notes">Notes</label><input type="text" id="of-notes" value="${esc(item.notes)}" autocomplete="off"></div>
+    <p class="ed-msg" id="ed-msg" role="alert" hidden></p>
+    <div class="ed-actions"><button type="button" class="btn sec" data-act="close">Cancel</button><button type="submit" class="btn">Save changes</button></div></form>`, 'pal');
+}
+
+async function owedSaveFull(kind, id) {
+  if (rowBusy) return;
+  const m = owedModel(store.base || store.raw), isLoan = kind === 'loan';
+  const item = (isLoan ? m.loans : m.deps).find(x => x.id === id);
+  if (!item) { toast('That entry is no longer there. Press Refresh.'); return; }
+  const g = k => { const el = document.getElementById(k); return el ? el.value : ''; };
+  const res = owedEditChanges(item, kind, { person: g('of-person'), item: g('of-item'), total: g('of-total'), paid: g('of-paid'), dateOut: g('of-out'), due: g('of-due'), contact: g('of-contact'), status: g('of-status'), notes: g('of-notes') }, TODAY);
+  const msg = document.getElementById('ed-msg');
+  if (res.error) { if (msg) { msg.textContent = res.error; msg.hidden = false; } else toast(res.error); return; }
+  if (msg) msg.hidden = true;
+  rowSetBusy(true);
+  try {
+    await sheetCall({ action: 'edit', target: 'Owed', rowId: id, expect: res.expect, changes: res.changes });
+    store.set(owedPatchRaw(store.base || store.raw, 'Owed', id, res.patch));
+    closeOverlay(); toast('Saved to your sheet'); syncSoon();
+  } catch (e) { rowShowErr(e); } finally { rowSetBusy(false); }
+}
+
+/* "Mark sold" on an open deposit: opens the normal Sold form (phone, PC or accessory) pre-filled from the deposit. Nothing is written here;
+   the sale is logged by the usual Log entry button. After a sent sale the deposit is closed as Picked Up (see owedCloseDepositAfterSale). */
+function owedSell(depId) {
+  const m = owedModel(store.base || store.raw);
+  const dep = m.deps.find(x => x.id === depId);
+  const dev = dep && owedDeviceFor(dep);
+  if (!dep || !dev) { toast('No matching device in stock for that deposit. Press Refresh.'); return; }
+  if (typeof window.mmSellFromDeposit !== 'function') { toast('The Log form is not ready yet. Try again in a moment.'); return; }
+  closeOverlay();
+  window.mmSellFromDeposit({ kind: dev.kind, label: String(dev.label || dev.name), price: dep.total, buyer: dep.name, contact: dep.contact, depId: dep.id });
+}
+
+async function owedCloseDepositAfterSale(depId) {
+  try {
+    const m = owedModel(store.base || store.raw);
+    const dep = m.deps.find(x => x.id === depId);
+    if (!dep || !dep.open) return { ok: true, skipped: true };
+    const res = owedDepChanges(dep, { pay: String(dep.balance), pickup: '', status: 'Picked Up' }, TODAY);
+    if (res.error) return { ok: true, skipped: true };
+    await sheetCall({ action: 'edit', target: 'Owed', rowId: depId, expect: res.expect, changes: res.changes });
+    store.set(owedPatchRaw(store.base || store.raw, 'Owed', depId, res.patch));
+    syncSoon();
+    return { ok: true };
+  } catch (e) { return { ok: false }; }
+}
+
+document.addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('[data-owed-full]');
+  if (b) { owedOpenFull(b.dataset.owedFull, b.dataset.oid); return; }
+  const s = e.target.closest && e.target.closest('[data-owed-sell]');
+  if (s) owedSell(s.dataset.owedSell);
+});
+document.addEventListener('submit', e => {
+  const f = e.target && e.target.closest && e.target.closest('[data-owedfull]');
+  if (!f) return;
+  e.preventDefault();
+  owedSaveFull(f.dataset.owedfull, f.dataset.oid);
 });
 /* ===== OWED END ===== */
 /* ===== STATUS SIGNALS ENGINE START ===== */
@@ -7160,6 +7333,24 @@ function formScreen(f,draftTs){
 }
 const agoTxt=t=>{const m=Math.round((Date.now()-t)/60000);return m<1?'just now':m<60?m+' min ago':m<1440?Math.round(m/60)+' h ago':Math.round(m/1440)+' d ago'};
 
+
+/* Opens the normal Sold form for a device held by a deposit, pre-filled. Used by the Owed tab "Mark sold" button. Writes nothing by itself. */
+let sellDep=null;
+window.mmSellFromDeposit=function(info){
+  try{
+    const fid={Phone:'sphone',PC:'spc',Accessory:'sacc'}[info.kind];if(!fid)return;
+    openForm(fid,false);
+    const set=(k,v)=>{if(cur.f.some(x=>x.k===k)&&v!=null&&String(v)!=='')V[k]=String(v)};
+    const itemF=cur.f.find(x=>x.t==='item');
+    if(!itemF||!unsold(cur.kind).some(x=>x.l===info.label)){toast('That device is not in the Sold list. Log the sale from the menu.');return}
+    V[itemF.k]=info.label;
+    set('Sale Price',info.price);
+    ['Buyer\'s Name','Sold to'].forEach(k=>set(k,info.buyer));
+    ['Phone Number',"Buyer's Phone Number"].forEach(k=>set(k,info.contact));
+    sellDep={formId:fid,label:info.label,depId:info.depId};
+    show(formScreen(cur,0));setTimeout(()=>{ctx();imeiWarn()},0);
+  }catch(e){}
+};
 /* ---------- Open / draft ---------- */
 const dKey=id=>'lg.d.'+id;
 const meaningful=()=>cur&&Object.keys(V).some(k=>{const x=fOf(k.replace(/#$/,''));if(!x||x.t==='date')return false;const v=V[k];return Array.isArray(v)?v.length:String(v||'').trim()});
@@ -7361,6 +7552,8 @@ async function submit(){
   if(st==='queued'){const q=J('lg.q',[]);q.push(item);W('lg.q',q)}
   clearTimeout(saveT);remember(f);LS.set(dKey(f.id),'');busy=false;bumpChanges();badge();setTimeout(showBackupBanner,600);
   if(st!=='queued'){addOverlay(item);afterSend()}
+  const sd=sellDep&&!trade&&sellDep.formId===f.id&&V[(f.f.find(x=>x.t==='item')||{}).k]===sellDep.label?sellDep:null;if(sd)sellDep=null;
+  if(sd&&st!=='queued'&&typeof owedCloseDepositAfterSale==='function')owedCloseDepositAfterSale(sd.depId).then(r=>toast(r&&r.ok?'Deposit closed as Picked Up':'Sale logged. Close the deposit manually in Owed (Update, Picked Up).'));
   const ok=st==='sent',w=st!=='sent';
   const msg=trade
    ?st==='sent'?`Trade ID ${item.id}: the sale was logged on the “${E(f.tab)}” tab and the received device on the “${E(item.req.boughtTab)}” tab, as one trade.`
