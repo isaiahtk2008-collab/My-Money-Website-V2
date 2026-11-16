@@ -17,6 +17,10 @@ const MAX_SESSIONS = 8;   // newest sessions kept; older ones are signed out
 // An empty value does NOT mean "open": with no valid token every request is refused.
 const SECRET = '';
 
+// OPTIONAL, for Scan photos: paste your Gemini API key between the quotes. Leave empty to use the GEMINI_API_KEY script property instead.
+// Keep this key ONLY in your Apps Script editor. Never put it in the copy of this file on GitHub or the website.
+const GEMINI_API_KEY = '';
+
 /* ---------- SIGN-IN AND SESSIONS ----------
    Tokens are random, shown to the website once, and only their SHA-256 hash is stored (Script properties, key mm.sessions).
    To sign every device out at once, run revokeAllSessions() from the Apps Script editor. */
@@ -1191,7 +1195,7 @@ function fillMissingIdsOnSubmit(e) { return runRowIdFill('fillMissingIdsOnSubmit
 
 // ---- Photo scan (read photos of a device, return what is VISIBLE in them) ----
 // Reads nothing from and writes nothing to the sheet. The website fills a form with the answer and waits for you to press Log.
-// Needs ONE script property: GEMINI_API_KEY (Project Settings > Script properties). Optional: GEMINI_MODEL.
+// Needs your Gemini key: either the GEMINI_API_KEY line near the top of this file, or a script property of the same name. Optional property: GEMINI_MODEL.
 // The key lives only in your Apps Script project; it is never sent to the website and never committed.
 const SCAN_MAX_IMAGES = 10;
 const SCAN_MAX_IMAGE_B64 = 6000000;    // about 4.5 MB per photo after the site shrinks it
@@ -1244,7 +1248,7 @@ const SCAN_PROMPT = [
 
 function scanPhotos_(body) {
   const props = PropertiesService.getScriptProperties();
-  const key = (props.getProperty('GEMINI_API_KEY') || '').trim();
+  const key = (GEMINI_API_KEY || props.getProperty('GEMINI_API_KEY') || '').trim();
   if (!key) return { ok: false, error: 'no-key' };
 
   const imgs = Array.isArray(body.images) ? body.images : [];
