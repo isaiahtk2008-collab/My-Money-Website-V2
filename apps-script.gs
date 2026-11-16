@@ -10,6 +10,9 @@
 // Fill in both values below before you deploy. CLIENT_ID is the Web client ID from Google Cloud (it is not a secret).
 const GOOGLE_CLIENT_ID = 'PASTE-YOUR-GOOGLE-CLIENT-ID.apps.googleusercontent.com';
 const ALLOWED_EMAIL = 'you@example.com';
+// GEMINI_API_KEY (optional, only for Scan photos): paste your Gemini API key between the quotes. Leave empty to use a script property of the same name.
+// Keep this key ONLY in your Apps Script editor. Never put it in the copy of this file on GitHub or the website.
+const GEMINI_API_KEY = '';
 const SESSION_DAYS = 7;   // how long one sign-in stays valid
 const MAX_SESSIONS = 8;   // newest sessions kept; older ones are signed out
 
@@ -1191,7 +1194,7 @@ function fillMissingIdsOnSubmit(e) { return runRowIdFill('fillMissingIdsOnSubmit
 
 // ---- Photo scan (read photos of a device, return what is VISIBLE in them) ----
 // Reads nothing from and writes nothing to the sheet. The website fills a form with the answer and waits for you to press Log.
-// Needs ONE script property: GEMINI_API_KEY (Project Settings > Script properties). Optional: GEMINI_MODEL.
+// Needs your Gemini key: either the GEMINI_API_KEY line near the top of this file, or a script property of the same name. Optional property: GEMINI_MODEL.
 // The key lives only in your Apps Script project; it is never sent to the website and never committed.
 const SCAN_MAX_IMAGES = 10;
 const SCAN_MAX_IMAGE_B64 = 6000000;    // about 4.5 MB per photo after the site shrinks it
@@ -1244,7 +1247,7 @@ const SCAN_PROMPT = [
 
 function scanPhotos_(body) {
   const props = PropertiesService.getScriptProperties();
-  const key = (props.getProperty('GEMINI_API_KEY') || '').trim();
+  const key = (GEMINI_API_KEY || props.getProperty('GEMINI_API_KEY') || '').trim();
   if (!key) return { ok: false, error: 'no-key' };
 
   const imgs = Array.isArray(body.images) ? body.images : [];
