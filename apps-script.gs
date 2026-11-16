@@ -1215,6 +1215,8 @@ const SCAN_PROMPT = [
   '5. Do not guess price, seller, dates, phone numbers or locations. Never output personal data other than what is needed (ignore names, emails and account IDs shown on screen, except that you may note "signed in to an Apple/Google/Microsoft account" or "not signed in").',
   '6. confidence is "high" only when the text is sharp and fully readable. Otherwise "medium" or "low".',
   '7. evidence is the exact short text you read (for example "Memory 8 GB" or "Maximum Capacity 81%"). image is the 1-based number of the photo it came from.',
+  '8. Where the serial number is shown depends on the device. Apple: "Serial Number" in About This Mac or Settings > General > About. Android: "Serial number" under About phone > Status information. Windows: "Serial number" in Settings > System > About on some PCs, a line "SerialNumber" followed by the value (output of wmic bios get serialnumber or Get-CimInstance Win32_BIOS), a Dell "Service Tag", or the S/N printed on the sticker under the laptop or on the box. Use any of these for "serial".',
+  '9. Ignore placeholder serials such as "To Be Filled By O.E.M.", "Default string", "System Serial Number" or "None": use null. The Windows "Device ID" (a long code of hex digits and dashes) and "Product ID" are NOT serial numbers: never put them in "serial"; add the Device ID as a notes entry of kind "software" with text "Windows Device ID: <code>".',
   '',
   'OUTPUT SHAPE (every key required; use null where not visible):',
   '{',
