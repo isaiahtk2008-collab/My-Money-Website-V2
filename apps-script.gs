@@ -1189,6 +1189,122 @@ function backfillRowIds() { return runRowIdFill('backfillRowIds'); }
 // Attach as an installable "On form submit" trigger (see the 4 clicks above).
 function fillMissingIdsOnSubmit(e) { return runRowIdFill('fillMissingIdsOnSubmit'); }
 
+// ---- Photo scan (read photos of a device, return what is VISIBLE in them) ----
+// Reads nothing from and writes nothing to the sheet. The website fills a form with the answer and waits for you to press Log.
+// Needs ONE script property: GEMINI_API_KEY (Project Settings > Script properties). Optional: GEMINI_MODEL.
+// The key lives only in your Apps Script project; it is never sent to the website and never committed.
+const SCAN_MAX_IMAGES = 10;
+const SCAN_MAX_IMAGE_B64 = 6000000;    // about 4.5 MB per photo after the site shrinks it
+const SCAN_MAX_TOTAL_B64 = 16000000;   // Gemini takes about 20 MB of inline data per request
+const SCAN_DAILY_CAP = 80;             // photo-scan requests per day, so a stolen session cannot run up your quota
+const SCAN_DEFAULT_MODEL = 'gemini-3.8-flash';
+
+const SCAN_PROMPT = [
+  'You read photos taken while buying or selling a used electronic device (phone, laptop, desktop PC, or accessory).',
+  'The photos may include: the device itself, its box or charger, and screenshots of its settings (About / System Information / Battery / Storage / Device Manager / Task Manager / dxdiag / battery report).',
+  'Return ONLY a JSON object. Accuracy matters more than completeness: a blank is always better than a guess.',
+  '',
+  'RULES',
+  '1. Only report what is actually visible or written in the photos. Never fill a field from general knowledge of the model. If a spec is not shown, use null.',
+  '2. Copy serial numbers and IMEIs character by character exactly as shown. If any character is unclear or could be two different characters (0/O, 1/I/l, 5/S, 8/B), set confidence to "low" and say which character in evidence.',
+  '3. If two photos disagree about the same thing, set that field to null and describe the disagreement in "conflicts".',
+  '4. Do not judge cosmetic condition as New / Good / Fair etc. Describe only what you can see (scratches, dents, stickers, film, missing keys, cracks) in "notes".',
+  '5. Do not guess price, seller, dates, phone numbers or locations. Never output personal data other than what is needed (ignore names, emails and account IDs shown on screen, except that you may note "signed in to an Apple/Google/Microsoft account" or "not signed in").',
+  '6. confidence is "high" only when the text is sharp and fully readable. Otherwise "medium" or "low".',
+  '7. evidence is the exact short text you read (for example "Memory 8 GB" or "Maximum Capacity 81%"). image is the 1-based number of the photo it came from.',
+  '',
+  'OUTPUT SHAPE (every key required; use null where not visible):',
+  '{',
+  '  "deviceType": "phone" | "pc" | "accessory" | "unknown",   // pc = laptop, desktop, all-in-one, mini PC',
+  '  "accessoryType": "Monitor" | "Mouse" | "Controller" | "Keyboard" | "Headphones" | "Earbuds" | "Watch" | null,',
+  '  "fields": {',
+  '    "model":   F,   // marketing name as shown, e.g. "MacBook Air" with chip, or "Galaxy S23 Ultra"',
+  '    "color":   F,',
+  '    "serial":  F,   // serial number',
+  '    "imei":    F,   // phone IMEI (15 digits), digits only',
+  '    "cpu":     F,   // processor name as shown',
+  '    "gpu1":    F,   // main graphics as shown (an integrated GPU may be named from the chip only if the chip name is shown)',
+  '    "gpu2":    F,   // second graphics, if shown',
+  '    "ram":     F,   // as shown, e.g. "8 GB"',
+  '    "storage": F,   // total storage as shown, e.g. "245.11 GB" or "256 GB"; value is the text, plus "totalGB" as a number',
+  '    "screen":  F,   // screen size and/or refresh rate if shown',
+  '    "os":      F,   // operating system and version',
+  '    "chargerIncluded": F,  // value true/false, only if a charger is clearly visible (true) ',
+  '    "boxIncluded":     F,  // value true only if the retail box is visible',
+  '    "caseIncluded":    F,  // value true only if a case is visible',
+  '    "connection": F        // for accessories only: array of: "Wired USB-A","Wired USB-C","Wireless 2.4GHz","Bluetooth","3.5mm Audio","HDMI/DisplayPort"',
+  '  },',
+  '  "notes": [ { "kind": "battery" | "software" | "storage" | "display" | "cosmetic" | "included" | "other", "text": "short factual sentence", "image": 1 } ],',
+  '  "conflicts": [ "short sentence" ]',
+  '}',
+  'F is either null or { "value": <string|number|boolean|array>, "confidence": "high"|"medium"|"low", "evidence": "<text seen>", "image": <number>, "totalGB": <number, storage only> }.',
+  'notes should capture: battery maximum capacity / health / cycle count / battery condition message, OS version, storage used and free, display resolution, device name shown on screen, whether the device is signed in to an account or has a lock, visible cosmetic wear, accessories visible, anything unusual (stickers, film on the palm rest, missing items).',
+  'No text outside the JSON.'
+].join('\n');
+
+function scanPhotos_(body) {
+  const props = PropertiesService.getScriptProperties();
+  const key = (props.getProperty('GEMINI_API_KEY') || '').trim();
+  if (!key) return { ok: false, error: 'no-key' };
+
+  const imgs = Array.isArray(body.images) ? body.images : [];
+  if (!imgs.length) return { ok: false, error: 'no-images' };
+  if (imgs.length > SCAN_MAX_IMAGES) return { ok: false, error: 'too-many-images' };
+  let total = 0;
+  const parts = [{ text: SCAN_PROMPT + '\n\nThe photos follow, in order (photo 1 first).' }];
+  for (let i = 0; i < imgs.length; i++) {
+    const im = imgs[i] || {};
+    const mime = String(im.mime || '');
+    const data = String(im.data || '');
+    if (!/^image\/(jpeg|png|webp)$/.test(mime) || !/^[A-Za-z0-9+\/=]+$/.test(data) || !data.length) return { ok: false, error: 'bad-image' };
+    if (data.length > SCAN_MAX_IMAGE_B64) return { ok: false, error: 'image-too-large' };
+    total += data.length;
+    if (total > SCAN_MAX_TOTAL_B64) return { ok: false, error: 'image-too-large' };
+    parts.push({ text: 'Photo ' + (i + 1) + ':' });
+    parts.push({ inline_data: { mime_type: mime, data: data } });
+  }
+
+  // Daily cap (counts attempts that pass the checks above)
+  const cache = CacheService.getScriptCache();
+  const day = Utilities.formatDate(new Date(), 'UTC', 'yyyyMMdd');
+  const ck = 'scan-' + day;
+  const used = parseInt(cache.get(ck) || '0', 10) || 0;
+  if (used >= SCAN_DAILY_CAP) return { ok: false, error: 'daily-cap' };
+  cache.put(ck, String(used + 1), 90000);
+
+  const model = (props.getProperty('GEMINI_MODEL') || SCAN_DEFAULT_MODEL).trim().replace(/[^A-Za-z0-9._-]/g, '');
+  let res;
+  try {
+    res = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent', {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { 'x-goog-api-key': key },
+      payload: JSON.stringify({ contents: [{ role: 'user', parts: parts }], generationConfig: { temperature: 0, responseMimeType: 'application/json' } }),
+      muteHttpExceptions: true
+    });
+  } catch (err) { return { ok: false, error: 'network' }; }
+
+  const code = res.getResponseCode();
+  if (code === 429) return { ok: false, error: 'quota' };
+  if (code === 401 || code === 403) return { ok: false, error: 'bad-key' };
+  if (code === 404) return { ok: false, error: 'bad-model' };
+  if (code === 503 || code === 500) return { ok: false, error: 'busy' };
+  if (code !== 200) return { ok: false, error: 'ai-error' };
+
+  let text = '';
+  try {
+    const j = JSON.parse(res.getContentText());
+    const cand = j && j.candidates && j.candidates[0];
+    const ps = (cand && cand.content && cand.content.parts) || [];
+    text = ps.map(p => (p && typeof p.text === 'string' ? p.text : '')).join('').trim();
+  } catch (err) { return { ok: false, error: 'unreadable' }; }
+  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  let out;
+  try { out = JSON.parse(text); } catch (err) { return { ok: false, error: 'unreadable' }; }
+  if (!out || typeof out !== 'object' || Array.isArray(out)) return { ok: false, error: 'unreadable' };
+  return { ok: true, result: out, model: model, count: imgs.length };
+}
+
 function doPost(e) {
   const lock = LockService.getScriptLock();
   let held = false;    // true once this request holds the script lock
@@ -1216,6 +1332,10 @@ function doPost(e) {
     if (body.action === 'logout') { lock.waitLock(20000); held = true; endSession_(body.secret); return json({ ok: true }); }
     // A plain read does NOT take the lock here: it is answered from a short-lived cache, and only a cache miss takes the lock (inside readAllCached_).
     if (body.action === 'read') return json(readReply_(body, null));
+
+    // Photo scan: owner only (a guest key never gets past the block above). It touches no sheet, so it takes NO script lock
+    // (a slow AI answer must never hold up a save) and does not clear the read cache.
+    if (body.action === 'scan_photos') return json(scanPhotos_(body));
 
     // Everything below behaves exactly as before: the script lock is taken first, then the request runs.
     lock.waitLock(20000); held = true;
