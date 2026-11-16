@@ -10,16 +10,15 @@
 // Fill in both values below before you deploy. CLIENT_ID is the Web client ID from Google Cloud (it is not a secret).
 const GOOGLE_CLIENT_ID = 'PASTE-YOUR-GOOGLE-CLIENT-ID.apps.googleusercontent.com';
 const ALLOWED_EMAIL = 'you@example.com';
+// GEMINI_API_KEY (optional, only for Scan photos): paste your Gemini API key between the quotes. Leave empty to use a script property of the same name.
+// Keep this key ONLY in your Apps Script editor. Never put it in the copy of this file on GitHub or the website.
+const GEMINI_API_KEY = '';
 const SESSION_DAYS = 7;   // how long one sign-in stays valid
 const MAX_SESSIONS = 8;   // newest sessions kept; older ones are signed out
 
 // OPTIONAL break-glass word. Leave empty. If set, the same word typed into Log > Sheet connection is also accepted as a token.
 // An empty value does NOT mean "open": with no valid token every request is refused.
 const SECRET = '';
-
-// OPTIONAL, for Scan photos: paste your Gemini API key between the quotes. Leave empty to use the GEMINI_API_KEY script property instead.
-// Keep this key ONLY in your Apps Script editor. Never put it in the copy of this file on GitHub or the website.
-const GEMINI_API_KEY = '';
 
 /* ---------- SIGN-IN AND SESSIONS ----------
    Tokens are random, shown to the website once, and only their SHA-256 hash is stored (Script properties, key mm.sessions).
