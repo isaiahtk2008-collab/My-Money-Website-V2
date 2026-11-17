@@ -172,6 +172,14 @@ html.mm-guest .rail { top: calc(34px + env(safe-area-inset-top, 0px)); height: c
 @media (max-width:720px){.lg-fab{bottom:calc(78px + env(safe-area-inset-bottom,0px));right:max(16px,env(safe-area-inset-right,0px))}}
 @media print{.lg-fab{display:none}}
 .drawer.lg{padding-bottom:0;position:relative}
+.lg-stat{margin:0 0 12px}
+.lg-scan{display:flex;align-items:center;gap:12px;width:100%;margin:0 0 6px;padding:10px 12px;border-radius:14px;border:var(--ap3-w,1px) dashed var(--line);background:var(--surface2);color:var(--ink);text-align:left;cursor:pointer}
+.lg-scan:hover{border-color:var(--accent)}
+.lg-scan .ic{flex:0 0 auto;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent)}
+.lg-scan .ic svg{width:18px;height:18px;display:block}
+.lg-scan .tx{display:flex;flex-direction:column;min-width:0}
+.lg-scan .tx b{font-size:14px;font-weight:700}
+.lg-scan .tx span{font-size:12px;color:var(--muted)}
 .lg-gh{margin:18px 0 4px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);font-weight:700}
 .lg-top{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;margin-bottom:14px}
 .lg-top h2{font-size:19px;font-weight:800;letter-spacing:-.02em;text-wrap:balance}
@@ -7286,7 +7294,7 @@ function menuScreen(){
      Dot colours follow each form's position in FORMS so they stay the same as before the reorder. */
   const groups=['Money','Buying','Selling'].map(g=>`<h4 class="lg-gh">${g}</h4><div class="list">${menuForms(g).map(f=>{const n=FORMS.indexOf(f)+1;const d=J('lg.d.'+f.id,null),deco=ssRowDecor(f.id,SS),dr=draftState(d),drAttr=(dr&&!deco.cls)?` data-dr="${dr}"`:'',drBadge=(dr&&!deco.cls)?'<i class="ss-b ss-b-draft" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1L19 8l-3-3L5 16z"/></svg></i>':'';
     return `<button class="li${deco.cls}" data-lg="open" data-id="${f.id}"><span class="ic"${deco.iconAttrs}${drAttr}>${FORM_ICO[f.id]||'<i class="dot" style="background:var(--c'+n+')"></i>'}${deco.badge}${drBadge}</span><span class="tx"><b>${E(f.t)}</b><span>${E(f.s)}</span></span>${dr?`<span class="pill draft${dr==='stale'?' glow-draft':''}">${dr==='stale'?'Draft · waiting':'Draft'}</span>`:''}${chev()}</button>`}).join('')}</div>`).join('');
-  return `<div class="lg-top"><div><h2>Log an entry</h2><p>Goes straight to your sheet</p></div><div class="lg-r"><button class="ibtn" data-lg="settings" aria-label="Sheet connection and queue">${ICO.cfg}</button>${xbtn()}</div></div>${status}<button class="btn sec" data-sc="fresh" style="width:100%;margin:0 0 12px">Scan photos: pre-fill a form from pictures</button>${groups}<h4 class="lg-gh">Tools</h4><div class="list"><button class="li" data-lg="calc"><span class="tx"><b>Margin calculator</b><span>Work out a listing price from cost and target profit</span></span>${chev()}</button></div><div style="height:24px"></div>`;
+  return `<div class="lg-top"><div><h2>Log an entry</h2><p>Goes straight to your sheet</p></div><div class="lg-r"><button class="ibtn" data-lg="settings" aria-label="Sheet connection and queue">${ICO.cfg}</button>${xbtn()}</div></div><div class="lg-stat">${status}</div><button class="lg-scan" data-sc="fresh" type="button"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span><span class="tx"><b>Scan photos</b><span>Pre-fill a form from pictures</span></span></button>${groups}<h4 class="lg-gh">Tools</h4><div class="list"><button class="li" data-lg="calc"><span class="tx"><b>Margin calculator</b><span>Work out a listing price from cost and target profit</span></span>${chev()}</button></div><div style="height:24px"></div>`;
 }
 
 function fieldHtml(f,i){
