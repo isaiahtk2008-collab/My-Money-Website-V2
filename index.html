@@ -224,6 +224,25 @@ html.mm-guest .rail { top: calc(34px + env(safe-area-inset-top, 0px)); height: c
 .sc-ban small{opacity:.75}
 .sc-ban em{font-style:normal;font-weight:700;color:var(--warn)}
 .sc-id{margin-top:8px}
+/* minimized scan: progress pill (bottom), finished / failed banner (top) */
+#sc-pill{position:fixed;left:50%;transform:translateX(-50%);z-index:85;display:flex;align-items:stretch;max-width:min(94vw,460px);width:max-content;border-radius:999px;background:var(--surface);color:var(--ink);border:var(--ap3-w,1px) solid var(--ap3-lc,var(--line));box-shadow:0 8px 28px rgba(10,13,18,.28);font-size:13px;overflow:hidden}
+#sc-pill[data-s="busy"]{bottom:calc(24px + env(safe-area-inset-bottom,0px))}
+#sc-pill[data-s="done"],#sc-pill[data-s="fail"]{top:calc(12px + env(safe-area-inset-top,0px));border-radius:16px;font-size:14px;animation:sc-in .28s ease-out}
+#sc-pill[data-s="done"]{background:var(--good);color:#fff;border-color:transparent}
+#sc-pill[data-s="fail"]{background:var(--bad);color:#fff;border-color:transparent}
+#sc-pill .sc-pm{display:flex;align-items:center;gap:10px;min-width:0;padding:10px 16px;text-align:left;color:inherit;font:inherit;cursor:pointer;background:none;border:0}
+#sc-pill .sc-pt{display:flex;flex-direction:column;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#sc-pill[data-s="busy"] .sc-pt{display:block}
+#sc-pill .sc-pt small{font-size:12px;opacity:.9;overflow:hidden;text-overflow:ellipsis}
+#sc-pill[data-s="busy"] .sc-pm b{color:var(--accent);font-weight:700;margin-left:2px}
+#sc-pill .sc-ck{flex:none;width:24px;height:24px;border-radius:50%;background:rgba(255,255,255,.25);display:grid;place-items:center;font-weight:800}
+#sc-pill .sc-px{flex:none;width:40px;color:inherit;font-size:20px;line-height:1;background:none;border:0;border-left:var(--ap3-w,1px) solid rgba(255,255,255,.3);cursor:pointer;opacity:.9}
+#sc-pill .sc-sp{flex:none;width:14px;height:14px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--accent);animation:sc-spin .9s linear infinite}
+@keyframes sc-spin{to{transform:rotate(360deg)}}
+@keyframes sc-in{from{opacity:0;transform:translate(-50%,-14px)}to{opacity:1;transform:translate(-50%,0)}}
+@media (max-width:720px){#sc-pill[data-s="busy"]{bottom:calc(86px + env(safe-area-inset-bottom,0px))}}
+@media (prefers-reduced-motion:reduce){#sc-pill,#sc-pill .sc-sp{animation:none}}
+@media print{#sc-pill{display:none}}
 .sc-crop{display:block;max-width:100%;margin-top:4px;border-radius:8px;border:var(--ap3-w,1px) solid var(--ap3-lc,var(--line,rgba(128,128,128,.35)));background:#fff}
 .sc-th{display:flex;gap:6px;margin-top:8px;overflow-x:auto}
 .sc-th img{width:56px;height:56px;object-fit:cover;border-radius:8px;display:block}
@@ -7582,7 +7601,7 @@ async function submit(){
    The photos go to your own sheet script (action scan_photos), which asks Gemini to report only what is visible in them.
    This block only fills the form on screen. Nothing reaches your sheet until you press "Log entry", so you can fix or add anything first.
    Anything unclear is left blank and listed in the banner instead of guessed. */
-const SC={mode:'buy',imgs:[],busy:false,msg:'',bad:false,res:null,src:'',why:''};
+const SC={mode:'buy',imgs:[],busy:false,msg:'',bad:false,res:null,src:'',why:'',prog:'',pending:null,fail:''};
 const SC_MAX=10,SC_SIZES=[16,32,64,128,256,512,1024,2048,4096];
 const scTxt=s=>String(s==null?'':s).replace(/[\u0000-\u001f\u007f]/g,' ').replace(/\s+/g,' ').trim();
 const scIdN=s=>String(s==null?'':s).replace(/[\s:\-]/g,'').toUpperCase();
@@ -7990,7 +8009,7 @@ function scOcrCrops(res,pages){
 /* page text -> result, on this device. Throws if the reader cannot start. Shared by "Read without AI" and "Smart read". */
 async function scOcrCompute(){
   let w=null,pages=[];
-  const st=t=>{const el=$('#sc-st');if(el)el.textContent=t};
+  const st=t=>scProg(t);
   try{
     st('Getting the reader ready (first time only, about 10 MB)…');
     const T=await scLoadOcr();let cur=0;
@@ -8021,7 +8040,7 @@ async function scOcrCompute(){
 }
 async function scOcrRun(){
   if(SC.busy||!SC.imgs.length)return;
-  SC.busy=true;SC.msg='';SC.bad=false;SC.why='';scRender();
+  SC.busy=true;SC.msg='';SC.bad=false;SC.why='';SC.fail='';SC.prog='Getting the reader ready…';scRender();scPillUpdate();
   try{const res=await scOcrCompute();SC.busy=false;SC.src='ocr';scDone(res)}
   catch(e){SC.busy=false;scMsg('Could not read the photos on this device. The reader downloads once (about 10 MB), so connect to the internet and try again.',1)}
 }
@@ -8029,12 +8048,13 @@ async function scOcrRun(){
 /* ----- the Scan photos screen ----- */
 function scScreen(){
   const n=SC.imgs.length;
-  return `<div class="lg-top"><div style="display:flex;gap:10px;align-items:center"><button class="ibtn" data-lg="menu" aria-label="Back to all forms">${ICO.back}</button><div><h2>Scan photos</h2><p>Reads your photos and pre-fills a form. You press Log.</p></div></div><div class="lg-r">${xbtn()}</div></div>
+  return `<div class="lg-top"><div style="display:flex;gap:10px;align-items:center"><button class="ibtn" data-lg="menu" aria-label="Back to all forms">${ICO.back}</button><div><h2>Scan photos</h2><p>Reads your photos and pre-fills a form. You press Log.</p></div></div><div class="lg-r">${SC.busy?`<button class="ibtn" data-sc="min" aria-label="Minimize and keep scanning" title="Minimize: keep scanning in the background"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 12h12"/></svg></button>`:''}${xbtn()}</div></div>
   <div class="lg-f"><span class="lg-l">I am</span><div class="lg-chips" role="group" aria-label="Buying or selling">${[['buy','Buying'],['sell','Selling']].map(([v,l])=>`<button type="button" class="chip-b" data-sc="mode" data-v="${v}" aria-pressed="${SC.mode===v}">${l}</button>`).join('')}</div></div>
   <div class="sc-add"><label class="btn sc-pick">Take photo<input type="file" accept="image/*" capture="environment" data-sc-file hidden></label><label class="btn sec sc-pick">Choose photos<input type="file" accept="image/*" multiple data-sc-file hidden></label></div>
   <p class="hint" style="color:var(--muted);margin:8px 0 12px">Add as many as you like (up to ${SC_MAX}): the About or System Info screen, the battery screen, the serial label, the whole device. Screenshots of settings give the most accurate specs.</p>
   ${n?`<div class="sc-grid">${SC.imgs.map((i,k)=>`<div class="sc-t"><img src="${E(i.url)}" alt="Photo ${k+1}"><button type="button" class="sc-x" data-sc="rm" data-id="${E(i.id)}" aria-label="Remove photo ${k+1}">×</button></div>`).join('')}</div><p class="hint" style="color:var(--muted)">${n} of ${SC_MAX} photos</p>`:''}
-  <p class="lg-st${SC.bad?' bad':''}" id="sc-st" role="status">${E(SC.msg)}</p>
+  <p class="lg-st${SC.bad&&!SC.busy?' bad':''}" id="sc-st" role="status">${E(SC.busy?SC.prog:SC.msg)}</p>
+  ${SC.busy?'<p class="hint" style="color:var(--muted);margin:6px 0 0">You can minimize this (the – button) and keep using the site. A banner will tell you when the scan is finished.</p>':''}
   <div class="lg-foot sc-foot"><button class="btn sc-main" data-sc="mix" ${n&&!SC.busy?'':'disabled'}>${SC.busy?'Reading photos…':'Smart read'}<small>AI and on-device together</small></button><div class="sc-row"><button class="btn sec" data-sc="go" ${n&&!SC.busy?'':'disabled'}>AI only</button><button class="btn sec" data-sc="ocr" ${n&&!SC.busy?'':'disabled'}>Read without AI</button></div></div><div style="height:24px"></div>`;
 }
 function scTypeScreen(){
@@ -8042,8 +8062,9 @@ function scTypeScreen(){
   <div class="list">${[['phone','Phone'],['pc','Laptop or PC'],['accessory','Accessory']].map(([v,l])=>`<button class="li" data-sc="type" data-v="${v}"><span class="tx"><b>${l}</b></span>${chev()}</button>`).join('')}</div>`;
 }
 function scRender(){if($('#sc-st'))show(scScreen())}
-function scMsg(m,bad){SC.msg=m;SC.bad=!!bad;scRender()}
-function scReset(){SC.imgs.forEach(i=>{try{URL.revokeObjectURL(i.url)}catch(e){}});SC.imgs=[];SC.msg='';SC.bad=false;SC.res=null;SC.why=''}
+/* a message while the scan screen is closed (minimized) becomes the red banner instead of being lost */
+function scMsg(m,bad){SC.msg=m;SC.bad=!!bad;if(scOpen())scRender();else{SC.fail=bad?m:'';scPillUpdate()}}
+function scReset(){SC.imgs.forEach(i=>{try{URL.revokeObjectURL(i.url)}catch(e){}});SC.imgs=[];SC.msg='';SC.bad=false;SC.res=null;SC.why='';SC.pending=null;SC.fail='';scPillUpdate()}
 
 async function scShrink(file){
   if(!/^image\//.test(file.type||'')&&!/\.(jpe?g|png|webp)$/i.test(file.name||''))throw new Error('type');
@@ -8063,6 +8084,7 @@ async function scShrink(file){
   return {id:uid(),url:URL.createObjectURL(blob),mime:'image/jpeg',b64,sig:[file.name,file.size,file.lastModified].join('|')};
 }
 async function scAdd(files){
+  if(SC.busy)return scRender();   /* the photos are being read right now: changing them mid-scan would mix two sets */
   let bad=0,full=false;
   for(const file of files){
     if(SC.imgs.length>=SC_MAX){full=true;break}
@@ -8113,7 +8135,7 @@ async function scGo(){
   const url=LS.get('lgUrl');
   if(!url)return scMsg('Connect your sheet first (gear icon on the Log menu). Photos are read through your own sheet script.',1);
   if(navigator.onLine===false)return scOcrRun();
-  SC.busy=true;SC.msg='';SC.bad=false;SC.why='';scRender();
+  SC.busy=true;SC.msg='';SC.bad=false;SC.why='';SC.fail='';SC.prog='Asking the AI to read your photos…';scRender();scPillUpdate();
   try{
     const res=await scAiFetch();
     SC.busy=false;SC.src='ai';scDone(res);
@@ -8126,7 +8148,7 @@ async function scGo(){
 /* Smart read: AI and the on-device reader run at the same time and are combined (scMerge). If one of them fails, the other still fills the form and the banner says so. */
 async function scMixRun(){
   if(SC.busy||!SC.imgs.length)return;
-  SC.busy=true;SC.msg='';SC.bad=false;SC.why='';scRender();
+  SC.busy=true;SC.msg='';SC.bad=false;SC.why='';SC.fail='';SC.prog='Reading your photos…';scRender();scPillUpdate();
   const canAi=navigator.onLine!==false&&!!LS.get('lgUrl');
   const aiP=canAi?scAiFetch().then(r=>({r}),e=>({e})):Promise.resolve({e:Object.assign(new Error(navigator.onLine===false?'You are offline.':'Your sheet is not connected.'),{scan:1})});
   const ocrP=scOcrCompute().then(r=>({r}),e=>({e}));
@@ -8143,6 +8165,8 @@ function scDone(res){
   if(!fl||typeof fl!=='object'||!Object.keys(fl).some(k=>fl[k]!=null))return scMsg('Nothing readable was found in those photos. Try clearer photos or the settings/About screen.',1);
   SC.res=res;
   const t=String(res.deviceType||'');
+  /* scan screen closed (minimized): keep the result and show the "finished" banner. The form is only filled when you tap Review, so nothing on screen is replaced while you work. */
+  if(!scOpen()){SC.pending={res,t,mode:SC.mode};SC.fail='';scPillUpdate();return}
   if(SC_FORM[SC.mode][t])return scApply(SC_FORM[SC.mode][t],res);
   show(scTypeScreen());
 }
@@ -8153,16 +8177,68 @@ document.addEventListener('change',e=>{
 document.addEventListener('click',e=>{
   const t=e.target.closest&&e.target.closest('[data-sc]');if(!t)return;const a=t.dataset.sc;
   try{
-    if(a==='fresh'){scReset();show(scScreen())}
+    if(a==='fresh'){
+      if(SC.busy)show(scScreen());   /* a scan is still running: go back to it instead of wiping its photos */
+      else if(SC.pending&&confirm('A finished scan is waiting.\n\nOK = review it.\nCancel = start a new scan.'))scReview();
+      else{scReset();show(scScreen())}
+    }
     else if(a==='open'){show(scScreen())}
-    else if(a==='mode'){SC.mode=t.dataset.v==='sell'?'sell':'buy';scRender()}
-    else if(a==='rm'){const i=SC.imgs.findIndex(x=>x.id===t.dataset.id);if(i>=0){try{URL.revokeObjectURL(SC.imgs[i].url)}catch(_){}SC.imgs.splice(i,1)}scRender()}
+    else if(a==='min'){closeOverlay();toast('Still scanning. You can keep using the site.')}
+    else if(a==='pill'){if(scGuard()){SC.fail='';show(scScreen());scPillUpdate()}}
+    else if(a==='review'){scReview()}
+    else if(a==='dismiss'){scDismiss()}
+    else if(a==='mode'){if(SC.busy)return;SC.mode=t.dataset.v==='sell'?'sell':'buy';scRender()}
+    else if(a==='rm'){if(SC.busy)return;const i=SC.imgs.findIndex(x=>x.id===t.dataset.id);if(i>=0){try{URL.revokeObjectURL(SC.imgs[i].url)}catch(_){}SC.imgs.splice(i,1)}scRender()}
     else if(a==='go'){scGo()}
     else if(a==='mix'){scMixRun()}
     else if(a==='ocr'){scOcrRun()}
     else if(a==='type'){const id=(SC_FORM[SC.mode]||{})[t.dataset.v];if(id&&SC.res)scApply(id,SC.res)}
   }catch(err){toast('Could not do that. Nothing was changed.')}
 });
+
+/* ----- Minimize: a scan keeps running with the screen closed; a small pill shows progress and a banner says when it is finished -----
+   The scan itself (OCR / AI) never depended on the screen being open; this block only shows its state. Nothing is logged and nothing on the page
+   is replaced when it finishes: the form is filled only when you tap Review. */
+function scOpen(){return !!$('#sc-st')}
+/* progress text from the readers: shown on the scan screen when it is open, and in the pill when it is not */
+function scProg(t){SC.prog=String(t==null?'':t);const el=$('#sc-st');if(el&&SC.busy)el.textContent=SC.prog;scPillUpdate()}
+/* opening the scan screen from the banner would replace whatever panel is open: ask first */
+function scGuard(){return !$('#overlay .overlay')||scOpen()||confirm('This will close the panel you have open. Continue?')}
+function scReview(){
+  const p=SC.pending;if(!p)return;
+  if(!scGuard())return;
+  SC.pending=null;SC.res=p.res;SC.mode=p.mode==='sell'?'sell':'buy';scPillUpdate();
+  const id=(SC_FORM[SC.mode]||{})[p.t];
+  if(id)scApply(id,p.res);else show(scTypeScreen());
+}
+function scDismiss(){
+  if(SC.pending){if(!confirm('Discard the finished scan? The form will not be filled.'))return;SC.pending=null;toast('Scan discarded.')}
+  SC.fail='';scPillUpdate();
+}
+function scPillUpdate(){
+  let el=document.getElementById('sc-pill');
+  const s=scOpen()||!(SC.busy||SC.pending||SC.fail)?'':SC.busy?'busy':SC.pending?'done':'fail';
+  /* tab title: a ✓ so a finished scan is noticed from another tab or window */
+  try{
+    if(s==='done'){if(SC.tt==null)SC.tt=document.title;document.title='✓ Scan finished · '+SC.tt}
+    else if(SC.tt!=null){document.title=SC.tt;SC.tt=null}
+  }catch(e){}
+  if(!s){if(el)el.remove();return}
+  const short=t=>{t=String(t||'');return t.length>70?t.slice(0,69)+'…':t};
+  if(!el){el=document.createElement('div');el.id='sc-pill';el.setAttribute('role','status');el.setAttribute('aria-live','polite');document.body.appendChild(el)}
+  if(el.dataset.s!==s){
+    el.dataset.s=s;
+    el.innerHTML=s==='busy'?`<button type="button" class="sc-pm" data-sc="pill"><i class="sc-sp" aria-hidden="true"></i><span class="sc-pt"></span><b>Open</b></button>`
+      :s==='done'?`<button type="button" class="sc-pm" data-sc="review"><span class="sc-ck" aria-hidden="true">✓</span><span class="sc-pt"><b>Scan finished</b><small>Tap to review and pre-fill the form</small></span></button><button type="button" class="sc-px" data-sc="dismiss" aria-label="Discard the finished scan">×</button>`
+      :`<button type="button" class="sc-pm" data-sc="pill"><span class="sc-ck" aria-hidden="true">!</span><span class="sc-pt"><b>Scan did not finish</b><small class="sc-fm"></small></span></button><button type="button" class="sc-px" data-sc="dismiss" aria-label="Dismiss">×</button>`;
+  }
+  if(s==='busy'){const t=el.querySelector('.sc-pt');if(t)t.textContent=short(SC.prog||'Scanning photos…')}
+  if(s==='fail'){const t=el.querySelector('.sc-fm');if(t)t.textContent=short(SC.fail)}
+}
+(function(){
+  /* the pill follows the panel: it appears when the scan screen goes away mid-scan, and hides again when the scan screen is back */
+  try{const o=document.getElementById('overlay');if(o&&window.MutationObserver)new MutationObserver(()=>scPillUpdate()).observe(o,{childList:true,subtree:true})}catch(e){}
+})();
 
 /* ---------- Settings / queue ---------- */
 function settingsScreen(){
