@@ -87,13 +87,19 @@ with sync_playwright() as p:
     check('the AI button asked the script once, then read on this device', len([x for x in posts if x.get('action') == 'scan_photos']) == 1 and val(page, 'Serial Number') == 'HRTJ5BLUQ6L4')
     check('no error message was shown for the missing key', 'not switched on' not in page.inner_text('#overlay'))
 
-    # 3. Windows: serial from wmic output, Device ID kept out of the serial; type is unclear so it asks
+    # 3. Windows: serial from wmic output is recognised as a PC by itself; Device ID kept out of the serial
     open_scan(page); add(page, PHOTOS[:2]); setocr(page, WMIC_TXT, 'PF2ABCDE')
+    page.click('[data-sc=ocr]'); page.wait_for_selector('#sc-ban', timeout=30000)
+    check('a Windows wmic screen is recognised as a PC (no "What is it?" question)', page.locator('[data-sc=type]').count() == 0 and 'Bought PC' in page.inner_text('#overlay h2'))
+    check('Windows serial filled from wmic output', val(page, 'Serial Number') == 'PF2ABCDE', val(page, 'Serial Number'))
+    check('Windows Device ID is in Notes, not the serial', 'Windows Device ID: 6F9A1C2E' in val(page, 'Notes'), val(page, 'Notes'))
+
+    # 4. a bare serial with no clue about the kind of device still asks what it is
+    open_scan(page); add(page, PHOTOS[:2]); setocr(page, 'Serial number PF2ABCDE', 'PF2ABCDE')
     page.click('[data-sc=ocr]'); page.wait_for_selector('[data-sc=type]', timeout=30000)
     check('type unclear: it asks what the device is', page.locator('[data-sc=type]').count() == 3)
     page.click('[data-sc=type][data-v=pc]'); page.wait_for_selector('#sc-ban', timeout=30000)
-    check('Windows serial filled from wmic output', val(page, 'Serial Number') == 'PF2ABCDE', val(page, 'Serial Number'))
-    check('Windows Device ID is in Notes, not the serial', 'Windows Device ID: 6F9A1C2E' in val(page, 'Notes'), val(page, 'Notes'))
+    check('serial filled after choosing the type', val(page, 'Serial Number') == 'PF2ABCDE', val(page, 'Serial Number'))
 
     check('no page errors', not errors, errors)
     b.close()
