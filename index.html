@@ -227,6 +227,7 @@ html.mm-guest .rail { top: calc(34px + env(safe-area-inset-top, 0px)); height: c
 .sc-ban p{margin:4px 0 0}
 .sc-ban ul{margin:6px 0 0;padding-left:18px}
 .sc-chk{color:var(--warn)}
+.sc-sg{margin:6px 0 2px}.sc-sg span{display:block;margin-bottom:4px}.sc-sg .chip-b{margin:0 6px 6px 0}
 .sc-ban details{margin-top:6px}
 .sc-ban summary{cursor:pointer;font-weight:600}
 .sc-ban small{opacity:.75}
@@ -7626,9 +7627,53 @@ function scF(fl,key){
 const SC_FORM={buy:{phone:'bphone',pc:'bpc',accessory:'bacc'},sell:{phone:'sphone',pc:'spc',accessory:'sacc'}};
 const SC_NOTE={battery:'Battery',software:'Software',storage:'Storage',display:'Display',cosmetic:'Cosmetic',included:'Included',other:'Other'};
 
+/* ----- Past-purchase suggestions (Phase 1). Reads ONLY the bought rows the page already loaded; sends nothing, stores nothing.
+   Strong ID from the photo (model number / identifier, found in the scan's notes) or an exact normalised model name selects past rows.
+   Fixed per model (model name; CPU and screen on the PC form) are filled only when every matching past row agrees. RAM, storage and colour are never
+   filled: they come back as suggestions the person must tap. A value from history never replaces one read from the photo. ----- */
+const SC_HIST_TAB={bphone:'BoughtPhones',bpc:'BoughtPCs',bacc:'BoughtAccess'};
+const SC_HIST_FIXED={bphone:{model:'Phone Model'},bpc:{model:'PC model',cpu:'CPU (and specs)',screen:'Screen Size, Hertz'},bacc:{model:'Model'}};
+const SC_HIST_VAR={bphone:['Color','Storage (GB)'],bpc:['Color','RAM','Storage (SSD, HDD or NVME)'],bacc:['Color']};
+function scHistory(formId,res,raw){
+  const out={fixed:{},suggest:{},checks:[]};
+  try{
+    const tab=raw&&raw[SC_HIST_TAB[formId]];if(!tab||!Array.isArray(tab.rows)||!tab.rows.length)return out;
+    const nrm=s=>String(s==null?'':s).toUpperCase().replace(/[^A-Z0-9]/g,'');
+    const cell=(r,h)=>{if(!r||typeof r!=='object')return '';const t=nrm(h);for(const k of Object.keys(r))if(nrm(k)===t){const v=r[k];return v==null?'':String(v).replace(/\s+/g,' ').trim()}return ''};
+    const fixedMap=SC_HIST_FIXED[formId],fl=(res&&res.fields)||{};
+    const photoVal=k=>{const x=fl[k];return x&&typeof x==='object'&&x.value!=null&&x.value!==''?String(x.value):''};
+    /* strong IDs the reader found in this scan: "Model number: A2337", "Model identifier: Mac14,2", an Android code */
+    const ids=[];(Array.isArray(res&&res.notes)?res.notes:[]).forEach(n=>{const m=n&&typeof n.text==='string'&&n.text.match(/^Model (?:number|identifier): (\S{4,24})$/i);if(m)ids.push(nrm(m[1]))});
+    const hasId=r=>{const nt=cell(r,'Notes')+' '+cell(r,'Note');const found=[...nt.matchAll(/Model (?:number|identifier): (\S{4,24}?)(?=[;,\s]|$)/gi)].map(m=>nrm(m[1]));return found.some(f=>ids.includes(f))};
+    const mk=fixedMap.model,photoName=nrm(photoVal('model'));
+    let rows=[],byId=false;
+    if(ids.length){rows=tab.rows.filter(hasId);byId=rows.length>0}
+    if(!rows.length&&photoName&&fl.model&&fl.model.confidence!=='low')rows=tab.rows.filter(r=>nrm(cell(r,mk))===photoName);
+    if(!rows.length)return out;
+    /* past rows must agree on the model name, otherwise this is ambiguous and nothing is suggested */
+    const names=[...new Set(rows.map(r=>nrm(cell(r,mk))).filter(Boolean))];
+    if(names.length!==1)return out;
+    const agree=(k)=>{const vals=rows.map(r=>cell(r,k)).filter(Boolean);if(!vals.length||rows.some(r=>!cell(r,k)))return null;return new Set(vals.map(nrm)).size===1?vals[0]:null};
+    const minRows=byId?1:2;   /* a name-only match needs two agreeing past purchases before a CPU / screen is trusted */
+    Object.keys(fixedMap).forEach(key=>{
+      const k=fixedMap[key];const v=agree(k);if(!v)return;
+      if(key!=='model'&&rows.length<minRows)return;
+      const p=photoVal(key);
+      if(p){if(nrm(p)!==nrm(v)&&!(key==='screen'&&parseInt(p,10)===parseInt(v,10)))out.checks.push('The photo shows "'+p.slice(0,40)+'" for '+k+', but a past purchase of this model has "'+v.slice(0,40)+'". The photo was kept. Check it.');return}
+      out.fixed[k]={val:v.slice(0,120),rows:rows.length};
+    });
+    /* variable per unit: only offered, never filled */
+    (SC_HIST_VAR[formId]||[]).forEach(k=>{
+      const cnt=new Map();rows.forEach(r=>{const v=cell(r,k);if(v&&v.length<=40)cnt.set(v,(cnt.get(v)||0)+1)});
+      const list=[...cnt.entries()].sort((a,b)=>b[1]-a[1]).slice(0,4).map(e=>e[0]);
+      if(list.length)out.suggest[k]=list;
+    });
+  }catch(e){return {fixed:{},suggest:{},checks:[]}}
+  return out;
+}
 /* Turn the reading into {V (field values), filled, checks, notes}. Every value is checked against the form's own options. */
-function scBuild(formId,res){
-  const f=BY[formId],fl=(res&&res.fields)||{},o={V:{},filled:[],checks:[],noteLines:[]};
+function scBuild(formId,res,rawIn){
+  const f=BY[formId],fl=(res&&res.fields)||{},o={V:{},filled:[],checks:[],noteLines:[],suggest:{}};
   const has=k=>f.f.some(x=>x.k===k),lab=k=>(f.f.find(x=>x.k===k)||{}).l||k;
   const put=(k,val,src,why)=>{if(!has(k))return false;o.V[k]=val;o.filled.push({k,val:Array.isArray(val)?val.join(', '):String(val),conf:src?src.conf:'high',ev:src?src.ev:(why||''),img:src?src.img:0,crop:src&&src.crop||null});return true};
   const low=(label,src)=>o.checks.push(label+' looked like "'+scTxt(Array.isArray(src.v)?src.v.join(', '):src.v).slice(0,60)+'" but was not clear enough, so it was left blank.');
@@ -7691,6 +7736,14 @@ function scBuild(formId,res){
       else o.checks.push(hits.length?'More than one unsold device matches that serial/IMEI, so none was picked.':'No unsold device in your stock has that serial/IMEI ('+ids.join(', ')+'), so none was picked. Choose it yourself.');
     }else o.checks.push('No readable serial or IMEI was found, so the device was not picked. Choose it yourself.');
   }
+  /* past purchases (additive): fills only fixed fields the photo left empty, tagged; variable fields are only offered. No history = nothing changes. */
+  if(isBuy&&typeof scHistory==='function'&&typeof SC_HIST_TAB!=='undefined'&&SC_HIST_TAB[formId]){
+    let raw=rawIn;if(raw===undefined){try{raw=(typeof store!=='undefined'&&store)?(store.base||store.raw):null}catch(e){raw=null}}
+    const h=scHistory(formId,res,raw);
+    Object.keys(h.fixed).forEach(k=>{if(has(k)&&!scHas(o.V[k])){o.V[k]=h.fixed[k].val;o.filled.push({k,val:h.fixed[k].val,conf:'medium',ev:'',img:0,crop:null,hist:true})}});
+    Object.keys(h.suggest).forEach(k=>{if(has(k)&&!scHas(o.V[k]))o.suggest[k]=h.suggest[k]});
+    h.checks.forEach(c=>o.checks.push(c));
+  }
   /* Notes: everything that has no field of its own (battery health, OS, storage use, cosmetic details, what is included) */
   const seen=new Set(),add=l=>{l=scTxt(l);if(l&&!seen.has(l.toLowerCase())){seen.add(l.toLowerCase());o.noteLines.push(l)}};
   (Array.isArray(res&&res.notes)?res.notes:[]).slice(0,30).forEach(n=>{if(!n||typeof n!=='object')return;const t=scTxt(n.text).slice(0,200);if(!t)return;add((SC_NOTE[n.kind]||'Other')+': '+t)});
@@ -7752,8 +7805,9 @@ function scBanner(b,formId){
   const d=$('#overlay .drawer.lg'),top=d&&$('.lg-top',d);if(!top||$('#sc-ban',d))return;
   const f=BY[formId],lab=k=>(f.f.find(x=>x.k===k)||{}).l||k;
   const idFilled=b.filled.some(x=>/Serial/.test(x.k));
-  const rows=b.filled.map(x=>`<li><b>${E(lab(x.k))}:</b> ${E(String(x.val).length>90?String(x.val).slice(0,90)+'…':x.val)}${x.conf==='medium'?' <em>double-check</em>':''}${x.ev?` <small>saw “${E(x.ev)}”${x.img?' in photo '+x.img:''}</small>`:''}</li>`).join('');
+  const rows=b.filled.map(x=>`<li><b>${E(lab(x.k))}:</b> ${E(String(x.val).length>90?String(x.val).slice(0,90)+'…':x.val)}${x.hist?' <em>from a past purchase</em>':x.conf==='medium'?' <em>double-check</em>':''}${x.ev?` <small>saw “${E(x.ev)}”${x.img?' in photo '+x.img:''}</small>`:''}</li>`).join('');
   const crops=b.filled.filter(x=>x.crop&&/Serial/.test(x.k)).map(x=>`<div class="sc-id"><span>${E(lab(x.k))} as read: <b>${E(x.val)}</b>. Compare it with this zoomed photo:</span><img class="sc-crop" src="${E(x.crop)}" alt="Zoomed photo of the ${E(lab(x.k))}"></div>`).join('');
+  const sug=Object.keys(b.suggest||{}).filter(k=>!scHas(V[k])).map(k=>`<div class="sc-sg" data-sg="${E(k)}"><span>${E(lab(k))}, from past purchases of this model (tap to use):</span> ${b.suggest[k].map(v=>`<button type="button" class="chip-b" data-sc="hist" data-k="${E(k)}" data-v="${E(v)}">${E(v)}</button>`).join('')}</div>`).join('');
   const thumbs=SC.imgs.map((i,n)=>`<a href="${E(i.url)}" target="_blank" rel="noopener" aria-label="Open photo ${n+1}"><img src="${E(i.url)}" alt="Photo ${n+1}"></a>`).join('');
   top.insertAdjacentHTML('afterend',`<div class="sc-ban" id="sc-ban"><b>Filled from ${SC.imgs.length} photo${SC.imgs.length===1?'':'s'}. Nothing is logged yet.</b>
     <p>Check the highlighted fields against your photos, fix or add anything, then press Log entry.${idFilled?' Compare the serial number / IMEI character by character.':''}</p>
@@ -7761,6 +7815,7 @@ function scBanner(b,formId){
     ${SC.src==='mix'?'<p>Smart read: the AI and a second reading done on this device were combined. Where both agreed the field is solid; <em>double-check</em> means only one of them saw it or they disagreed.</p>':''}
     ${SC.why?`<p>${E(SC.why)}</p>`:''}
     ${crops}
+    ${sug}
     ${b.checks.length?`<ul class="sc-chk">${b.checks.map(c=>`<li>${E(c)}</li>`).join('')}</ul>`:''}
     ${rows?`<details><summary>${b.filled.length} field${b.filled.length===1?'':'s'} filled · what was seen</summary><ul>${rows}</ul></details>`:''}
     ${thumbs?`<div class="sc-th">${thumbs}</div>`:''}</div>`);
@@ -8306,6 +8361,7 @@ document.addEventListener('click',e=>{
       else if(SC.pending&&confirm('A finished scan is waiting.\n\nOK = review it.\nCancel = start a new scan.'))scReview();
       else{scReset();show(scScreen())}
     }
+    else if(a==='hist'){const k=t.dataset.k,v=t.dataset.v;if(k&&v&&cur&&cur.f.some(x=>x.k===k)&&!scHas(V[k])){V[k]=v;const el=$$('input.lg-in').find(i=>i.dataset.k===k);if(el)el.value=v;const g=t.closest('.sc-sg');if(g)g.remove();saveDraft()}}
     else if(a==='open'){show(scScreen())}
     else if(a==='min'){closeOverlay();toast('Still scanning. You can keep using the site.')}
     else if(a==='pill'){if(scGuard()){SC.fail='';show(scScreen());scPillUpdate()}}
