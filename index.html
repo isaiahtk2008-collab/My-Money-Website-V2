@@ -6908,9 +6908,15 @@ async function connectSheet(){
 }
 
 /* ================= EVENTS ================= */
+/* A click that starts inside the form and ends on the dim area (dragging to select text, a slipped mouse while
+   picking a dropdown item) is reported by the browser as a click on the dim area. Only close the popup when the press
+   itself also began on the dim area. */
+let _scrimDown=false;
+document.addEventListener('pointerdown',e=>{_scrimDown=!!(e.target&&e.target.getAttribute&&e.target.getAttribute('data-act')==='scrim')},true);
+document.addEventListener('mousedown',e=>{_scrimDown=!!(e.target&&e.target.getAttribute&&e.target.getAttribute('data-act')==='scrim')},true);
 document.addEventListener('click',e=>{
   const t=e.target.closest('[data-act]');if(!t)return;const a=t.dataset.act,d=t.dataset;
-  if(a==='scrim'){if(e.target===t)closeOverlay();return}
+  if(a==='scrim'){const started=_scrimDown;_scrimDown=false;if(e.target===t&&started)closeOverlay();return}
   switch(a){
     case 'go':go(d.v);break;
     case 'navreset':navReset();break;
@@ -6963,7 +6969,11 @@ document.addEventListener('keydown',e=>{
   if((e.key==='Enter'||e.key===' ')&&e.target.classList&&e.target.classList.contains('dh-seg')){e.preventDefault();e.target.dispatchEvent(new MouseEvent('click',{bubbles:true}));return}
   if(e.key==='Enter'||e.key===' '){const tr=e.target.closest&&e.target.closest('tr[data-act="open"]');if(tr){e.preventDefault();tr.click();return}}
   const ov=$('#overlay .overlay');
-  if(e.key==='Escape'&&ov){closeOverlay();return}
+  if(e.key==='Escape'&&ov){
+    /* Escape while typing in a field or closing a dropdown/suggestion list should not throw away the whole form. */
+    const tg0=e.target&&e.target.tagName;
+    if(e.defaultPrevented||(/INPUT|TEXTAREA|SELECT/.test(tg0||'')&&!$('#palq'))){if(e.target&&e.target.blur&&!e.defaultPrevented)e.target.blur();return}
+    closeOverlay();return}
   if($('#palq')){
     const n=(window._pal||[]).length;
     if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();S.palIdx=(S.palIdx+(e.key==='ArrowDown'?1:-1)+n)%Math.max(n,1);window._palPaint();const s=$('.pr[aria-selected="true"]');s&&s.scrollIntoView({block:'nearest'})}
