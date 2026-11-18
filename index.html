@@ -6872,10 +6872,10 @@ function setupTop(){
   let mf;try{mf=matchfixStatus()}catch(_){mf={cls:'',label:'Check matching',title:'Check that every device matches its sheet row',badge:''}}
   $('#tools').innerHTML=`<button class="ibtn search" data-act="palette" aria-label="Search">${ICON.search}<span>Search</span><kbd>⌘K</kbd></button>
     <button class="ibtn" data-act="theme" aria-label="Theme: ${S.theme}" title="Theme: ${S.theme}">${ICON[S.theme==='dark'?'moon':S.theme==='light'?'sun':'auto']}</button>
-    <button class="ibtn" data-act="privacy" aria-pressed="${S.privacy}" aria-label="Hide amounts" title="Hide amounts (P)">${S.privacy?ICON.eyeoff:ICON.eye}</button>
+    <button class="ibtn" data-act="privacy" aria-pressed="${S.privacy}" aria-label="Hide amounts" title="Hide amounts">${S.privacy?ICON.eyeoff:ICON.eye}</button>
     <button class="ibtn${mf.cls}" data-act="matchfix" aria-label="${mf.label}" title="${mf.title}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>${mf.badge}</button>
-    <button class="ibtn" data-act="refresh" aria-label="Refresh data" title="Refresh data (R)">${ICON.refresh}</button>
-    <button class="ibtn" data-act="help" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">${ICON.kbd}</button>`;
+    <button class="ibtn" data-act="refresh" aria-label="Refresh data" title="Refresh data">${ICON.refresh}</button>
+    <button class="ibtn" data-act="help" aria-label="Keyboard shortcuts" title="Keyboard shortcuts">${ICON.kbd}</button>`;
   const rb=$('#rangebar');
   if(['home','spending','reselling'].includes(S.view)){const R=RG();
     rb.hidden=false;rb.innerHTML=`<div class="chips" role="group" aria-label="Date range">${RANGES.map(([v,l])=>`<button class="chip-b" data-act="range" data-v="${v}" aria-pressed="${S.range===v}">${l}</button>`).join('')}</div>
@@ -8647,7 +8647,7 @@ document.addEventListener('click',e=>{const t=e.target.closest&&e.target.closest
   if(t.dataset.bk==='dl')downloadBackup();else{LS.set('bk.snooze',String(Date.now()+3*864e5));removeBackupBanner()}});
 
 /* ---------- Entry point + boot ---------- */
-const fab=document.createElement('button');fab.type='button';fab.className='lg-fab';fab.dataset.lg='menu';fab.title='Log an entry (N)';
+const fab=document.createElement('button');fab.type='button';fab.className='lg-fab';fab.dataset.lg='menu';fab.title='Log an entry';
 fab.innerHTML=ICO.plus+'<span class="lg-bd" hidden></span>';document.body.appendChild(fab);badge();
 (()=>{const tl=$('#tools');if(tl&&tl.parentNode){const p=document.createElement('button');p.type='button';p.id='syncpill';p.className='chip-b';p.dataset.lg='pill';tl.parentNode.insertBefore(p,tl);}updatePill()})();
 window.addEventListener('online',()=>{updatePill();flush(true).then(updatePill)});window.addEventListener('offline',updatePill);
@@ -9550,19 +9550,24 @@ setInterval(()=>{if(qn()&&!document.hidden)flush(true)},60000);
     window.__mmFoldSettingsHtml = function () {
       try {
         var g = get(), h = '';
+        var kb = window.__mmKbdTipsGet ? window.__mmKbdTipsGet() : true;
         h += '<section class="m3-card" id="fold-card">';
-        h += '<div class="m3-card-head"><span class="m3-icon" aria-hidden="true">unfold_less</span><div>';
-        h += '<div class="m3-card-title">Minimize / maximize buttons</div>';
-        h += '<div class="m3-card-sub">A small button on each card to fold it down to its title. Saved on this device only.</div></div></div>';
-        h += '<div class="lg-f" style="margin-top:12px;"><div class="lg-l">Buttons</div><div class="lg-chips" role="group" aria-label="Buttons on or off">';
+        h += '<div class="m3-card-head"><span class="m3-icon" aria-hidden="true">keyboard</span><div>';
+        h += '<div class="m3-card-title">Buttons &amp; shortcuts</div>';
+        h += '<div class="m3-card-sub">Shortcut hints on hover and the fold buttons on each card. Saved on this device only.</div></div></div>';
+        h += '<div class="lg-f" style="margin-top:12px;"><div class="lg-l">Shortcut hints (show the key when you hover a button)</div><div class="lg-chips" role="group" aria-label="Shortcut hints on or off">';
+        h += '<button type="button" class="chip-b" data-kbd-on="1" aria-pressed="' + pr(kb) + '">On</button>';
+        h += '<button type="button" class="chip-b" data-kbd-on="0" aria-pressed="' + pr(!kb) + '">Off</button>';
+        h += '</div></div>';
+        h += '<div class="lg-f"><div class="lg-l">Fold buttons (minimize / maximize a card)</div><div class="lg-chips" role="group" aria-label="Buttons on or off">';
         h += '<button type="button" class="chip-b" data-fold-on="1" aria-pressed="' + pr(g.on) + '">On</button>';
         h += '<button type="button" class="chip-b" data-fold-on="0" aria-pressed="' + pr(!g.on) + '">Off</button>';
         h += '</div></div>';
         var cs = [['tl', 'Top left'], ['tr', 'Top right'], ['bl', 'Bottom left'], ['br', 'Bottom right']];
-        h += '<div class="lg-f"><div class="lg-l">Corner</div><div class="lg-chips" role="group" aria-label="Button corner">';
+        h += '<div class="lg-f"><div class="lg-l">Fold button corner</div><div class="lg-chips" role="group" aria-label="Button corner">';
         for (var i = 0; i < cs.length; i++) h += '<button type="button" class="chip-b" data-fold-corner="' + cs[i][0] + '" aria-pressed="' + pr(g.corner === cs[i][0]) + '">' + cs[i][1] + '</button>';
         h += '</div></div>';
-        h += '<div class="lg-f"><div class="lg-l">This page</div><div class="lg-chips">';
+        h += '<div class="lg-f"><div class="lg-l">Cards on this page</div><div class="lg-chips">';
         h += '<button type="button" class="chip-b" data-fold-all="collapse">Collapse all</button>';
         h += '<button type="button" class="chip-b" data-fold-all="expand">Expand all</button>';
         h += '</div></div>';
@@ -9581,8 +9586,16 @@ setInterval(()=>{if(qn()&&!document.hidden)flush(true)},60000);
       window.__mmFoldCardBound = true;
       document.addEventListener('click', function (e) {
         try {
-          var t = e.target && e.target.closest ? e.target.closest('#fold-card [data-fold-on],#fold-card [data-fold-corner],#fold-card [data-fold-all]') : null;
+          var t = e.target && e.target.closest ? e.target.closest('#fold-card [data-fold-on],#fold-card [data-fold-corner],#fold-card [data-fold-all],#fold-card [data-kbd-on]') : null;
           if (!t) return;
+          if (t.hasAttribute('data-kbd-on')) {
+            var kon = t.getAttribute('data-kbd-on') === '1';
+            window.__mmKbdTipsSet && window.__mmKbdTipsSet(kon);
+            var ks = document.querySelectorAll('#fold-card [data-kbd-on]');
+            for (var q = 0; q < ks.length; q++) ks[q].setAttribute('aria-pressed', pr((ks[q].getAttribute('data-kbd-on') === '1') === kon));
+            say(kon ? 'Shortcut hints are on.' : 'Shortcut hints are off.');
+            return;
+          }
           if (t.hasAttribute('data-fold-on')) {
             var on = t.getAttribute('data-fold-on') === '1';
             window.__mmFoldSet && window.__mmFoldSet('on', on); sync(); say(on ? 'Buttons are on.' : 'Buttons are off. The page looks as it did before.');
@@ -9599,6 +9612,111 @@ setInterval(()=>{if(qn()&&!document.hidden)flush(true)},60000);
   } catch (err) {}
 })();
 </script>
+<script id="mm-kbdtips-js">
+/* Shortcut hints: hovering (or keyboard-focusing) a button that has a keyboard shortcut shows a small label with the key.
+   Device-local only: key mm.kbdtips ('1' on, default | '0' off). Purely visual: it never clicks, submits, or touches the sheet or sync code.
+   Off = no listeners act, no element is created, and native tooltips behave as they did. */
+(function () {
+  try {
+    if (window.__mmKbdTipsGet) return;
+    var KEY = 'mm.kbdtips', mem = null;
+    function on() { try { var v = localStorage.getItem(KEY); return v === null ? mem !== '0' : v !== '0'; } catch (e) { return mem !== '0'; } }
+    window.__mmKbdTipsGet = on;
+    window.__mmKbdTipsSet = function (v) { mem = v ? '1' : '0'; try { localStorage.setItem(KEY, mem); } catch (e) {} if (!v) hide(); };
+    var isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
+    var MOD = isMac ? '⌘' : 'Ctrl';
+    var NAVKEY = { home: 'H', spending: 'S', reselling: 'R', inventory: 'I', investing: 'V', data: 'D' };
+    /* [selector, function returning an array of key groups, or a string] */
+    var RULES = [
+      ['[data-act="palette"]', function () { return [[MOD, 'K'], ['/']]; }],
+      ['[data-act="theme"]', function () { return [['T']]; }],
+      ['[data-act="privacy"]', function () { return [['P']]; }],
+      ['[data-act="refresh"]', function () { return [['R']]; }],
+      ['[data-act="help"]', function () { return [['?']]; }],
+      ['.lg-fab', function () { return [['N']]; }],
+      ['[data-lg="submit"]', function () { return [[MOD, 'Enter']]; }],
+      ['#rail [data-act="go"]', function (el) { var k = NAVKEY[el.getAttribute('data-v')]; return k ? [['G', 'then', k]] : null; }],
+      ['#overlay [data-act="close"]', function () { return [['Esc']]; }]
+    ];
+    function keysFor(el) {
+      for (var i = 0; i < RULES.length; i++) {
+        try { if (el.matches(RULES[i][0])) { var r = RULES[i][1](el); if (r) return r; } } catch (e) {}
+      }
+      return null;
+    }
+    function labelOf(el) {
+      var l = el.getAttribute('data-kbd-label') || el.getAttribute('data-kbd-title') || el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent || '';
+      return l.replace(/\s+/g, ' ').trim().slice(0, 40);
+    }
+    var tip = null, cur = null, timer = null, savedTitle = null;
+    function ensure() {
+      if (tip) return tip;
+      tip = document.createElement('div');
+      tip.id = 'mm-kbdtip'; tip.setAttribute('role', 'tooltip'); tip.hidden = true;
+      document.body.appendChild(tip);
+      return tip;
+    }
+    function hide() {
+      if (timer) { clearTimeout(timer); timer = null; }
+      if (tip) tip.hidden = true;
+      if (cur && savedTitle !== null) { try { cur.setAttribute('title', savedTitle); } catch (e) {} }
+      cur = null; savedTitle = null;
+    }
+    function build(el, groups) {
+      var t = ensure(); t.textContent = '';
+      var lab = labelOf(el);
+      if (lab) { var sp = document.createElement('span'); sp.className = 'mm-kt-l'; sp.textContent = lab; t.appendChild(sp); }
+      for (var g = 0; g < groups.length; g++) {
+        if (g > 0) { var o = document.createElement('span'); o.className = 'mm-kt-o'; o.textContent = 'or'; t.appendChild(o); }
+        for (var k = 0; k < groups[g].length; k++) {
+          var part = groups[g][k];
+          if (part === 'then') { var th = document.createElement('span'); th.className = 'mm-kt-o'; th.textContent = 'then'; t.appendChild(th); }
+          else { var kb = document.createElement('kbd'); kb.textContent = part; t.appendChild(kb); }
+        }
+      }
+      return t;
+    }
+    function place(el, t) {
+      t.hidden = false; t.style.left = '0px'; t.style.top = '0px';
+      var r = el.getBoundingClientRect(), w = t.offsetWidth, h = t.offsetHeight, vw = document.documentElement.clientWidth, vh = window.innerHeight;
+      var x = r.left + r.width / 2 - w / 2; x = Math.max(8, Math.min(x, vw - w - 8));
+      var y = r.bottom + 8; if (y + h > vh - 8) y = Math.max(8, r.top - h - 8);
+      t.style.left = Math.round(x) + 'px'; t.style.top = Math.round(y) + 'px';
+    }
+    function show(el) {
+      if (!on() || !el.isConnected) return;
+      var groups = keysFor(el); if (!groups) return;
+      var title = el.getAttribute('title');
+      if (title !== null) { savedTitle = title; el.setAttribute('data-kbd-title', title); el.removeAttribute('title'); }   /* avoid a second, native tooltip on top of this one */
+      place(el, build(el, groups));
+    }
+    function target(e) { return e.target && e.target.closest ? e.target.closest('button,[data-act],[data-lg],a') : null; }
+    function canHover() { try { return !window.matchMedia || window.matchMedia('(hover:hover)').matches; } catch (e) { return true; } }
+    function enter(el) {
+      if (el === cur) return;
+      hide();
+      if (!on() || !keysFor(el)) return;
+      cur = el;
+      timer = setTimeout(function () { timer = null; if (cur === el) show(el); }, 350);
+    }
+    document.addEventListener('mouseover', function (e) { try { if (!canHover()) return; var el = target(e); if (el) enter(el); else if (cur) hide(); } catch (x) {} });
+    document.addEventListener('mouseout', function (e) { try { if (cur && (!e.relatedTarget || !cur.contains(e.relatedTarget))) hide(); } catch (x) {} });
+    document.addEventListener('focusin', function (e) { try { var el = target(e); if (el && e.target.matches && e.target.matches(':focus-visible')) enter(el); } catch (x) {} });
+    document.addEventListener('focusout', function () { hide(); });
+    ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function (n) { document.addEventListener(n, function () { if (cur || timer) hide(); }, true); });
+    window.addEventListener('scroll', function () { if (cur || timer) hide(); }, true);
+    window.addEventListener('blur', hide);
+    window.__mmKbdTips = { keysFor: keysFor, show: function (el) { enter(el); } };
+  } catch (err) {}
+})();
+</script>
+<style id="mm-kbdtips-css">
+#mm-kbdtip{position:fixed;z-index:100000;display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:10px;background:var(--ink);color:var(--bg);font:600 12px/1.2 var(--font);box-shadow:0 6px 20px rgba(0,0,0,.28);pointer-events:none;white-space:nowrap;max-width:calc(100vw - 16px)}
+#mm-kbdtip[hidden]{display:none}
+#mm-kbdtip .mm-kt-o{font-weight:500;opacity:.65}
+#mm-kbdtip kbd{font:700 11px var(--font);background:color-mix(in srgb,var(--bg) 22%,transparent);color:var(--bg);border:var(--ap3-w,1px) solid color-mix(in srgb,var(--bg) 35%,transparent);border-radius:6px;padding:1px 6px}
+@media (prefers-reduced-motion:no-preference){#mm-kbdtip:not([hidden]){animation:mmkt .12s ease-out}@keyframes mmkt{from{opacity:0;transform:translateY(-2px)}to{opacity:1;transform:none}}}
+</style>
 <script id="mm-clr-js">
 /* Color chart + color picker for the Appearance card, and the custom app accent color they can set.
    Device-local only: key mm.clr.accent = '#rrggbb'. The custom color sets --accent, --c1, --accent-soft, --accent-ink inline on <html> (+ data-custom-accent).
@@ -10615,7 +10733,7 @@ setInterval(()=>{if(qn()&&!document.hidden)flush(true)},60000);
         var raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return [];
         var parsed = JSON.parse(raw);
-        if (Object.prototype.toString.call(parsed) === '[object Array]') return parsed;
+        if (Object.prototype.toString.call(parsed) === '[object Array]') return parsed.map(function (x) { return x === 'Minimize / maximize buttons' ? 'Buttons & shortcuts' : x; });
       } catch (e) {}
       return [];
     }

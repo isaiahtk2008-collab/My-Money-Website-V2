@@ -22,7 +22,7 @@ def run(p):
     page.on('console', lambda m: errors.append(m.text) if m.type == 'error' and 'Failed to load resource' not in m.text and 'tailwind is not defined' not in m.text else None)
     page.route('**/*', lambda r: r.continue_() if r.request.url.startswith('file:') else r.abort())   # block everything else (CDNs, Google)
     page.add_init_script("try{sessionStorage.setItem('user_authenticated','true');sessionStorage.setItem('mm.auth.method','local')}catch(e){}")
-    page.add_init_script("try{localStorage.setItem('mm.setfold',JSON.stringify(['Google Account Connection','Local Security','In-App Reminders','Status colours on the Log menu','Appearance','Minimize / maximize buttons','Sheet Sync Connection']))}catch(e){}")   # settings sections start folded; open them for this test
+    page.add_init_script("try{localStorage.setItem('mm.setfold',JSON.stringify(['Google Account Connection','Local Security','In-App Reminders','Status colours on the Log menu','Appearance','Buttons & shortcuts','Sheet Sync Connection']))}catch(e){}")   # settings sections start folded; open them for this test
     page.add_init_script("window.Chart=function(){return{destroy(){},update(){},resize(){}}};window.Chart.register=function(){};window.Chart.defaults={font:{},plugins:{legend:{labels:{}}}};")
     page.goto(PAGE.as_uri() + '?demo=1')
     page.wait_for_function("typeof store!=='undefined' && store.D && store.D.expenses.length>3")
@@ -33,7 +33,7 @@ with sync_playwright() as p:
     page.click('.logo[data-sec=open]')
     page.wait_for_selector('.m3-scope')
     check('Card count', page.locator('.m3-card').count() == 9)
-    check('Card titles', page.locator('.m3-card-title').all_inner_texts() == ['Google Account Connection', 'Local Security', 'Guest access', 'In-App Reminders', 'Status colours on the Log menu', 'Appearance', 'Minimize / maximize buttons', 'Sheet Sync Connection'])
+    check('Card titles', page.locator('.m3-card-title').all_inner_texts() == ['Google Account Connection', 'Local Security', 'Guest access', 'In-App Reminders', 'Status colours on the Log menu', 'Appearance', 'Buttons & shortcuts', 'Sheet Sync Connection'])
     check('Border radius', page.evaluate("getComputedStyle(document.querySelector('.m3-card')).borderRadius") == '16px')
     selectors = ['[data-sec=signout]', '#sec-u', '#sec-n1', '#sec-n2', '[data-sec=save]', '#notif-on', '#notif-day', '#notif-time', '[data-notif=test]', '[data-sec=sheet]', '[data-sec-root]']
     for selector in selectors:

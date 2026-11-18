@@ -18,7 +18,7 @@ def check(name, cond, extra=''):
 
 INIT_AUTH = "try{sessionStorage.setItem('user_authenticated','true');sessionStorage.setItem('mm.auth.method','local')}catch(e){}"
 # the settings sections start folded (title only); open them so these tests can reach the controls
-INIT_AUTH += "try{localStorage.setItem('mm.setfold',JSON.stringify(['Google Account Connection','Local Security','In-App Reminders','Status colours on the Log menu','Appearance','Minimize / maximize buttons','Sheet Sync Connection']))}catch(e){}"
+INIT_AUTH += "try{localStorage.setItem('mm.setfold',JSON.stringify(['Google Account Connection','Local Security','In-App Reminders','Status colours on the Log menu','Appearance','Buttons & shortcuts','Sheet Sync Connection']))}catch(e){}"
 # Chart.js is blocked in tests, so a recording stand-in is used: every `new Chart(el, cfg)` pushes cfg onto window.__charts
 INIT_CHART = "window.__charts=[];window.Chart=function(el,cfg){window.__charts.push(cfg);return{destroy(){},update(){},resize(){}}};window.Chart.register=function(){};window.Chart.defaults={font:{},plugins:{legend:{labels:{}}}};"
 READY = "typeof store!=='undefined' && store.D && store.D.expenses.length>3"

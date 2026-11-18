@@ -133,7 +133,7 @@ with sync_playwright() as p:
     ctx.close()
 
     # ---------- phone width: no sideways scrolling, Log drawer untouched ----------
-    ctx, page, e = boot(b, width=390, init="try{localStorage.setItem('mm.setfold',JSON.stringify(['Appearance','Minimize / maximize buttons']))}catch(x){}"); errs += e
+    ctx, page, e = boot(b, width=390, init="try{localStorage.setItem('mm.setfold',JSON.stringify(['Appearance','Buttons & shortcuts']))}catch(x){}"); errs += e
     open_panel(page)
     check('Phone: no sideways scrolling inside the settings drawer', page.evaluate("(()=>{const d=document.querySelector('#overlay .drawer.lg');return d.scrollWidth-d.clientWidth<=0})()"))
     page.keyboard.press('Escape'); page.mouse.move(2, 2); page.wait_for_timeout(300)

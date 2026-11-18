@@ -15,7 +15,7 @@ def check(name, cond, extra=''):
 
 INIT_AUTH = "try{sessionStorage.setItem('user_authenticated','true');sessionStorage.setItem('mm.auth.method','local')}catch(e){}"
 INIT_AUTH += "try{localStorage.setItem('mm.ap.drawer3','1')}catch(e){}"
-INIT_AUTH += "try{localStorage.setItem('mm.setfold',JSON.stringify(['Google Account Connection','Local Security','In-App Reminders','Status colours on the Log menu','Appearance','Minimize / maximize buttons','Sheet Sync Connection']))}catch(e){}"
+INIT_AUTH += "try{localStorage.setItem('mm.setfold',JSON.stringify(['Google Account Connection','Local Security','In-App Reminders','Status colours on the Log menu','Appearance','Buttons & shortcuts','Sheet Sync Connection']))}catch(e){}"
 INIT_CHART = "window.Chart=function(){return{destroy(){},update(){},resize(){}}};window.Chart.register=function(){};window.Chart.defaults={font:{},plugins:{legend:{labels:{}}}};"
 READY = "typeof store!=='undefined' && store.D && store.D.expenses.length>3"
 
