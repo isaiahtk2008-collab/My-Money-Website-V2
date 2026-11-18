@@ -227,6 +227,7 @@ html.mm-guest .rail { top: calc(34px + env(safe-area-inset-top, 0px)); height: c
 .sc-ban p{margin:4px 0 0}
 .sc-ban ul{margin:6px 0 0;padding-left:18px}
 .sc-chk{color:var(--warn)}
+.sc-prim{background:none;border:0;color:var(--muted);font-size:12px;text-decoration:underline;padding:8px 0;cursor:pointer;width:100%;text-align:center}
 .sc-sg{margin:6px 0 2px}.sc-sg span{display:block;margin-bottom:4px}.sc-sg .chip-b{margin:0 6px 6px 0}
 .sc-ban details{margin-top:6px}
 .sc-ban summary{cursor:pointer;font-weight:600}
@@ -8224,6 +8225,8 @@ async function scOcrRun(){
   catch(e){SC.busy=false;scMsg('Could not read the photos on this device. The reader downloads once (about 10 MB), so connect to the internet and try again.',1)}
 }
 
+/* Which button leads on the Scan screen. Default: reading on this device (no AI). A device-only setting (never sent to the sheet) switches back to AI first. */
+function scPrimAi(){try{return LS.get('lg.scPrim')==='ai'}catch(e){return false}}
 /* ----- the Scan photos screen ----- */
 function scScreen(){
   const n=SC.imgs.length;
@@ -8234,7 +8237,9 @@ function scScreen(){
   ${n?`<div class="sc-grid">${SC.imgs.map((i,k)=>`<div class="sc-t"><img src="${E(i.url)}" alt="Photo ${k+1}"><button type="button" class="sc-x" data-sc="rm" data-id="${E(i.id)}" aria-label="Remove photo ${k+1}">×</button></div>`).join('')}</div><p class="hint" style="color:var(--muted)">${n} of ${SC_MAX} photos</p>`:''}
   <p class="lg-st${SC.bad&&!SC.busy?' bad':''}" id="sc-st" role="status">${E(SC.busy?SC.prog:SC.msg)}</p>
   ${SC.busy?'<p class="hint" style="color:var(--muted);margin:6px 0 0">You can minimize this (the – button) and keep using the site. A banner will tell you when the scan is finished.</p>':''}
-  <div class="lg-foot sc-foot"><button class="btn sc-main" data-sc="mix" ${n&&!SC.busy?'':'disabled'}>${SC.busy?'Reading photos…':'Smart read'}<small>AI and on-device together</small></button><div class="sc-row"><button class="btn sec" data-sc="go" ${n&&!SC.busy?'':'disabled'}>AI only</button><button class="btn sec" data-sc="ocr" ${n&&!SC.busy?'':'disabled'}>Read without AI</button></div><button class="btn sec" data-sc="clear" ${SC.busy?'disabled':''} title="Removes the photos, the readings and any form pre-filled from a scan. Your sheet is never touched.">Clear all scan results</button></div><div style="height:24px"></div>`;
+  <div class="lg-foot sc-foot">${scPrimAi()
+    ?`<button class="btn sc-main" data-sc="mix" ${n&&!SC.busy?'':'disabled'}>${SC.busy?'Reading photos…':'Smart read'}<small>AI and on-device together</small></button><div class="sc-row"><button class="btn sec" data-sc="go" ${n&&!SC.busy?'':'disabled'}>AI only</button><button class="btn sec" data-sc="ocr" ${n&&!SC.busy?'':'disabled'}>Read without AI</button></div>`
+    :`<button class="btn sc-main" data-sc="ocr" ${n&&!SC.busy?'':'disabled'}>${SC.busy?'Reading photos…':'Read without AI'}<small>On this device, nothing is sent anywhere</small></button><div class="sc-row"><button class="btn sec" data-sc="mix" ${n&&!SC.busy?'':'disabled'}>Smart read (AI)</button><button class="btn sec" data-sc="go" ${n&&!SC.busy?'':'disabled'}>AI only</button></div>`}<button class="btn sec" data-sc="clear" ${SC.busy?'disabled':''} title="Removes the photos, the readings and any form pre-filled from a scan. Your sheet is never touched.">Clear all scan results</button><button type="button" class="sc-prim" data-sc="prim">${scPrimAi()?'Main button: AI first. Switch to reading on this device first':'Main button: on this device first. Switch back to AI first'}</button></div><div style="height:24px"></div>`;
 }
 function scTypeScreen(){
   return `<div class="lg-top"><div style="display:flex;gap:10px;align-items:center"><button class="ibtn" data-sc="open" aria-label="Back">${ICO.back}</button><div><h2>What is it?</h2><p>The photos did not make the type clear</p></div></div><div class="lg-r">${xbtn()}</div></div>
@@ -8372,6 +8377,7 @@ document.addEventListener('click',e=>{
     else if(a==='go'){scGo()}
     else if(a==='mix'){scMixRun()}
     else if(a==='ocr'){scOcrRun()}
+    else if(a==='prim'){LS.set('lg.scPrim',scPrimAi()?'':'ai');if(!SC.busy&&scOpen())show(scScreen())}
     else if(a==='clear'){scClearAll()}
     else if(a==='type'){const id=(SC_FORM[SC.mode]||{})[t.dataset.v];if(id&&SC.res)scApply(id,SC.res)}
   }catch(err){toast('Could not do that. Nothing was changed.')}
