@@ -32,7 +32,9 @@ const J = x => JSON.parse(JSON.stringify(x));
 // a valid fake IMEI: 14 digits + Luhn check digit
 function fakeImei(body) { for (let c = 0; c < 10; c++) if (T.scLuhn(body + c)) return body + c; throw new Error('no luhn'); }
 const IMEI = fakeImei('35432109876543');
-const sub = v => typeof v === 'string' ? v.replace(/\{IMEI\}/g, IMEI) : v;
+// {IMEI_SLIP} = the same IMEI as a camera might misread it (0 as O, 1 as l): the reader should repair it, and the truth stays {IMEI}
+const IMEI_SLIP = IMEI.replace(/0/g, 'O').replace(/1/g, 'l');
+const sub = v => typeof v === 'string' ? v.replace(/\{IMEI_SLIP\}/g, IMEI_SLIP).replace(/\{IMEI\}/g, IMEI) : v;
 
 const nrm = s => String(s).toUpperCase().replace(/[^A-Z0-9]/g, '');
 const same = {
@@ -62,7 +64,8 @@ function score(res, expect) {
   }
   return rows;
 }
-const run = c => T.scOcrParse([{ n: 1, text: sub(c.text), conf: 92, words: [] }]);
+// a case is one photo ("text") or several ("pages": [text, text...]); "conf" is the reader's own score for the photo (default 92)
+const run = c => T.scOcrParse((c.pages || [c.text]).map((t, i) => ({ n: i + 1, text: sub(t), conf: c.conf || 92, words: [] })));
 
 test('benchmark: on-device reader accuracy on fake photo text', () => {
   const all = [], byCat = {}, byField = {};
