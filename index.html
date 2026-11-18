@@ -7851,7 +7851,7 @@ function scOcrLoc(pg,val){
   if(w&&w.b&&isFinite(w.b.x0)&&isFinite(w.b.x1)&&isFinite(w.b.y0)&&isFinite(w.b.y1))return {c:Number(w.c),b:{x0:w.b.x0,y0:w.b.y0,x1:w.b.x1,y1:w.b.y1}};
   return {c:Number(pg&&pg.conf),b:null};
 }
-const SC_SER_LABEL='(?:serial\\s*(?:number|no\\.?|#)?|service\\s*tag|identifying\\s*number|s\\s*/\\s*n|sn)';
+const SC_SER_LABEL='(?:serial\\s*(?:number|no\\.?|#)?(?:\\s*\\(\\s*system\\s*\\))?|service\\s*tag|identifying\\s*number|s\\s*/\\s*n|sn)';
 function scOcrSerials(pg){
   const L=scOcrLines(pg&&pg.text),out=[];
   const good=v=>{const n=scIdN(v);return /^[A-Z0-9]{5,25}$/.test(n)&&/\d/.test(n)&&!SC_JUNK_ID.test(n)&&!/^(.)\1+$/.test(n)?n:null};
@@ -7896,10 +7896,12 @@ const SC_MAC_A={'A1932':'MacBook Air (13-inch, 2018)','A2179':'MacBook Air (13-i
 const SC_MODEL_JUNK=/^(?:system product name|system manufacturer|to be filled|default string|o\.?e\.?m\b|not specified|rename|copy|device|windows|mobile|supported|v\d|not |none|unknown)/i;
 const SC_CPU_OK=/\b(?:Intel|AMD|Ryzen|Core|Celeron|Pentium|Xeon|Athlon|Apple|Snapdragon|Qualcomm|Exynos|MediaTek|Threadripper)\b|\bM\d\b|\bi[3579][- ]?\d|\b\d{4,5}[A-Z]{1,2}\b/i;
 const SC_UI_WORDS=/\b(?:Accessibility|Privacy|Security|Windows|Bluetooth|Network|Personalization|Apps|Accounts|Time|Language|Gaming|Update|Rename|Copy|Device|Home|System|Settings|Find|Related|Search)\b/i;
-const SC_RAM_OK=[2,3,4,6,8,12,16,18,24,32,36,48,64,96,128,192,256];
+const SC_RAM_OK=[2,3,4,6,8,12,16,18,20,24,32,36,40,48,64,96,128,192,256];
 const SC_APPLE=/^(MacBook (?:Air|Pro)|iMac|Mac mini|Mac Studio|Mac Pro)\b(\s*\([^)]{3,44}\))?/;
 const SC_PHONE=/^(iPhone\s+(?:SE|X[RS]?|1\d|[5-9][sS]?)(?:\s+(?:Pro\s+Max|Pro|Plus|mini|Max))?|iPad(?:\s+(?:Pro|Air|mini))?(?:\s+\d{1,2}(?:\.\d)?(?:-inch)?)?|Galaxy\s+[SZAMF]\d{1,3}(?:\s+(?:Ultra|Plus|\+|FE|Fold\d?|Flip\d?))?|Pixel\s+\d{1,2}[A-Za-z]{0,3}(?:\s+(?:Pro|XL|Fold))?)\b/;
 const SC_BRAND=/\b(ThinkPad\s+[A-Z]\d{1,3}[a-z]?(?:\s+Gen\s*\d)?|IdeaPad\s+[A-Za-z0-9]{1,5}(?:\s+\d{2}[A-Z]{2,5}\d?)?|Legion\s+[A-Za-z0-9]{1,5}|Surface\s+(?:Laptop|Pro|Book|Go|Studio)(?:\s+\d)?|XPS\s*\d{2}(?:\s*\d{4})?|(?:Inspiron|Latitude|Precision|Vostro)\s*\d{3,4}|ROG\s+[A-Za-z]+(?:\s+[A-Za-z0-9]+){0,2}|Zenbook\s+[A-Za-z0-9]{1,6}(?:\s+[A-Za-z0-9]{1,6})?|Vivobook\s+[A-Za-z0-9]{1,6}(?:\s+[A-Za-z0-9]{1,6})?|(?:EliteBook|ProBook|ZBook|Pavilion|Spectre|Envy|OMEN|Victus)\s+[A-Za-z0-9]{1,6}(?:\s+[A-Za-z0-9]{1,6})?|Galaxy\s+Book\d?(?:\s+(?:Pro|Pro 360|Go))?|(?:Acer\s+)?(?:Nitro|Predator|Aspire|Swift|Spin|TravelMate)\s+(?:[A-Z]{1,4}\d{1,3}-\d{2,3}[A-Z0-9-]*|V\s?\d{2}[A-Z0-9-]*)|TUF\s+(?:Gaming\s+)?[A-Z]\d{2}[A-Za-z0-9]*|LOQ\s+\d{2}[A-Z0-9]{3,6}|(?:Katana|Stealth|Raider|Sword|Cyborg|Thin)\s+[A-Z0-9][A-Za-z0-9 -]{1,10})\b/;
+/* accessory names: Apple's own (AirPods, Magic Mouse...) and a few well-known peripheral brands followed by the product name. Only used when nothing better named the model. */
+const SC_ACC=/^(?:Apple\s+)?(AirPods(?:\s+(?:Pro|Max))?(?:\s*\(?\d(?:st|nd|rd|th)?\s*gen(?:eration)?\)?)?|Magic\s+(?:Mouse|Keyboard|Trackpad)|Apple\s+Pencil|(?:Logitech|Razer|Corsair|SteelSeries|HyperX|Anker|Belkin|JBL|Jabra|Sennheiser|Bose|Beats)\s+[A-Za-z0-9][A-Za-z0-9 \-+.]{2,28}[A-Za-z0-9])$/;
 const SC_CPU=/(Intel\(?R?\)?\s*Core\(?(?:TM)?\)?\s*(?:Ultra\s*[3579]\s*\d{3}[A-Z]{0,2}|i[3579][- ]\d{4,5}[A-Z]{0,2}\d?)|AMD\s+Ryzen\s+[3579]\s+\d{4}[A-Z]{0,2}|Apple\s+M\d(?:\s+(?:Pro|Max|Ultra))?\b|\d(?:\.\d+)?\s*GHz\s+(?:Dual|Quad|6|8|10)-Core\s+Intel\s+Core\s+i[3579])/i;
 const SC_GPU=/((?:NVIDIA\s+)?GeForce\s+(?:GTX|RTX|RIX|R1X|GIX|G1X|MX)\s*\d{3,4}(?:\s*(?:Ti|SUPER))?(?:\s+Laptop GPU)?|AMD\s+Radeon\s+(?:RX\s*)?[A-Za-z0-9 ]{2,22}|Intel\(?R?\)?\s*(?:UHD|Iris[A-Za-z ]{0,10})\s*Graphics|Apple\s+M\d(?:\s+(?:Pro|Max|Ultra))?\s+\d+-core\s+GPU)/i;
 
@@ -7932,7 +7934,8 @@ function scOcrPay(text){
   const a1=sent?num(sent[1]):null,a2=row?num(row[1]):null;
   if(a1==null&&a2==null)return null;
   const tidy=scPersonCase;
-  const p1=sent?tidy(sent[2]):'',p2=toLine?tidy(toLine[1]):'';
+  const got=!sent&&/\b(?:you\s+received|money\s+received|received\s+from|has\s+been\s+deposited)\b/i.test(t);   /* a RECEIVED transfer: 'To' is the person using the app */
+  const p1=sent?tidy(sent[2]):'',p2=toLine&&!got?tidy(toLine[1]):'';
   const nz=s=>s.toUpperCase().replace(/[^A-Z0-9]/g,'');
   let amount=null,aAgree=false,party='',pAgree=false;const conflicts=[];
   if(a1!=null&&a2!=null){if(a1===a2){amount=a1;aAgree=true}else conflicts.push('The payment screenshot shows two different amounts ($'+a1.toFixed(2)+' and $'+a2.toFixed(2)+'), so the price was left blank.')}
@@ -7976,7 +7979,7 @@ function scOcrParse(pages){
     scOcrImeis(pg).forEach(d=>{imeis.push({d,pg});add('imei',d,'IMEI '+d,pg,{conf:'high',bbox:scOcrLoc(pg,d).b})});
     L.forEach((l0,i)=>{
       /* common OCR slip: a 1 read as l/I in front of a screen size ("l3.3-inch") */
-      const l=l0.replace(/\b[lI](\d(?:[.,]\d)?)(?=\s?-?\s?inch)/gi,'1$1');
+      const l=l0.replace(/\b[lI](\d(?:[.,]\d)?)(?=\s?-?\s?inch)/gi,'1$1').replace(/\b(iPhone\s+)[lI](?=[0-7](?:\s|$))/g,(m,a)=>a+'1');   /* "iPhone l3" is iPhone 13 */
       let m;
       /* model: the label wins, then Apple / phone names, then Apple identifiers and model numbers, then PC brand lines (lowest priority) */
       if((m=l.match(/\b(?:model\s*name|device\s*model|system\s*model|marketing\s*name|product\s*name)\s*[:;]?\s+([A-Za-z0-9][A-Za-z0-9 ()+\-.,'/]{2,40})$/i))){if(!SC_MODEL_JUNK.test(m[1].trim()))add('model',m[1],l,pg)}
@@ -7985,7 +7988,8 @@ function scOcrParse(pages){
         if(!m[2]){const nx=(L[i+1]||'').match(/^\(?(\d{2}(?:\.\d)?-inch(?:,\s*[A-Za-z0-9 ]{1,12}){0,2})\)?$/);if(nx)nm+=' ('+nx[1]+')'}
         add('model',nm,l,pg,{conf:'medium'});
       }
-      else if((m=l.match(SC_PHONE)))add('model',m[1].trim(),l,pg,{conf:'medium'});
+      else if((m=l.match(SC_PHONE)||l.replace(/^model\s*[:;]?\s+/i,'').match(SC_PHONE)))add('model',m[1].trim(),l,pg,{conf:'medium'});
+      else if((m=l.match(SC_ACC)))add('model2',m[1].replace(/\s{2,}/g,' ').trim(),l,pg,{conf:'medium'});
       if((m=l.match(/\bmodel\s*identifier\s*[:;]?\s*([A-Za-z]+\d+,\d+)\b/i))){const id=m[1];note('other','Model identifier: '+id,pg);const nm=SC_MAC_ID[Object.keys(SC_MAC_ID).find(k=>k.toLowerCase()===id.toLowerCase())];if(nm)add('model3',nm,l,pg,{conf:'medium'})}
       if((m=l.match(/\bmodel\s*(?:number|no\.?)?\s*[:;]?\s*(A[12]\d{3})\b/i))){const an=m[1].toUpperCase();note('other','Model number: '+an,pg);if(SC_MAC_A[an])add('model3',SC_MAC_A[an],l,pg,{conf:'medium'})}
       else if((m=l.match(/\bmodel\s*(?:number|no\.?)\s*[:;]?\s+([A-Z0-9][A-Z0-9\-/]{3,19})\b/i)))note('other','Model number: '+m[1].toUpperCase(),pg);
@@ -7996,18 +8000,18 @@ function scOcrParse(pages){
       else if((m=l.match(SC_CPU)))add('cpu',m[1].replace(/\((?:R|TM)\)/gi,'').replace(/\s{2,}/g,' ').trim(),l,pg,{ok:true});
       /* RAM */
       let ram=null;
-      if((m=l.match(/\b(?:installed\s*ram|memory|ram)\s*[:;]?\s+(\d{1,3}(?:\.\d)?)\s*GB\b/i)))ram=m[1];
+      if(!/\b(?:gpu|graphics|video|vram|dedicated|shared|virtual)\b/i.test(l)&&(m=l.match(/\b(?:installed\s*ram|memory|ram)\s*[:;]?\s+(\d{1,3}(?:\.\d{1,2})?)\s*GB\b(?!\s*usable)/i)))ram=m[1];
       else if((m=l.match(/\b(\d{1,3})\s*GB\s*(?:of\s+)?(?:unified\s+memory|RAM|LPDDR\d?X?|DDR\d)/i)))ram=m[1];
-      if(ram!=null){const n=Math.round(scNum(ram));add('ram',n+' GB',l,pg,{ok:SC_RAM_OK.includes(n)})}
+      if(ram!=null){const n=Math.round(scNum(ram));if(SC_RAM_OK.includes(n))add('ram',n+' GB',l,pg,{ok:true});else if(n>0&&n<=64)add('ram',n+' GB',l,pg,{conf:'low'})}   /* an odd size is only ever low-trust; a size over 64 GB that is not a real one (a lost decimal point: 16.0 read as 160) is left blank */
       /* storage: the total, never the free space; a lost decimal point is repaired when the result is a real drive size */
       let st=null;
       if((m=l.match(/([\d.,]+)\s*(GB|TB)[\s:.;,]*(?:available\s+|free\s+)?of\s+([\d.,]+)\s*(GB|TB)/i)))st=[m[3],m[4]];
-      else if((m=l.match(/\b(?:internal\s*storage|total\s*space|storage|capacity|disk|drive)\s*[:;]?\s+([\d.,]+)\s*(GB|TB)\b/i)))st=[m[1],m[2]];
+      else if(!/\b(?:available|free|used|remaining|left)\s+(?:internal\s+)?(?:storage|space|capacity)\b/i.test(l)&&(m=l.match(/\b(?:internal\s*storage|total\s*space|storage|capacity|disk|drive)\s*[:;]?\s+([\d.,]+)\s*(GB|TB)\b/i)))st=[m[1],m[2]];
       else if((m=l.match(/\b(\d[\d.,]*)\s*(GB|TB)\s*(?:SSD|NVMe|PCIe|Flash|eMMC|HDD)\b/i)))st=[m[1],m[2]];
       else if((m=l.match(/\b(?:SSD|NVMe|HDD)\s*[:;]?\s*(\d[\d.,]*)\s*(GB|TB)\b/i)))st=[m[1],m[2]];
       if(st){const f=scFixGB(st[0],st[1]);if(f.n>0)add('storage',scGBtxt(f.n,st[1]),l,pg,{totalGB:scSize(f.n,st[1]),ok:f.ok})}
       /* OS */
-      if((m=l.match(/\b(macOS\s+[A-Z][a-z]+(?:\s+\d+(?:\.\d+)*)?)/)))add('os',m[1],l,pg);
+      if((m=l.match(/\b(macOS\s+[A-Z][a-z]+(?:\s+(?:Version\s+)?\d+(?:\.\d+)*)?)/)))add('os',m[1].replace(/\s+version\s+/i,' '),l,pg);
       else if((m=l.match(/\b(Windows\s+(?:10|11)(?:\s+(?:Home|Pro|Education|Enterprise))?)\b/)))add('os',m[1],l,pg);
       else if((m=l.match(/\b(?:iOS|iPadOS)\s*(?:version)?\s*(\d+(?:\.\d+)+)/i)))add('os','iOS '+m[1],l,pg);
       else if((m=l.match(/\bandroid\s*version\s*[:;]?\s*(\d+(?:\.\d+)*)/i)))add('os','Android '+m[1],l,pg);
@@ -8033,7 +8037,8 @@ function scOcrParse(pages){
      if(m&&/\b(?:Intel|Core|CPU|Processor)\b/i.test(J)){const gen=J.match(/\b\d{1,2}(?:th|st|nd|rd)\s+Gen\b/i);add('cpu',(gen?gen[0].replace(/\s+/g,' ')+' ':'')+'Intel Core '+m[0].replace(/\s/g,'').replace(/[a-z]+$/,s=>s.toUpperCase()),m[0],pg,{ok:true})}
      const r=J.match(/\bRyzen\s*([3579])\s*(\d{4}[A-Z]{0,2})\b/);if(r)add('cpu','AMD Ryzen '+r[1]+' '+r[2],r[0],pg,{ok:true})}
     /* Windows shows installed RAM with ".0" (16.0 GB); only trusted next to the word RAM / memory, and never when it is free/used space */
-    if(/\bRAM\b|\bmemory\b/i.test(J)){const re=/(^|[^\d.,\/])(\d{1,3})\.0\s*GB\b(?!\s*(?:available|free|used|of))/gi;let m;while((m=re.exec(J))){const n=+m[2];if(SC_RAM_OK.includes(n))add('ram',n+' GB',m[0],pg,{ok:true})}}
+    const Jr=J.replace(/\b(?:dedicated|shared|gpu|video|graphics|virtual)\s+(?:gpu\s+|video\s+)?memory\s*[:;]?\s*[\d.,]+\s*[GM]B/gi,' ');
+    if(/\bRAM\b|\bmemory\b/i.test(Jr)){const re=/(^|[^\d.,\/])(\d{1,3})\.00?\s*GB\b(?!\s*(?:available|free|used|of))/gi;let m;while((m=re.exec(Jr))){const n=+m[2];if(SC_RAM_OK.includes(n))add('ram',n+' GB',m[0],pg,{ok:true})}}
     /* the Storage card shows only the drive size ("932 GB"); the "x GB of y GB used" line is handled above */
     if(/\bstorage\b/i.test(J)){const re=/(^|[^\d.,])(\d{3,4})\s*GB\b(?!\s*(?:of|free|available|usable|used))/gi;let m;while((m=re.exec(J))){const n=+m[2];if(n>=100&&scMarketed(n))add('storage',n+' GB',m[0],pg,{totalGB:n,ok:true})}}
     /* Windows names the computer ("LAPTOP-AB12CD3"), and the model sits on the line under it */
