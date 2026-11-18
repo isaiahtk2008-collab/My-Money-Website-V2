@@ -7769,8 +7769,72 @@ function scBuild(formId,res,rawIn){
 }
 
 function scHas(v){return Array.isArray(v)?v.length>0:String(v==null?'':v).trim()!==''}
+/* ----- Post-scan tidy-up, Bought PC form only. Additive: one line turns it off, and any problem means the untouched scan result is used.
+   GPU 1 = integrated, GPU 2 = dedicated; storage without "(shows N GB)"; screen as "15.6in, 144Hz"; Notes keep battery lines only (display, software, storage,
+   cosmetic, included and other spec lines are dropped); a close model in your sheet and a missing integrated GPU / screen size are offered as tap chips (b.fix).
+   Nothing is invented: anything unclear stays blank. ----- */
+const SC_NORMALIZE_ON=true;
+function scNormalizeBuild(b,formId,res,rawIn){
+  if(formId!=='bpc'||!b||!b.V||!Array.isArray(b.filled))return b;
+  const o=JSON.parse(JSON.stringify(b)),f=BY[formId];
+  o.fix={};o.checks=Array.isArray(o.checks)?o.checks:[];o.noteLines=Array.isArray(o.noteLines)?o.noteLines:[];
+  const has=k=>f.f.some(x=>x.k===k);
+  const K={g1:'GPU 1 (and specs)',g2:'GPU 2 (and specs)',st:'Storage (SSD, HDD or NVME)',sc:'Screen Size, Hertz',md:'PC model'};
+  const setF=(k,val)=>{const i=o.filled.findIndex(x=>x.k===k);
+    if(val==null||val===''){delete o.V[k];if(i>=0)o.filled.splice(i,1);return}
+    o.V[k]=val;if(i>=0)o.filled[i].val=String(val);else o.filled.push({k,val:String(val),conf:'medium',ev:'',img:0,crop:null})};
+  /* 1. graphics: integrated in GPU 1, dedicated in GPU 2 (only when both are seen, or one is clearly a laptop GPU) */
+  const isDed=s=>/\b(?:nvidia|geforce|rtx|gtx|quadro)\b|radeon\s*(?:pro\s*)?rx\b|\brx\s?\d{3,4}/i.test(s);
+  const isInt=s=>!isDed(s)&&/\b(?:intel|uhd|iris|integrated|vega|radeon\s*(?:\(tm\))?\s*graphics|apple\s+m\d)/i.test(s);
+  if(has(K.g1)&&has(K.g2)){
+    const items=[K.g1,K.g2].map(k=>o.V[k]?{v:String(o.V[k]),e:o.filled.find(x=>x.k===k)}:null).filter(Boolean);
+    const ints=items.filter(x=>isInt(x.v)),deds=items.filter(x=>isDed(x.v));
+    let a=null,d=null;
+    if(items.length===2&&ints.length===1&&deds.length===1){a=ints[0];d=deds[0]}
+    else if(items.length===1&&deds.length===1&&/laptop|mobile|max-q/i.test(deds[0].v))d=deds[0];
+    if(a||d){
+      o.filled=o.filled.filter(x=>x.k!==K.g1&&x.k!==K.g2);delete o.V[K.g1];delete o.V[K.g2];
+      const put=(k,x)=>{o.V[k]=x.v;o.filled.push(Object.assign({conf:'medium',ev:'',img:0,crop:null},x.e||{},{k,val:x.v}))};
+      if(a)put(K.g1,a);if(d)put(K.g2,d);
+      if(!a){o.fix[K.g1]={why:'No integrated graphics were seen, so GPU 1 was left blank. Tap if this laptop has one:',vals:['Integrated']};
+        o.checks.push('GPU 1 was left blank: no integrated graphics were seen in the photos.')}
+    }
+  }
+  /* 2. storage: just the marketed size */
+  {const st=o.V[K.st];if(typeof st==='string'&&/\(shows[^)]*\)/i.test(st))setF(K.st,st.replace(/\s*\(shows[^)]*\)/i,'').trim())}
+  /* 3. screen: "<size>in, <hz>Hz" from the screen reading and the Display note. Size is never guessed (a settings screenshot has none). */
+  if(has(K.sc)){
+    const cur=String(o.V[K.sc]||''),dn=o.noteLines.filter(l=>/^display:/i.test(l)).join(' ');
+    const sz=(cur.match(/(\d{2}(?:[.,]\d)?)\s*-?\s*(?:inch(?:es)?|in\b|")/i)||[])[1],hz=(cur.match(/(\d{2,3})\s*Hz/i)||dn.match(/(\d{2,3})\s*Hz/i)||[])[1];
+    const n=sz?parseFloat(sz.replace(',','.')):0,size=n>=10&&n<=34?String(n):null,rate=hz&&+hz>=24&&+hz<=540?String(+hz):null;
+    if(size&&rate)setF(K.sc,size+'in, '+rate+'Hz');
+    else if(size){setF(K.sc,size+'in');o.checks.push('The refresh rate was not seen, so Screen shows only the size. Add the Hz.')}
+    else if(rate&&!cur)o.fix[K.sc]={why:'A refresh rate was seen but no screen size. Tap to use it, then add the size in front:',vals:[rate+'Hz']};
+  }
+  /* 4. Notes: battery lines stay; display / software / storage / cosmetic / included / other / spec lines go (screen and Hz live in their own field) */
+  {const nf=f.f.find(x=>/^notes?$/i.test(x.k));
+   if(nf){const keep=o.noteLines.filter(l=>!/^(?:display|software|storage|cosmetic|included|other|cpu|graphics|ram):/i.test(l));
+     if(keep.length!==o.noteLines.length){o.noteLines=keep;setF(nf.k,keep.join('; ').slice(0,1500)||null)}}}
+  /* 5. model: a tap chip when the model code is a near match (look-alike characters count half) to exactly one model already in your sheet */
+  try{
+    let raw=rawIn;if(raw===undefined){try{raw=(typeof store!=='undefined'&&store)?(store.base||store.raw):null}catch(e){raw=null}}
+    const tab=raw&&raw.BoughtPCs,m=String(o.V[K.md]||'');
+    if(tab&&Array.isArray(tab.rows)&&m){
+      const nrm=s=>String(s).toUpperCase().replace(/[^A-Z0-9]/g,''),G=['B86','0OQD','1IL','5S','2Z','G6','UV'];
+      const cost=(x,y)=>x===y?0:G.some(g=>g.includes(x)&&g.includes(y))?0.5:1;
+      const dist=(s,t)=>{let p=Array.from({length:t.length+1},(_,j)=>j);for(let i=1;i<=s.length;i++){const c=[i];for(let j=1;j<=t.length;j++)c[j]=Math.min(p[j]+1,c[j-1]+1,p[j-1]+cost(s[i-1],t[j-1]));p=c}return p[t.length]};
+      const codes=s=>String(s).toUpperCase().split(/[^A-Z0-9]+/).filter(t=>t.length>=5&&/\d/.test(t)&&/[A-Z]/.test(t));
+      const mine=codes(m),names=[...new Set(tab.rows.map(r=>String((r&&r['PC model'])||'').replace(/\s+/g,' ').trim()).filter(Boolean))];
+      if(mine.length&&!names.some(n=>nrm(n)===nrm(m))){
+        const hit=names.filter(n=>codes(n).some(c=>mine.some(x=>Math.abs(c.length-x.length)<=1&&dist(x,c)<=1.5)));
+        if(hit.length===1)o.fix[K.md]={why:'The model looks close to one already in your sheet. Tap to use it:',vals:[hit[0].slice(0,120)],ow:true};
+      }
+    }
+  }catch(e){}
+  return o;
+}
 function scApply(formId,res){
-  const f=BY[formId],b=scBuild(formId,res);let merge=false;
+  const f=BY[formId],b0=scBuild(formId,res);let b=b0;try{if(SC_NORMALIZE_ON)b=scNormalizeBuild(b0,formId,res)||b0}catch(e){b=b0}let merge=false;
   const d=J(dKey(formId),null);
   if(d&&d.v&&Object.keys(d.v).some(k=>{const x=f.f.find(y=>y.k===k.replace(/#$/,''));return x&&x.t!=='date'&&scHas(d.v[k])})){
     merge=!confirm('You have an unfinished "'+f.t+'" entry saved.\n\nOK = replace it with what was read from the photos.\nCancel = keep it and fill only its empty fields.');
@@ -7819,6 +7883,7 @@ function scBanner(b,formId){
   const rows=b.filled.map(x=>`<li><b>${E(lab(x.k))}:</b> ${E(String(x.val).length>90?String(x.val).slice(0,90)+'…':x.val)}${x.hist?' <em>from a past purchase</em>':x.conf==='medium'?' <em>double-check</em>':''}${x.ev?` <small>saw “${E(x.ev)}”${x.img?' in photo '+x.img:''}</small>`:''}</li>`).join('');
   const crops=b.filled.filter(x=>x.crop&&/Serial/.test(x.k)).map(x=>`<div class="sc-id"><span>${E(lab(x.k))} as read: <b>${E(x.val)}</b>. Compare it with this zoomed photo:</span><img class="sc-crop" src="${E(x.crop)}" alt="Zoomed photo of the ${E(lab(x.k))}"></div>`).join('');
   const sug=Object.keys(b.suggest||{}).filter(k=>!scHas(V[k])).map(k=>`<div class="sc-sg" data-sg="${E(k)}"><span>${E(lab(k))}, from past purchases of this model (tap to use):</span> ${b.suggest[k].map(v=>`<button type="button" class="chip-b" data-sc="hist" data-k="${E(k)}" data-v="${E(v)}">${E(v)}</button>`).join('')}</div>`).join('');
+  const fixs=Object.keys(b.fix||{}).filter(k=>b.fix[k]&&Array.isArray(b.fix[k].vals)&&(b.fix[k].ow||!scHas(V[k]))).map(k=>`<div class="sc-sg" data-sg="${E(k)}"><span>${E(b.fix[k].why)}</span> ${b.fix[k].vals.map(v=>`<button type="button" class="chip-b" data-sc="fix" data-k="${E(k)}" data-v="${E(v)}"${b.fix[k].ow?' data-ow="1"':''}>${E(v)}</button>`).join('')}</div>`).join('');
   const thumbs=SC.imgs.map((i,n)=>`<a href="${E(i.url)}" target="_blank" rel="noopener" aria-label="Open photo ${n+1}"><img src="${E(i.url)}" alt="Photo ${n+1}"></a>`).join('');
   top.insertAdjacentHTML('afterend',`<div class="sc-ban" id="sc-ban"><b>Filled from ${SC.imgs.length} photo${SC.imgs.length===1?'':'s'}. Nothing is logged yet.</b>
     <p>Check the highlighted fields against your photos, fix or add anything, then press Log entry.${idFilled?' Compare the serial number / IMEI character by character.':''}</p>
@@ -7827,6 +7892,7 @@ function scBanner(b,formId){
     ${SC.why?`<p>${E(SC.why)}</p>`:''}
     ${crops}
     ${sug}
+    ${fixs}
     ${b.checks.length?`<ul class="sc-chk">${b.checks.map(c=>`<li>${E(c)}</li>`).join('')}</ul>`:''}
     ${rows?`<details><summary>${b.filled.length} field${b.filled.length===1?'':'s'} filled · what was seen</summary><ul>${rows}</ul></details>`:''}
     ${thumbs?`<div class="sc-th">${thumbs}</div>`:''}</div>`);
@@ -8382,6 +8448,7 @@ document.addEventListener('click',e=>{
       else{scReset();show(scScreen())}
     }
     else if(a==='hist'){const k=t.dataset.k,v=t.dataset.v;if(k&&v&&cur&&cur.f.some(x=>x.k===k)&&!scHas(V[k])){V[k]=v;const el=$$('input.lg-in').find(i=>i.dataset.k===k);if(el)el.value=v;const g=t.closest('.sc-sg');if(g)g.remove();saveDraft()}}
+    else if(a==='fix'){const k=t.dataset.k,v=t.dataset.v;if(k&&v&&cur&&cur.f.some(x=>x.k===k)&&(t.dataset.ow==='1'||!scHas(V[k]))){V[k]=v;const el=$$('input.lg-in').find(i=>i.dataset.k===k);if(el)el.value=v;const g=t.closest('.sc-sg');if(g)g.remove();saveDraft()}}
     else if(a==='open'){show(scScreen())}
     else if(a==='min'){closeOverlay();toast('Still scanning. You can keep using the site.')}
     else if(a==='pill'){if(scGuard()){SC.fail='';show(scScreen());scPillUpdate()}}
