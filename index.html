@@ -8213,7 +8213,7 @@ function scOcrParse(pages){
   };
   const confOf=c=>c>=88?'high':c>=70?'medium':'low';
   /* ok:true = the value has the exact shape of a real spec (a real drive size, a real RAM size, a real screen size...), so a so-so reading is trusted as "double-check" instead of being thrown away */
-  const add=(key,val,ev,pg,extra)=>{val=scTxt(val).replace(/[\s:;,|]+$/,'');if(!val)return;if(key==='cpu')val=val.replace(/(\bi[3579]-\d{4,5})([a-z]{1,2}\d?)\b/,(m,a,b)=>a+b.toUpperCase());
+  const add=(key,val,ev,pg,extra)=>{val=scTxt(val).replace(/[\s:;,|]+$/,'');if(!val)return;if(key==='model'||key==='model2')val=val.replace(/\b([A-Z0-9]{4,})_\1\b/g,'$1');if(key==='cpu')val=val.replace(/(\bi[3579]-\d{4,5})([a-z]{1,2}\d?)\b/,(m,a,b)=>a+b.toUpperCase());
     let c=lineConf(pg,ev);if(extra&&extra.ok&&c>=50)c=Math.max(c,70);
     const x=Object.assign({v:val,ev:scTxt(ev).slice(0,80),img:pg.n||1,conf:confOf(c)},extra||{});delete x.ok;(C[key]=C[key]||[]).push(x)};
   const note=(kind,text,pg)=>{text=scTxt(text);if(text&&!notes.some(n=>n.text===text))notes.push({kind,text,image:pg.n||1})};
@@ -8247,7 +8247,7 @@ function scOcrParse(pages){
       else if((m=l.match(/\bmodel\s*(?:number|no\.?)\s*[:;]?\s+([A-Z0-9][A-Z0-9\-/]{3,19})\b/i)))note('other','Model number: '+m[1].toUpperCase(),pg);
       if((m=l.match(SC_BRAND)))add('model2',m[1].replace(/\s{2,}/g,' '),l,pg,{conf:'medium'});
       /* CPU / chip: labelled, or recognised by its name alone (Task Manager, sticker, "Chip Apple M1") */
-      const cl=(m=l.match(/\b(?:chip|processor|cpu)\s*[:;]?\s+(?!serial)(\S.{3,70})$/i))?m[1].replace(/\((?:R|TM)\)/gi,'').replace(/\s+(?:CPU\s*)?@\s*\d.*$/i,'').replace(/\s*\(\s*\d(?:\.\d+)?\s*GHz\s*\)\s*$/i,'').replace(/\s+(?:CPU\s*)?\d(?:\.\d+)?\s*GHz.*$/i,'').replace(/\s{2,}/g,' ').trim():'';
+      const cl=(m=l.match(/\b(?:chip|processor|cpu)\s*[:;]?\s+(?!serial)(\S.{3,70})$/i))?m[1].replace(/\((?:R|TM)\)/gi,'').replace(/\s+(?:CPU\s*)?@\s*\d.*$/i,'').replace(/\s*\(\s*\d(?:\.\d+)?\s*GHz\s*\)\s*$/i,'').replace(/\s+(?:CPU\s*)?\d(?:\.\d+)?\s*GHz.*$/i,'').replace(/\s+with\s+(?:AMD\s+)?Radeon.*$/i,'').replace(/\s{2,}/g,' ').trim():'';
       if(m&&SC_CPU_OK.test(cl)&&!/^@/.test(cl))add('cpu',cl,l,pg);
       else if((m=l.match(SC_CPU)))add('cpu',m[1].replace(/\((?:R|TM)\)/gi,'').replace(/\s{2,}/g,' ').trim(),l,pg,{ok:true});
       /* RAM */
@@ -8272,7 +8272,9 @@ function scOcrParse(pages){
       if((m=l.match(/\b(\d{2}(?:[.,]\d)?)\s?-?\s?(?:inch(?:es)?|″|")/i))){const n=parseFloat(m[1].replace(',','.'));const hz=(l.match(/\b(\d{2,3})\s*Hz\b/i)||[])[1];add('screen',n+'-inch'+(hz?', '+hz+'Hz':''),l,pg,{ok:n>=10&&n<=34})}
       if((m=l.match(/\brefresh\s*rate\s*[:;]?\s*(\d{2,3})(?:\.\d+)?\s*Hz\b/i)))add('hz',m[1],l,pg);
       /* graphics */
-      if((m=l.match(SC_GPU)))add('gpu',m[1].replace(/^(?:NVIDIA\s+)?GeForce/i,'NVIDIA GeForce').replace(/\b(?:RIX|R1X)\b/i,'RTX').replace(/\b(?:GIX|G1X)\b/i,'GTX').replace(/\((?:R|TM)\)/gi,'').replace(/\s{2,}/g,' ').trim(),l,pg);
+      /* a camera photo turns "Radeon" into "Racieon"/"Radieon"; a Radeon name that does not look like a real card ("Radeon Fixs30", "Radeon Hava") is dropped, never filled in */
+      const lg=l.replace(/\b(AMD\s+)R[a-z]{3,5}on\b/i,'$1Radeon');
+      if((m=lg.match(SC_GPU))&&!(/^AMD\s+Radeon\s/i.test(m[1])&&!/^AMD\s+Radeon\s+(?:RX\s*\d|Pro\b|Vega|R[579]\b|HD\b|Graphics|\d{3,4}M?\b|VII|W\d)/i.test(m[1])))add('gpu',m[1].replace(/^(?:NVIDIA\s+)?GeForce/i,'NVIDIA GeForce').replace(/\b(?:RIX|R1X)\b/i,'RTX').replace(/\b(?:GIX|G1X)\b/i,'GTX').replace(/\((?:R|TM)\)/gi,'').replace(/\s{2,}/g,' ').trim(),l,pg);
       /* battery */
       if((m=l.match(/\b(?:maximum\s*capacity|battery\s*health)\s*[:;]?\s*(\d{2,3})\s*%/i)))note('battery','Maximum Capacity '+m[1]+'%',pg);
       if((m=l.match(/\bcycle\s*count\s*[:;]?\s*(\d{1,4})\b/i)))note('battery','Cycle count '+m[1],pg);
@@ -8303,6 +8305,9 @@ function scOcrParse(pages){
      if(dc>0&&fc>0&&fc/dc>0.3&&fc/dc<=1.05){note('battery','Battery health '+Math.round(fc/dc*100)+'% (full charge '+com(fc)+' mWh of '+com(dc)+' mWh design)',pg);
        const cc=J.match(/mWh\s+(\d{1,4})(?![\d,])/);if(cc)note('battery','Cycle count '+cc[1],pg)}}
     if(/NVIDIA\s+GeForce\s+(?:GTX|RTX)(?!\s*\d{3,4}\b)/i.test(J)&&!/(?:GTX|RTX)\s*\d{3,4}/i.test(J))note('other','Graphics: an NVIDIA GeForce RTX card is installed (the model number was not readable)',pg);
+    /* a photo can cut the end of the model ("GU603Z"): the BIOS line ("GU603ZM.311 ...") starts with the whole code, so the model is completed from it, never invented */
+    {const bm=J.match(/\bBIOS\s+([A-Z]{1,4}\d{2,4}[A-Z]{0,3})\.\d/);
+     if(bm)['model','model2'].forEach(k=>(C[k]||[]).forEach(c=>{if(c.img!==(pg.n||1))return;const t=String(c.v).match(/([A-Za-z0-9]{4,})$/);if(t&&bm[1].toUpperCase().startsWith(t[1].toUpperCase())&&bm[1].length-t[1].length>=1&&bm[1].length-t[1].length<=2)c.v=c.v.slice(0,c.v.length-t[1].length)+bm[1]}))}
     /* display line: "1920 x 1080, 165 Hz" -> a note, and the refresh rate for the screen field when the inch size is known */
     {const m=J.match(/(\d{3,4})\s*[x×]\s*(\d{3,4})\s*,?\s*(\d{2,3})\s*Hz/i);if(m){note('display','Resolution '+m[1]+' × '+m[2]+', '+m[3]+' Hz',pg);add('hz',m[3],m[0],pg)}}
   });
@@ -8410,6 +8415,32 @@ function scMerge(ai,ocr){
   const okT=t=>t==='phone'||t==='pc'||t==='accessory';
   return {deviceType:okT(ai&&ai.deviceType)?ai.deviceType:(ocr&&ocr.deviceType)||'unknown',accessoryType:(ai&&ai.accessoryType)||null,fields,notes:outN.slice(0,30),conflicts:conflicts.slice(0,8)};
 }
+
+/* Finds the lit screen inside a photo of a monitor or laptop, so the reader looks at the screen and not at the keyboard, wall or desk around it. Pure: takes a small grayscale picture (about 200 px) and returns the screen as fractions of the photo, or null when there is nothing worth cropping (a screenshot that already fills the frame, a dark room, no clear bright block). */
+function scBoxFromGray(g,sw,sh){
+  if(!g||!(sw>=8)||!(sh>=8)||g.length<sw*sh)return null;
+  const n=sw*sh,b=new Uint8Array(n),R=2;
+  for(let y=0;y<sh;y++)for(let x=0;x<sw;x++){let t=0,c=0;for(let dy=-R;dy<=R;dy++){const yy=Math.min(sh-1,Math.max(0,y+dy));for(let dx=-R;dx<=R;dx++){const xx=Math.min(sw-1,Math.max(0,x+dx));t+=g[yy*sw+xx];c++}}b[y*sw+x]=t/c|0}
+  const hist=new Float64Array(256);for(let i=0;i<n;i++)hist[b[i]]++;
+  let sumAll=0;for(let t=0;t<256;t++)sumAll+=t*hist[t];
+  let wB=0,sB=0,best=-1,th=127;
+  for(let t=0;t<256;t++){wB+=hist[t];if(!wB)continue;const wF=n-wB;if(!wF)break;sB+=t*hist[t];const mB=sB/wB,mF=(sumAll-sB)/wF,v=wB*wF*(mB-mF)*(mB-mF);if(v>best){best=v;th=t}}
+  let bw=new Uint8Array(n);for(let i=0;i<n;i++)bw[i]=b[i]>th?1:0;
+  /* close small gaps (text on the screen is dark): grow by 2 pixels, then shrink by 2 */
+  const grow=(src,want)=>{const o=new Uint8Array(n);for(let y=0;y<sh;y++)for(let x=0;x<sw;x++){let hit=want?0:1;for(let dy=-R;dy<=R&&(want?!hit:hit);dy++){const yy=y+dy;for(let dx=-R;dx<=R;dx++){const xx=x+dx;if(yy<0||yy>=sh||xx<0||xx>=sw){if(want)continue;else continue}const v=src[yy*sw+xx];if(want&&v){hit=1;break}if(!want&&!v){hit=0;break}}}o[y*sw+x]=hit}return o};
+  bw=grow(grow(bw,1),0);
+  /* the biggest connected bright block */
+  const seen=new Uint8Array(n),q=new Int32Array(n);let bestN=0,bb=null;
+  for(let s0=0;s0<n;s0++){if(!bw[s0]||seen[s0])continue;let h=0,t=0;q[t++]=s0;seen[s0]=1;let mnx=sw,mxx=0,mny=sh,mxy=0,cnt=0;
+    while(h<t){const i=q[h++],x=i%sw,y=(i/sw)|0;cnt++;if(x<mnx)mnx=x;if(x>mxx)mxx=x;if(y<mny)mny=y;if(y>mxy)mxy=y;
+      if(x>0&&bw[i-1]&&!seen[i-1]){seen[i-1]=1;q[t++]=i-1}if(x<sw-1&&bw[i+1]&&!seen[i+1]){seen[i+1]=1;q[t++]=i+1}if(y>0&&bw[i-sw]&&!seen[i-sw]){seen[i-sw]=1;q[t++]=i-sw}if(y<sh-1&&bw[i+sw]&&!seen[i+sw]){seen[i+sw]=1;q[t++]=i+sw}}
+    if(cnt>bestN){bestN=cnt;bb=[mnx,mny,mxx,mxy]}}
+  if(!bb)return null;
+  const ratio=((bb[2]-bb[0]+1)*(bb[3]-bb[1]+1))/n;
+  if(bestN/n<0.10||ratio>0.9||ratio<0.12)return null;
+  const P=0.02,c=v=>Math.min(1,Math.max(0,v));
+  return {x0:c(bb[0]/sw-P),y0:c(bb[1]/sh-P),x1:c((bb[2]+1)/sw+P),y1:c((bb[3]+1)/sh+P)};
+}
 /*OCR-PARSE-END*/
 
 let _scEng=null;
@@ -8421,11 +8452,11 @@ function scLoadOcr(){
   return _scEng;
 }
 /* Local contrast boost, done by hand (iOS Safari has no canvas filters): every pixel is pushed away from the average of its neighbourhood, which keeps small text readable through glare, shadows and photos of monitors. The text colour is kept (the reader finds light-on-dark text itself). Small pictures (thumbnails) are enlarged first. */
-async function scPrep(img){
+async function scPrep(img,box){
   const el=await new Promise((ok,no)=>{const im=new Image();im.onload=()=>ok(im);im.onerror=()=>no(new Error('decode'));im.src=img.url});
-  const w0=el.naturalWidth,h0=el.naturalHeight,lg=Math.max(w0,h0),s=lg<1200?Math.min(4,1200/lg):1;
+  const NW=el.naturalWidth,NH=el.naturalHeight,sx=box?Math.round(box.x0*NW):0,sy=box?Math.round(box.y0*NH):0,w0=box?Math.max(8,Math.round((box.x1-box.x0)*NW)):NW,h0=box?Math.max(8,Math.round((box.y1-box.y0)*NH)):NH,lg=Math.max(w0,h0),s=box?(lg<1800?Math.min(2,1800/lg):1):(lg<1200?Math.min(4,1200/lg):1);   /* a cropped screen is enlarged to about 1800 px so small text stays readable */
   const w=Math.round(w0*s),h=Math.round(h0*s),c=document.createElement('canvas');c.width=w;c.height=h;
-  const x=c.getContext('2d',{willReadFrequently:true});x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.drawImage(el,0,0,w,h);
+  const x=c.getContext('2d',{willReadFrequently:true});x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.drawImage(el,sx,sy,w0,h0,0,0,w,h);
   const d=x.getImageData(0,0,w,h),p=d.data,n=w*h,g=new Uint8Array(n);
   for(let i=0,j=0;i<n;i++,j+=4)g[i]=(p[j]*299+p[j+1]*587+p[j+2]*114)/1000|0;
   const W=w+1,ii=new Uint32Array(W*(h+1));   /* integral image: any neighbourhood average in four lookups */
@@ -8436,6 +8467,14 @@ async function scPrep(img){
       const m=(ii[y1*W+x1]-ii[y0*W+x1]-ii[y1*W+x0]+ii[y0*W+x0])/((y1-y0)*(x1-x0));
       let v=m+(g[y*w+xx]-m)*2.5;v=v<0?0:v>255?255:v;const j=(y*w+xx)*4;p[j]=p[j+1]=p[j+2]=v}}
   x.putImageData(d,0,0);return c;
+}
+/* the lit screen of a photo, or null (never throws): a tiny copy of the photo is made and handed to scBoxFromGray */
+async function scScreenBox(img){
+  try{const el=await new Promise((ok,no)=>{const im=new Image();im.onload=()=>ok(im);im.onerror=()=>no(new Error('decode'));im.src=img.url});
+    const k=200/Math.max(el.naturalWidth,el.naturalHeight),sw=Math.max(8,Math.round(el.naturalWidth*k)),sh=Math.max(8,Math.round(el.naturalHeight*k)),c=document.createElement('canvas');c.width=sw;c.height=sh;
+    const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(el,0,0,sw,sh);const p=x.getImageData(0,0,sw,sh).data,g=new Uint8Array(sw*sh);
+    for(let i=0,j=0;i<g.length;i++,j+=4)g[i]=(p[j]*299+p[j+1]*587+p[j+2]*114)/1000|0;
+    return scBoxFromGray(g,sw,sh)}catch(e){return null}
 }
 function scRotate(cv,deg){const q=deg===90||deg===270,r=document.createElement('canvas');r.width=q?cv.height:cv.width;r.height=q?cv.width:cv.height;const x=r.getContext('2d');x.translate(r.width/2,r.height/2);x.rotate(deg*Math.PI/180);x.drawImage(cv,-cv.width/2,-cv.height/2);return r}
 function scSmall(cv,edge){const s=Math.min(1,edge/Math.max(cv.width,cv.height));if(s>=1)return cv;const c=document.createElement('canvas');c.width=Math.round(cv.width*s);c.height=Math.round(cv.height*s);c.getContext('2d').drawImage(cv,0,0,c.width,c.height);return c}
@@ -8464,12 +8503,12 @@ async function scOcrCompute(){
     for(let i=0;i<SC.imgs.length;i++){
       cur=i+1;st('Reading photo '+cur+' of '+SC.imgs.length+'…');
       let cv=await scPrep(SC.imgs[i]);
-      let r=await w.recognize(cv),d=(r&&r.data)||{};
+      let r=await w.recognize(cv),d=(r&&r.data)||{},turned=false;
       /* a photo taken sideways reads as almost nothing: try both quarter turns on a small copy and keep the best one */
       if(scGoodWords(d)<10){
         const sm=scSmall(cv,1100);let best={deg:0,n:scGoodWords(d)};
         for(const deg of [90,270]){try{const rr=await w.recognize(scRotate(sm,deg)),n=scGoodWords((rr&&rr.data)||{});if(n>=10&&n>best.n*2)best={deg,n}}catch(e){}}
-        if(best.deg){cv=scRotate(cv,best.deg);r=await w.recognize(cv);d=(r&&r.data)||{}}
+        if(best.deg){cv=scRotate(cv,best.deg);r=await w.recognize(cv);d=(r&&r.data)||{};turned=true}
       }
       const pg={n:i+1,text:d.text||'',conf:d.confidence,words:(d.words||[]).map(x=>({t:x.text,c:x.confidence,b:x.bbox})),cv};
       /* a settings screenshot with sparse labels often reads badly in "auto" mode: if little was found, read it again as sparse text and keep both */
@@ -8479,6 +8518,12 @@ async function scOcrCompute(){
           pg.text+='\n'+(d2.text||'');pg.words=pg.words.concat((d2.words||[]).map(x=>({t:x.text,c:x.confidence,b:x.bbox})));pg.conf=Math.max(Number(pg.conf)||0,Number(d2.confidence)||0);
           await w.setParameters({tessedit_pageseg_mode:T.PSM.AUTO})}catch(e){}
       }
+      /* a photo of a screen taken at an angle, with a keyboard or desk around it, reads far better when the reader looks at just the lit screen. The cropped reading is added to the full-frame one (never replaces it), so nothing the full photo read is lost. Skipped for a photo that was turned sideways, and for a screenshot that already fills the frame. */
+      if(!turned){try{
+        const box=await scScreenBox(SC.imgs[i]);
+        if(box){const cc=await scPrep(SC.imgs[i],box),rc=await w.recognize(cc),dc=(rc&&rc.data)||{};
+          if(scGoodWords(dc)>=10){pg.text=(dc.text||'')+'\n'+pg.text;pg.conf=Math.max(Number(pg.conf)||0,Number(dc.confidence)||0)}}
+      }catch(e){}}
       pages.push(pg);
     }
     const res=scOcrParse(pages);scOcrCrops(res,pages);
