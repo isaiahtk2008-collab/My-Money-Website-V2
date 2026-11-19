@@ -257,6 +257,20 @@ html.mm-guest .rail { top: calc(34px + env(safe-area-inset-top, 0px)); height: c
 .sc-th{display:flex;gap:6px;margin-top:8px;overflow-x:auto}
 .sc-th img{width:56px;height:56px;object-fit:cover;border-radius:8px;display:block}
 .lg-f.sc-ai .lg-in,.lg-f.sc-ai .chip-b[aria-pressed="true"]{outline:2px dashed var(--accent);outline-offset:1px}
+/* "Use similar entry": values copied from an earlier logged device get a dotted warm outline and a "from history" tag (OCR fields use the dashed accent outline) */
+.lg-f.sc-hx .lg-in{outline:2px dotted var(--warn);outline-offset:1px}
+.hx-tag{display:inline-block;margin-left:8px;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0;text-transform:none;line-height:1.5;vertical-align:middle;background:var(--warn-soft);color:var(--warn)}
+.hx-pick{margin:0 0 14px;padding:12px;border:var(--ap3-w,1px) solid var(--ap3-lc,var(--line));border-radius:12px;background:var(--surface)}
+.hx-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.hx-q{display:block;width:100%;box-sizing:border-box;height:40px;padding:0 12px;border-radius:10px;border:var(--ap3-w,1px) solid var(--line);background:var(--bg);color:var(--ink);font:inherit}
+.hx-n{margin:6px 0;color:var(--muted);font-size:12px}
+.hx-l{display:flex;flex-direction:column;gap:6px;max-height:min(46vh,340px);overflow-y:auto;overscroll-behavior:contain}
+.hx-r{display:block;width:100%;min-height:44px;box-sizing:border-box;text-align:left;padding:8px 11px;border-radius:10px;border:var(--ap3-w,1px) solid var(--line);background:transparent;color:var(--ink);font:inherit;cursor:pointer}
+.hx-r:hover,.hx-r:focus-visible{border-color:var(--accent)}
+.hx-r b{display:block;font-weight:700;overflow-wrap:anywhere}
+.hx-r span,.hx-r small{display:block;color:var(--muted);font-size:12.5px;overflow-wrap:anywhere}
+.hx-none{margin:6px 0;color:var(--muted);font-size:13px}
+.chip-b[aria-disabled="true"]{opacity:.6}
 .lg-foot{position:sticky;bottom:0;margin:8px -20px 0;padding:12px 20px calc(14px + env(safe-area-inset-bottom,0px));background:var(--surface);border-top:var(--ap3-w,1px) solid var(--ap3-lc,var(--line));display:flex;gap:12px;align-items:center}
 .lg-foot .btn{flex:1;height:44px;font-size:15px}
 .lg-foot .btn[disabled]{opacity:.6;cursor:progress}
@@ -7372,7 +7386,8 @@ function formScreen(f,draftTs){
   const sugs=[...new Set(f.f.map(x=>x.sug).filter(Boolean))];
   return `<div class="lg-top"><div style="display:flex;gap:10px;align-items:center"><button class="ibtn" data-lg="menu" aria-label="Back to all forms">${ICO.back}</button><div><h2>${E(f.t)}</h2><p>${E(f.s)}</p></div></div><div class="lg-r">${xbtn()}</div></div>
   ${draftTs?`<div class="lg-note"><span>Draft restored (${agoTxt(draftTs)})</span><button data-lg="discard">Discard</button></div>`:''}
-  ${last&&!draftTs?`<div style="margin-bottom:14px"><button class="chip-b" data-lg="repeat">Repeat last entry's details</button></div>`:''}
+  ${(()=>{const rep=last&&!draftTs?`<button class="chip-b" data-lg="repeat">Repeat last entry's details</button>`:'',hx=typeof hxBtn==='function'?hxBtn(f):'';
+    return hx?`<div style="margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap">${rep}${hx}</div>`:rep?`<div style="margin-bottom:14px">${rep}</div>`:''})()}
   ${f.sw?swHtml(f):''}
   ${f.f.map((x,i)=>fieldHtml(x,i)+(f.pay&&x.k==='Sale Price'?payHtml():'')).join('')}
   ${sugs.map(s=>`<datalist id="lg-dl-${s}">${sugList(s).map(x=>`<option value="${E(x)}">`).join('')}</datalist>`).join('')}
@@ -7769,6 +7784,95 @@ function scBuild(formId,res,rawIn){
 }
 
 function scHas(v){return Array.isArray(v)?v.length>0:String(v==null?'':v).trim()!==''}
+/*SIMILAR-START*/
+/* ----- "Use similar entry" (Bought PC form only). READ-ONLY: it reads the bought-PC rows the page already loaded; it sends nothing, writes no cell and adds no column.
+   Only SPEC fields are ever copied (HX_FIELDS below is the whole list; serial, colour, condition, charger, date, price, seller, contact, meetup and notes are unit-specific and never copied).
+   A copied field is only filled when empty; one that already holds a different value is only replaced after a confirm. Copied fields get a "from history" tag.
+   HX_SIMILAR_ON=false removes the button, the /similar command and the scan offer, and everything behaves as it did before. ----- */
+const HX_SIMILAR_ON=true;
+const HX_FIELDS={model:'PC model',cpu:'CPU (and specs)',gpu1:'GPU 1 (and specs)',gpu2:'GPU 2 (and specs)',ram:'RAM',storage:'Storage (SSD, HDD or NVME)',screen:'Screen Size, Hertz'};
+const HX_KEYS=Object.keys(HX_FIELDS).map(k=>HX_FIELDS[k]);
+function hxNrm(s){return String(s==null?'':s).toUpperCase().replace(/[^A-Z0-9]/g,'')}
+function hxRaw(){try{return (typeof store!=='undefined'&&store)?(store.base||store.raw):null}catch(e){return null}}
+/* Logged devices, newest first (the sheet appends at the bottom). Identical spec sets are merged into one row with a count. Any problem gives an empty list. */
+function hxRows(raw){
+  const out=[];
+  try{
+    const tab=raw&&raw.BoughtPCs;if(!tab||!Array.isArray(tab.rows))return out;
+    const cell=(r,h)=>{const t=hxNrm(h);for(const k of Object.keys(r))if(hxNrm(k)===t){const v=r[k];return v==null?'':String(v).replace(/\s+/g,' ').trim().slice(0,160)}return ''};
+    const seen=new Map();
+    for(let i=tab.rows.length-1;i>=0;i--){
+      const r=tab.rows[i];if(!r||typeof r!=='object')continue;
+      const e={idx:i};Object.keys(HX_FIELDS).forEach(k=>{e[k]=cell(r,HX_FIELDS[k])});
+      if(!e.model)continue;
+      const key=Object.keys(HX_FIELDS).map(k=>hxNrm(e[k])).join('|'),hit=seen.get(key);
+      if(hit){hit.n++;continue}
+      e.n=1;seen.set(key,e);out.push(e);
+    }
+  }catch(err){return []}
+  return out;
+}
+/* Search by model, CPU or GPU text (every word must appear, punctuation and spacing ignored). The list is newest first, so the first 50 hits are the 50 most recent. */
+function hxSearch(list,q,max){
+  const n=max||50,toks=String(q==null?'':q).toLowerCase().split(/\s+/).filter(Boolean).map(t=>({a:t,b:t.replace(/[^a-z0-9]/g,'')}));
+  const res=[];
+  for(const e of Array.isArray(list)?list:[]){
+    if(toks.length){const hay=[e.model,e.cpu,e.gpu1,e.gpu2].join(' ').toLowerCase(),cmp=hay.replace(/[^a-z0-9]/g,'');
+      if(!toks.every(t=>hay.includes(t.a)||(t.b&&cmp.includes(t.b))))continue}
+    res.push(e);if(res.length>=n)break;
+  }
+  return res;
+}
+/* a logged device -> {form field name: value}, spec fields only */
+function hxVals(e){const o={};Object.keys(HX_FIELDS).forEach(k=>{if(e&&e[k])o[HX_FIELDS[k]]=String(e[k])});return o}
+/* What would happen: fill = empty fields that get the value; ask = fields that already hold a different value (only replaced after a confirm). Keys outside HX_KEYS are ignored. */
+function hxPlan(vals,get){
+  const fill=[],ask=[];
+  Object.keys(vals||{}).forEach(k=>{
+    if(!HX_KEYS.includes(k))return;const v=String(vals[k]==null?'':vals[k]).trim();if(!v)return;
+    const c=String(get(k)==null?'':get(k)).trim();
+    if(!c)fill.push({k,v});else if(hxNrm(c)!==hxNrm(v))ask.push({k,from:c,to:v});
+  });
+  return {fill,ask};
+}
+/* Part 2 hook: the scan found a model that is already logged. Only ever sets o.hx (an offer) and tap chips; nothing is applied. The logged device's screen size / Hz and GPU layout
+   are the reference for an unknown screen size and for GPU 1. */
+function hxOffer(o,rawIn,K,gp){
+  const e=hxRows(rawIn===undefined?hxRaw():rawIn).find(r=>hxNrm(r.model)===hxNrm(o.V[K.md]));if(!e)return;
+  const mdl=e.model,vals=hxVals(e);
+  delete vals[K.md];Object.keys(vals).forEach(k=>{if(scHas(o.V[k]))delete vals[k]});   /* only what the scan left empty */
+  const sizeOf=s=>{const x=(String(s).match(/(\d{2}(?:[.,]\d)?)\s*-?\s*(?:inch(?:es)?|in\b|")/i)||[])[1],n=x?parseFloat(x.replace(',','.')):0;return n>=10&&n<=34?String(n):''};
+  const hzOf=s=>{const x=(String(s).match(/(\d{2,3})\s*Hz/i)||[])[1];return x&&+x>=24&&+x<=540?String(+x):''};
+  const hs=sizeOf(e.screen),hh=hzOf(e.screen),cs=String(o.V[K.sc]||''),ss=sizeOf(cs),sh=hzOf(cs),fx=o.fix&&o.fix[K.sc];
+  const rate=sh||(fx&&Array.isArray(fx.vals)&&fx.vals[0]?hzOf(fx.vals[0]):'');
+  if(scHas(cs)||fx){
+    delete vals[K.sc];   /* the scan already read something for the screen: it is never replaced, only compared */
+    if(ss&&hs&&hs!==ss)o.checks.push('Your earlier '+mdl+' is logged with a '+hs+'-inch screen, but the photos say '+ss+'. The photo value was kept. Check it.');
+    else if(ss&&sh&&hh&&hh!==sh)o.checks.push('Your earlier '+mdl+' is logged at '+hh+'Hz, but the photos say '+sh+'Hz. The photo value was kept. Check it.');
+    else if(ss&&!sh&&hh)o.fix[K.sc]={why:'Your earlier '+mdl+' runs at '+hh+'Hz. Tap to use it:',vals:[ss+'in, '+hh+'Hz'],ow:true};
+    else if(!ss&&rate&&hs&&fx&&Array.isArray(fx.vals)){
+      const v=hs+'in, '+rate+'Hz';if(!fx.vals.includes(v))fx.vals.push(v);
+      o.checks.push('The screen size ('+hs+' inch) is only known from your earlier '+mdl+'. It is offered as a tap choice, so check it on this unit.');
+      if(hh&&hh!==rate)o.checks.push('Your earlier '+mdl+' is logged at '+hh+'Hz, but the photos say '+rate+'Hz.');
+    }
+  }
+  /* graphics: the logged device's layout only fills a slot when it agrees with the dedicated GPU the scan saw */
+  const a=hxNrm(o.V[K.g2]),b=hxNrm(e.gpu2),agree=!!(a&&b&&(a.includes(b)||b.includes(a)));
+  if(scHas(o.V[K.g2])&&!agree)delete vals[K.g1];
+  const fg=o.fix&&o.fix[K.g1];
+  if(fg&&Array.isArray(fg.vals)&&agree&&e.gpu1&&gp&&gp.isInt(e.gpu1)&&!fg.vals.includes(e.gpu1))fg.vals.push(e.gpu1.slice(0,120));
+  if(Object.keys(vals).length)o.hx={model:mdl.slice(0,120),vals,n:e.n};
+}
+function hxOfferHtml(b){
+  try{
+    if(!HX_SIMILAR_ON||!b||!b.hx||!b.hx.vals||typeof V==='undefined')return '';
+    const vals={};Object.keys(b.hx.vals).forEach(k=>{if(HX_KEYS.includes(k)&&!scHas(V[k]))vals[k]=b.hx.vals[k]});
+    const ks=Object.keys(vals);if(!ks.length)return '';
+    const lab=k=>((BY.bpc&&BY.bpc.f.find(x=>x.k===k))||{}).l||k,cut=s=>String(s).length>40?String(s).slice(0,40)+'…':String(s);
+    return `<div class="sc-sg hx-offer"><span>Fill specs from your earlier ${E(b.hx.model)}? It had ${ks.map(k=>E(lab(k))+': '+E(cut(vals[k]))).join(' · ')}. RAM and storage can differ between units, so double-check them.</span> <button type="button" class="chip-b" data-hx="offer" data-v="${E(JSON.stringify(vals))}">Fill ${ks.length} empty field${ks.length===1?'':'s'}</button></div>`;
+  }catch(e){return ''}
+}
+/*SIMILAR-END*/
 /* ----- Post-scan tidy-up, Bought PC form only. Additive: one line turns it off, and any problem means the untouched scan result is used.
    GPU 1 = integrated, GPU 2 = dedicated; storage without "(shows N GB)"; screen as "15.6in, 144Hz"; Notes keep battery lines only (display, software, storage,
    cosmetic, included and other spec lines are dropped); a close model in your sheet and a missing integrated GPU / screen size are offered as tap chips (b.fix).
@@ -7831,6 +7935,8 @@ function scNormalizeBuild(b,formId,res,rawIn){
       }
     }
   }catch(e){}
+  /* 6. (Use similar entry) an earlier logged device with this exact model: only OFFERED (o.hx, plus tap chips), never applied. Skipped when HX_SIMILAR_ON is false. */
+  try{if(HX_SIMILAR_ON&&typeof hxOffer==='function'){const c=JSON.parse(JSON.stringify(o));hxOffer(c,rawIn,K,{isInt});Object.assign(o,c)}}catch(e){}
   return o;
 }
 function scApply(formId,res){
@@ -7892,7 +7998,7 @@ function scBanner(b,formId){
     ${SC.why?`<p>${E(SC.why)}</p>`:''}
     ${crops}
     ${sug}
-    ${fixs}
+    ${fixs}${typeof hxOfferHtml==='function'?hxOfferHtml(b):''}
     ${b.checks.length?`<ul class="sc-chk">${b.checks.map(c=>`<li>${E(c)}</li>`).join('')}</ul>`:''}
     ${rows?`<details><summary>${b.filled.length} field${b.filled.length===1?'':'s'} filled · what was seen</summary><ul>${rows}</ul></details>`:''}
     ${thumbs?`<div class="sc-th">${thumbs}</div>`:''}</div>`);
@@ -7900,6 +8006,86 @@ function scBanner(b,formId){
 }
 document.addEventListener('input',e=>{const g=e.target&&e.target.closest&&e.target.closest('.lg-f.sc-ai');if(g)g.classList.remove('sc-ai')});
 document.addEventListener('click',e=>{const g=e.target&&e.target.closest&&e.target.closest('.lg-f.sc-ai .chip-b');if(g)g.closest('.lg-f').classList.remove('sc-ai')});
+
+/*SIMILAR-UI-START*/
+/* "Use similar entry": button, searchable list, /similar command, and the "from history" tag. Uses only data-hx attributes, so no other handler is touched. */
+const HX={list:[],shown:[],t:0};
+function hxBtn(f){
+  if(!HX_SIMILAR_ON||!f||f.id!=='bpc')return '';
+  let n=0;try{n=hxRows(hxRaw()).length}catch(e){}
+  return `<button type="button" class="chip-b" data-hx="open"${n?'':' aria-disabled="true"'}>${n?'Use similar entry':'No similar entries yet'}</button>`;
+}
+function hxClose(){const p=document.getElementById('hx-pick');if(p)p.remove()}
+function hxList(q){
+  const l=document.getElementById('hx-l'),n=document.getElementById('hx-n');if(!l||!n)return;
+  q=String(q==null?'':q);HX.shown=hxSearch(HX.list,q,50);
+  l.innerHTML=HX.shown.length?HX.shown.map((x,i)=>`<button type="button" class="hx-r" data-hx="pick" data-i="${i}"><b>${E(x.model)}</b><span>${E([[x.ram,x.storage].filter(Boolean).join(' / ')||'RAM / storage not logged',x.screen].filter(Boolean).join(' · ')+(x.n>1?' · logged '+x.n+'×':''))}</span>${q.trim()&&(x.cpu||x.gpu1||x.gpu2)?`<small>${E([x.cpu,x.gpu1,x.gpu2].filter(Boolean).join(' · '))}</small>`:''}</button>`).join(''):'<p class="hx-none">No match. Try fewer words.</p>';
+  n.textContent=HX.shown.length?(HX.shown.length>=50?'Showing the 50 most recent matches':HX.shown.length+' match'+(HX.shown.length===1?'':'es')):'';
+}
+function hxOpen(){
+  if(!HX_SIMILAR_ON||!cur||cur.id!=='bpc')return;
+  const d=document.querySelector('#overlay .drawer.lg'),top=d&&d.querySelector('.lg-top');if(!top)return;
+  HX.list=hxRows(hxRaw());
+  if(!HX.list.length){toast('No similar entries yet');return}
+  hxClose();
+  top.insertAdjacentHTML('afterend',`<div class="hx-pick" id="hx-pick" role="region" aria-label="Use similar entry"><div class="hx-h"><b>Use similar entry</b><button type="button" class="ibtn" data-hx="close" aria-label="Close the list">${ICON.x}</button></div><input type="search" class="hx-q" id="hx-q" placeholder="Search model, CPU or GPU" autocomplete="off" aria-label="Search earlier entries"><p class="hx-n" id="hx-n" role="status"></p><div class="hx-l" id="hx-l"></div></div>`);
+  hxList('');
+  const q=document.getElementById('hx-q');if(q&&matchMedia('(pointer:fine)').matches)q.focus();
+}
+function hxTag(g,k){
+  g.classList.remove('sc-ai');g.classList.add('sc-hx');
+  if(g.querySelector('.hx-tag'))return;
+  const l=g.querySelector('.lg-l');if(!l)return;
+  const t=document.createElement('span');t.className='hx-tag';t.textContent=(k===HX_FIELDS.ram||k===HX_FIELDS.storage)?'from history · check':'from history';l.appendChild(t);
+}
+function hxUntag(g){g.classList.remove('sc-hx');const t=g.querySelector('.hx-tag');if(t)t.remove()}
+/* Fill empty fields from vals; fields that already hold a different value are only replaced after a confirm. Returns how many fields changed. */
+function hxApply(vals){
+  if(!cur||cur.id!=='bpc')return 0;
+  const p=hxPlan(vals,k=>V[k]),lab=k=>(cur.f.find(x=>x.k===k)||{}).l||k;
+  let over=[];
+  if(p.ask.length&&confirm('Some of these fields already have a value.\n\n'+p.ask.map(a=>lab(a.k)+': "'+a.from.slice(0,40)+'" → "'+a.to.slice(0,40)+'"').join('\n')+'\n\nOK = replace them with the earlier entry\'s values.\nCancel = keep what you have (empty fields are still filled).'))over=p.ask;
+  const todo=p.fill.concat(over.map(a=>({k:a.k,v:a.to}))).filter(t=>cur.f.some(x=>x.k===t.k));
+  const d=document.querySelector('#overlay .drawer.lg');
+  todo.forEach(t=>{
+    V[t.k]=t.v;
+    const el=[...document.querySelectorAll('input.lg-in')].find(i=>i.dataset.k===t.k);if(el)el.value=t.v;
+    const g=d&&[...d.querySelectorAll('.lg-f')].find(x=>x.dataset.f===t.k);if(g)hxTag(g,t.k);
+    try{setErr(t.k,'')}catch(e){}
+  });
+  if(todo.length)saveDraft();
+  return todo.length;
+}
+const hxDone=n=>toast('Filled '+n+' spec field'+(n===1?'':'s')+' from history. Double-check RAM and storage.');
+document.addEventListener('click',e=>{
+  const t=e.target.closest&&e.target.closest('[data-hx]');if(!t)return;const a=t.dataset.hx;
+  try{
+    if(a==='open')hxOpen();
+    else if(a==='close')hxClose();
+    else if(a==='pick'){const x=HX.shown[+t.dataset.i];if(!x)return;const n=hxApply(hxVals(x));if(n){hxClose();hxDone(n)}else toast('Nothing changed.')}
+    else if(a==='offer'){let v={};try{v=JSON.parse(t.dataset.v||'{}')}catch(_){}const n=hxApply(v);if(n){const g=t.closest('.sc-sg');if(g)g.remove();hxDone(n)}else toast('Nothing changed.')}
+  }catch(err){toast('Could not use that entry. Your sheet was not touched.')}
+});
+document.addEventListener('input',e=>{
+  const t=e.target;if(!t)return;
+  if(t.id==='hx-q'){hxList(t.value);return}
+  const g=t.closest&&t.closest('.lg-f.sc-hx');if(g)hxUntag(g);
+});
+document.addEventListener('keydown',e=>{
+  const t=e.target;if(!t||t.id!=='hx-q')return;
+  if(e.key==='Escape')hxClose();
+  else if(e.key==='Enter'&&!e.ctrlKey&&!e.metaKey&&HX.shown[0]){e.preventDefault();try{const n=hxApply(hxVals(HX.shown[0]));if(n){hxClose();hxDone(n)}}catch(err){}}
+});
+/* /similar (or /s) typed in the PC model field opens the same list. It runs before the form's own input handler (capture phase), clears the command text, and never reaches the sheet.
+   "/similar" opens at once; "/s" opens after a short pause so it does not fire while "/similar" is still being typed. */
+document.addEventListener('input',e=>{
+  if(!HX_SIMILAR_ON)return;const t=e.target;clearTimeout(HX.t);
+  if(!cur||cur.id!=='bpc'||!t||!t.classList||!t.classList.contains('lg-in')||t.dataset.k!==HX_FIELDS.model)return;
+  const v=String(t.value).trim().toLowerCase();
+  const go=()=>{if(!t.isConnected||!cur||cur.id!=='bpc'||String(t.value).trim().toLowerCase()!==v)return;t.value='';V[HX_FIELDS.model]='';saveDraft();hxOpen()};
+  if(v==='/similar')go();else if(v==='/s')HX.t=setTimeout(go,450);
+},true);
+/*SIMILAR-UI-END*/
 
 /* ----- Read photos on this device, no AI: OCR text -> the same result shape the AI returns, so scBuild/scApply/scBanner are shared -----
    OCR (text recognition) only copies text that is on screen. It cannot judge colour or condition, so those stay yours to fill.
