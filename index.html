@@ -7612,7 +7612,7 @@ async function submit(){
   let st='queued',err='';
   if(LS.get('lgUrl')&&navigator.onLine!==false){try{const r=await send(item);st=r.unverified?'unsure':'sent'}catch(e){if(e&&e.fatal){err=e.message;item.err=err}}}
   if(st==='queued'){const q=J('lg.q',[]);q.push(item);W('lg.q',q)}
-  clearTimeout(saveT);remember(f);LS.set(dKey(f.id),'');scTrackDraft(f.id,false);busy=false;bumpChanges();badge();setTimeout(showBackupBanner,600);
+  clearTimeout(saveT);remember(f);scMemLearn(f);LS.set(dKey(f.id),'');scTrackDraft(f.id,false);busy=false;bumpChanges();badge();setTimeout(showBackupBanner,600);
   if(st!=='queued'){addOverlay(item);afterSend()}
   const sd=sellDep&&!trade&&sellDep.formId===f.id&&V[(f.f.find(x=>x.t==='item')||{}).k]===sellDep.label?sellDep:null;if(sd)sellDep=null;
   if(sd&&st!=='queued'&&typeof owedCloseDepositAfterSale==='function')owedCloseDepositAfterSale(sd.depId).then(r=>toast(r&&r.ok?'Deposit closed as Picked Up':'Sale logged. Close the deposit manually in Owed (Update, Picked Up).'));
@@ -7939,8 +7939,87 @@ function scNormalizeBuild(b,formId,res,rawIn){
   try{if(HX_SIMILAR_ON&&typeof hxOffer==='function'){const c=JSON.parse(JSON.stringify(o));hxOffer(c,rawIn,K,{isInt});Object.assign(o,c)}}catch(e){}
   return o;
 }
+/*OCR-MEM-START*/
+/* ----- Reader memory: the reader learns from what you fix -----
+   Every time you log an entry that a scan pre-filled, the reader compares what it filled with what you actually logged.
+   It remembers (1) the exact misreads you corrected, so the same misread is fixed for you next time, (2) the model / CPU / graphics names you confirmed, so a reading that is one letter off a name you have already logged snaps to it, and (3) which letters it confuses in serial numbers.
+   It lives only on this device (never sent to your sheet, never changes it), holds no serial numbers, and can be reset from the Scan photos screen. */
+const SC_MEM_NEW=()=>({v:1,fix:{},vocab:{},conf:{},n:0});
+const scMemN=s=>String(s==null?'':s).toUpperCase().replace(/[^A-Z0-9]/g,'');
+const scMemIsId=k=>/serial|imei/i.test(String(k));
+const scMemSnapKey=k=>/model|cpu|gpu/i.test(String(k))&&!scMemIsId(k);
+function scMemDist(a,b,cap){
+  if(Math.abs(a.length-b.length)>cap)return cap+1;
+  let prev=Array.from({length:b.length+1},(_,i)=>i);
+  for(let i=1;i<=a.length;i++){const cur=[i];let lo=i;
+    for(let j=1;j<=b.length;j++){const v=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));cur.push(v);if(v<lo)lo=v}
+    if(lo>cap)return cap+1;prev=cur}
+  return prev[b.length];
+}
+/* filled: [{k,val,raw?}] what the form was filled with; final: {k: value} what was logged. Returns the updated memory (a copy is not made). */
+function scMemRecord(m,filled,final){
+  m=m&&m.v===1?m:SC_MEM_NEW();let learnedAny=false;
+  (Array.isArray(filled)?filled:[]).forEach(x=>{
+    if(!x||x.k==null)return;
+    const fin=final?final[x.k]:null;if(fin==null)return;
+    const to=String(Array.isArray(fin)?fin.join(', '):fin).trim().slice(0,120),from=String(x.raw!=null?x.raw:x.val).trim().slice(0,120);
+    if(!to||!from)return;
+    /* only a correction of the SAME thing counts: a completely different value means it was another entry, not a fix of this reading */
+    {const a=scMemN(from),b=scMemN(to),cap=Math.max(2,Math.floor(Math.max(a.length,b.length)*0.3));if(a!==b&&scMemDist(a,b,cap)>cap)return}
+    if(scMemIsId(x.k)){
+      if(scMemN(to)!==scMemN(from)&&scMemN(to).length>=5){
+        m.fix[x.k+'|'+scMemN(from)]=to;learnedAny=true;
+        const a=scMemN(from),b=scMemN(to);
+        if(a.length===b.length)for(let i=0;i<a.length;i++)if(a[i]!==b[i]){const p=a[i]+'>'+b[i];m.conf[p]=(m.conf[p]||0)+1}
+      }
+      return;
+    }
+    if(scMemN(to)!==scMemN(from)){m.fix[x.k+'|'+scMemN(from)]=to;learnedAny=true}
+    if(scMemSnapKey(x.k)){const vk=m.vocab[x.k]=m.vocab[x.k]||{},n=scMemN(to);if(n.length>=4){const e=vk[n]||{v:to,n:0};e.n++;e.v=to;vk[n]=e}}
+  });
+  if(learnedAny)m.n=(m.n||0)+1;
+  const keys=Object.keys(m.fix);if(keys.length>300)keys.slice(0,keys.length-300).forEach(k=>delete m.fix[k]);
+  Object.keys(m.vocab).forEach(k=>{const e=Object.entries(m.vocab[k]);if(e.length>200){e.sort((a,b)=>b[1].n-a[1].n).slice(200).forEach(([n])=>delete m.vocab[k][n])}});
+  return m;
+}
+/* filled: [{k,val}] -> [{k,to,why}] only where the memory is sure: an exact misread you fixed before, or one letter away from a name you confirmed at least twice */
+function scMemSuggest(m,filled){
+  const out=[];if(!m||m.v!==1)return out;
+  (Array.isArray(filled)?filled:[]).forEach(x=>{
+    if(!x||x.k==null)return;const val=String(x.val).trim(),n=scMemN(val);if(!n)return;
+    const fx=m.fix[x.k+'|'+n];
+    if(fx&&scMemN(fx)!==n){out.push({k:x.k,to:fx,why:'fixed the same way last time'});return}
+    if(!scMemSnapKey(x.k)||n.length<6)return;
+    const vk=m.vocab[x.k]||{};if(vk[n])return;
+    const cap=n.length>=14?2:1;let best=null,tie=false;
+    Object.keys(vk).forEach(c=>{if(vk[c].n<2)return;const d=scMemDist(n,c,cap);if(d>cap)return;if(!best||d<best.d){best={d,c};tie=false}else if(d===best.d)tie=true});
+    if(best&&!tie)out.push({k:x.k,to:vk[best.c].v,why:'matches a name you logged before'});
+  });
+  return out;
+}
+/*OCR-MEM-END*/
+/* device-only storage for the reader memory; every call is wrapped so a storage problem can never affect a form */
+function scMemGet(){try{const m=JSON.parse(LS.get('lg.ocrmem')||'null');return m&&m.v===1&&m.fix&&m.vocab?m:SC_MEM_NEW()}catch(e){return SC_MEM_NEW()}}
+function scMemSave(m){try{LS.set('lg.ocrmem',JSON.stringify(m))}catch(e){}}
+function scMemReset(){try{LS.set('lg.ocrmem','')}catch(e){}}
+let SC_LAST=null;
+function scMemApplyBuild(b,formId){
+  const sg=scMemSuggest(scMemGet(),b.filled);
+  sg.forEach(s=>{const x=b.filled.find(y=>y.k===s.k);if(!x||Array.isArray(b.V[s.k]))return;
+    x.raw=x.val;x.val=s.to;b.V[s.k]=s.to;
+    b.checks.push('Changed "'+scTxt(x.raw).slice(0,50)+'" to "'+scTxt(s.to).slice(0,50)+'" ('+s.why+').')});
+  return b;
+}
+function scMemNoteFill(formId,b){try{SC_LAST={t:Date.now(),formId,filled:b.filled.map(x=>({k:x.k,val:String(x.val),raw:x.raw}))}}catch(e){SC_LAST=null}}
+function scMemLearn(f){
+  try{if(!SC_LAST||!f||SC_LAST.formId!==f.id||Date.now()-SC_LAST.t>72e5){SC_LAST=null;return}
+    const last=SC_LAST;SC_LAST=null;scMemSave(scMemRecord(scMemGet(),last.filled,V))}catch(e){}
+}
+
 function scApply(formId,res){
-  const f=BY[formId],b0=scBuild(formId,res);let b=b0;try{if(SC_NORMALIZE_ON)b=scNormalizeBuild(b0,formId,res)||b0}catch(e){b=b0}let merge=false;
+  const f=BY[formId],b0=scBuild(formId,res);let b=b0;try{if(SC_NORMALIZE_ON)b=scNormalizeBuild(b0,formId,res)||b0}catch(e){b=b0}
+  try{b=scMemApplyBuild(b,formId)||b}catch(e){}
+  let merge=false;
   const d=J(dKey(formId),null);
   if(d&&d.v&&Object.keys(d.v).some(k=>{const x=f.f.find(y=>y.k===k.replace(/#$/,''));return x&&x.t!=='date'&&scHas(d.v[k])})){
     merge=!confirm('You have an unfinished "'+f.t+'" entry saved.\n\nOK = replace it with what was read from the photos.\nCancel = keep it and fill only its empty fields.');
@@ -7955,7 +8034,7 @@ function scApply(formId,res){
   if(kept.length)b.checks.push('Left as you had them (already filled): '+kept.map(k=>(f.f.find(x=>x.k===k)||{}).l||k).join(', ')+'.');
   show(formScreen(cur,0));
   setTimeout(()=>{try{ctx();imeiWarn()}catch(e){}scBanner(b,formId)},0);
-  saveDraft();
+  saveDraft();scMemNoteFill(formId,b);
   /* remember which form drafts a scan pre-filled, so "Clear all scan results" can remove exactly those (a draft you kept and filled with your own entry is never listed) */
   if(merge)scTrackDraft(formId,false);else scTrackDraft(formId,true);
 }
@@ -8451,35 +8530,146 @@ function scLoadOcr(){
     s.onload=()=>window.Tesseract?ok(window.Tesseract):(_scEng=null,no(new Error('ocr')));s.onerror=()=>{_scEng=null;no(new Error('ocr'))};document.head.appendChild(s)});
   return _scEng;
 }
-/* Local contrast boost, done by hand (iOS Safari has no canvas filters): every pixel is pushed away from the average of its neighbourhood, which keeps small text readable through glare, shadows and photos of monitors. The text colour is kept (the reader finds light-on-dark text itself). Small pictures (thumbnails) are enlarged first. */
-async function scPrep(img,box){
-  const el=await new Promise((ok,no)=>{const im=new Image();im.onload=()=>ok(im);im.onerror=()=>no(new Error('decode'));im.src=img.url});
-  const NW=el.naturalWidth,NH=el.naturalHeight,sx=box?Math.round(box.x0*NW):0,sy=box?Math.round(box.y0*NH):0,w0=box?Math.max(8,Math.round((box.x1-box.x0)*NW)):NW,h0=box?Math.max(8,Math.round((box.y1-box.y0)*NH)):NH,lg=Math.max(w0,h0),s=box?(lg<1800?Math.min(2,1800/lg):1):(lg<1200?Math.min(4,1200/lg):1);   /* a cropped screen is enlarged to about 1800 px so small text stays readable */
+/*OCR-PREP-START*/
+/* ===== Photo reader, version 2 =====
+   Why it changed: no single picture clean-up works for every photo. Glare, shadows, dark mode, tilt and low light each need a different one.
+   So a clear photo is still read once (fast, same as before). A poor read is cleaned up in extra ways (background flattening, adaptive black and white, tilt correction)
+   and the readings are fused: a field is only taken from an extra reading when it adds something and creates no disagreement.
+   Serial numbers get their own pass: the line is cut out of the photo, enlarged, read several ways with only serial-type characters allowed, and the readings vote letter by letter. */
+const SC_WL='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/:.';
+/* how many words were read with real confidence: a sideways photo reads as almost none */
+const scGoodWords=d=>(Array.isArray(d&&d.words)?d.words:[]).filter(x=>x&&Number(x.confidence)>=60&&/^[A-Za-z0-9]{3,}$/.test(String(x.text||'').replace(/[^A-Za-z0-9]/g,'')||'')).length;
+function scRotate(cv,deg){const q=deg===90||deg===270,r=document.createElement('canvas');r.width=q?cv.height:cv.width;r.height=q?cv.width:cv.height;const x=r.getContext('2d');x.translate(r.width/2,r.height/2);x.rotate(deg*Math.PI/180);x.drawImage(cv,-cv.width/2,-cv.height/2);return r}
+function scSmall(cv,edge){const s=Math.min(1,edge/Math.max(cv.width,cv.height));if(s>=1)return cv;const c=document.createElement('canvas');c.width=Math.round(cv.width*s);c.height=Math.round(cv.height*s);c.getContext('2d').drawImage(cv,0,0,c.width,c.height);return c}
+
+/* ---- picture maths on plain arrays (no browser needed, so it can be tested) ---- */
+function scIntegral(g,w,h,sq){
+  const W=w+1,ii=sq?new Float64Array(W*(h+1)):new Uint32Array(W*(h+1));
+  for(let y=0;y<h;y++){let row=0;for(let x=0;x<w;x++){const v=g[y*w+x];row+=sq?v*v:v;ii[(y+1)*W+x+1]=ii[y*W+x+1]+row}}
+  return ii;
+}
+/* kind: 'local' = push every pixel away from its neighbourhood average (the original clean-up);
+         'flat'  = estimate the lighting with a big window and remove it (glare gradients, shadows, vignetting), keeping the text's light/dark;
+         'bin'   = adaptive black-and-white (Sauvola); dark-mode screens are flipped first so the result is always dark text on white. */
+function scVariantGray(g,w,h,kind){
+  const n=w*h,out=new Uint8Array(n),W=w+1,lg=Math.max(w,h);
+  let src=g;
+  if(kind==='bin'){let s=0;for(let i=0;i<n;i+=7)s+=g[i];if(s/Math.ceil(n/7)<110){src=new Uint8Array(n);for(let i=0;i<n;i++)src[i]=255-g[i]}}
+  const ii=scIntegral(src,w,h,false),ii2=kind==='bin'?scIntegral(src,w,h,true):null;
+  const r=kind==='flat'?Math.max(30,Math.round(lg/12)):kind==='bin'?Math.max(10,Math.round(lg/60)):Math.max(20,Math.round(lg/70));
+  for(let y=0;y<h;y++){const y0=y-r<0?0:y-r,y1=y+r+1>h?h:y+r+1;
+    for(let x=0;x<w;x++){const x0=x-r<0?0:x-r,x1=x+r+1>w?w:x+r+1,a=(y1-y0)*(x1-x0),i=y*w+x;
+      const m=(ii[y1*W+x1]-ii[y0*W+x1]-ii[y1*W+x0]+ii[y0*W+x0])/a;let v;
+      if(kind==='local'){v=m+(g[i]-m)*2.5}
+      else if(kind==='flat'){v=128+(g[i]-m)/(m*0.5+30)*220}
+      else{const m2=(ii2[y1*W+x1]-ii2[y0*W+x1]-ii2[y1*W+x0]+ii2[y0*W+x0])/a,sd=Math.sqrt(Math.max(0,m2-m*m));
+        v=sd<9?255:(src[i]<=m*(1+0.2*(sd/128-1))?0:255)}
+      out[i]=v<0?0:v>255?255:v}}
+  return out;
+}
+/* how far the lines of text are tilted, in degrees (0 when not worth correcting): the angle at which dark pixels line up into the sharpest horizontal rows */
+function scTiltDeg(g,w,h){
+  if(w<40||h<40)return 0;
+  const step=Math.max(1,Math.round(Math.max(w,h)/600)),sw=Math.floor(w/step),sh=Math.floor(h/step);
+  const sg=new Uint8Array(sw*sh);for(let y=0;y<sh;y++)for(let x=0;x<sw;x++)sg[y*sw+x]=g[(y*step)*w+x*step];
+  const b=scVariantGray(sg,sw,sh,'bin'),pts=[];let dark=0;for(let i=0;i<b.length;i++)if(b[i]===0)dark++;
+  if(dark<300||dark>b.length*0.4)return 0;
+  const every=Math.max(1,Math.floor(dark/25000));let k=0;
+  for(let y=0;y<sh;y++)for(let x=0;x<sw;x++)if(b[y*sw+x]===0&&(k++%every===0))pts.push(x,y);
+  const hs=sh+sw+3,sc=deg=>{const a=deg*Math.PI/180,c=Math.cos(a),s=Math.sin(a),hist=new Float64Array(hs);
+    for(let i=0;i<pts.length;i+=2){const yy=Math.round(-pts[i]*s+pts[i+1]*c)+sw;if(yy>=0&&yy<hs)hist[yy]++}
+    let t=0;for(let i=0;i<hs;i++)t+=hist[i]*hist[i];return t};
+  const base=sc(0);let best=0,bs=base;
+  for(let d=-12;d<=12;d+=1){const s=sc(d);if(s>bs){bs=s;best=d}}
+  for(let d=best-0.75;d<=best+0.76;d+=0.25){const s=sc(d);if(s>bs){bs=s;best=d}}
+  return Math.abs(best)>=1.5&&bs>base*1.08?best:0;
+}
+/* ---- serial numbers: the readings vote letter by letter ---- */
+const SC_FOLD={O:'0',Q:'0',I:'1',L:'1',S:'5',B:'8',Z:'2'};
+const scFoldId=v=>String(v).toUpperCase().replace(/[OQILSBZ]/g,c=>SC_FOLD[c]);
+/* does it look like a real serial of a known maker? known:true only for the shapes these makers really use; anything else is just "plausible" */
+function scSerialShape(v){
+  const s=scIdN(v);
+  if(!/^[A-Z0-9]{5,25}$/.test(s)||!/\d/.test(s))return {ok:false,known:false};
+  if(/^\d{12}$/.test(s))return {ok:true,known:true};                       /* Microsoft Surface */
+  if(/^(?:[A-Z][A-Z0-9]{9,11})$/.test(s)&&/[A-Z]/.test(s)&&s.length>=10&&s.length<=12)return {ok:true,known:true};   /* Apple, Lenovo, HP, ASUS style */
+  if(/^R[A-Z0-9]{10}$/.test(s)||/^R[A-Z0-9]{14}$/.test(s))return {ok:true,known:true};     /* Samsung */
+  if(/^[A-Z0-9]{7}$/.test(s)&&/[A-Z]/.test(s))return {ok:true,known:true};   /* Dell service tag */
+  return {ok:s.length>=6,known:false};
+}
+/* reads: [{v,w}] (value and weight). Reads of the same length that differ by at most one folded character are one cluster; inside it each position takes the heaviest letter. */
+function scSerialConsensus(reads){
+  const rs=(Array.isArray(reads)?reads:[]).map(r=>({v:scIdN(r&&r.v),w:Number(r&&r.w)||1})).filter(r=>r.v.length>=5&&r.v.length<=25);
+  if(!rs.length)return null;
+  const ham=(a,b)=>{let d=0;for(let i=0;i<a.length;i++)if(a[i]!==b[i])d++;return d};
+  const cl=[];
+  rs.forEach(r=>{const f=scFoldId(r.v),c=cl.find(c=>c.len===r.v.length&&ham(c.f,f)<=1);if(c){c.items.push(r)}else cl.push({len:r.v.length,f,items:[r]})});
+  const outs=cl.map(c=>{
+    let v='';
+    for(let i=0;i<c.len;i++){const t={};c.items.forEach(r=>{t[r.v[i]]=(t[r.v[i]]||0)+r.w});
+      const ks=Object.keys(t).sort((a,b)=>t[b]-t[a]);
+      if(ks.length>1&&t[ks[0]]===t[ks[1]]){   /* tie: prefer the character that makes the whole value fit a real serial shape */
+        const tops=ks.filter(k=>t[k]===t[ks[0]]);const fit=tops.find(k=>scSerialShape(v+k+c.items[0].v.slice(i+1)).known);v+=fit||tops[0]}
+      else v+=ks[0]}
+    const support=c.items.filter(r=>r.v===v).reduce((a,r)=>a+r.w,0),fsupport=c.items.filter(r=>scFoldId(r.v)===scFoldId(v)).reduce((a,r)=>a+r.w,0),total=c.items.reduce((a,r)=>a+r.w,0),sh=scSerialShape(v);
+    return {value:v,support,fsupport,total,reads:c.items.length,ok:sh.ok,known:sh.known};
+  });
+  outs.sort((a,b)=>(b.known-a.known)||(b.ok-a.ok)||(b.total-a.total)||(b.value.length-a.value.length));
+  return outs[0];
+}
+/* how sure to be: 'high' only when three weighted reads agree exactly on a known serial shape, 'medium' when two do, otherwise 'low' (a low serial is never filled in) */
+function scSerialConf(c){
+  if(!c||!c.ok)return 'low';
+  if(c.known&&c.support>=3)return 'high';
+  if(c.fsupport>=2)return 'medium';
+  return 'low';
+}
+/* fields found + half a point per note: how much a reading is worth */
+function scReadValue(res){return Object.values((res&&res.fields)||{}).filter(Boolean).length+((res&&res.notes)||[]).length*0.5}
+/* readings (best first) -> one text. An extra reading is appended only when it adds a field or note and causes no new disagreement; a bad reading can never make the result worse. */
+function scOcrFuse(reads){
+  const rs=(Array.isArray(reads)?reads:[]).filter(r=>r&&typeof r.text==='string'&&r.text.trim());
+  if(!rs.length)return '';
+  const P=t=>scOcrParse([{n:1,text:t,conf:70,words:[]}]);
+  rs.forEach(r=>{r._v=scReadValue(P(r.text))});
+  rs.sort((a,b)=>b._v-a._v||(Number(b.conf)||0)-(Number(a.conf)||0));
+  let cur=rs[0].text,res=P(cur);
+  for(let i=1;i<rs.length;i++){const cand=cur+'\n'+rs[i].text,rc=P(cand);
+    /* additive only: every value already found must stay exactly as it is, so a misreading in an extra pass can add a field but never change one */
+    const same=Object.keys(res.fields).every(k=>!res.fields[k]||(rc.fields[k]&&rc.fields[k].value===res.fields[k].value));
+    if(same&&scReadValue(rc)>scReadValue(res)&&rc.conflicts.length<=res.conflicts.length){cur=cand;res=rc}}
+  return cur;
+}
+/* ---- browser side ---- */
+async function scLoadEl(img){return new Promise((ok,no)=>{const im=new Image();im.onload=()=>ok(im);im.onerror=()=>no(new Error('decode'));im.src=img.url})}
+function scCanvasOf(g,w,h){const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d'),d=x.createImageData(w,h),p=d.data;for(let i=0,j=0;i<g.length;i++,j+=4){p[j]=p[j+1]=p[j+2]=g[i];p[j+3]=255}x.putImageData(d,0,0);return c}
+function scGrayOfCanvas(c){const w=c.width,h=c.height,p=c.getContext('2d',{willReadFrequently:true}).getImageData(0,0,w,h).data,g=new Uint8Array(w*h);for(let i=0,j=0;i<g.length;i++,j+=4)g[i]=(p[j]*299+p[j+1]*587+p[j+2]*114)/1000|0;return {g,w,h}}
+/* the photo (or a part of it) as a grey picture. A cropped screen is enlarged to about 1800 px so small text stays readable; small pictures (thumbnails) are enlarged first. */
+async function scBase(img,box){
+  const el=await scLoadEl(img);
+  const NW=el.naturalWidth,NH=el.naturalHeight,sx=box?Math.round(box.x0*NW):0,sy=box?Math.round(box.y0*NH):0,w0=box?Math.max(8,Math.round((box.x1-box.x0)*NW)):NW,h0=box?Math.max(8,Math.round((box.y1-box.y0)*NH)):NH,lg=Math.max(w0,h0),s=box?(lg<1800?Math.min(2,1800/lg):1):(lg<1200?Math.min(4,1200/lg):1);
   const w=Math.round(w0*s),h=Math.round(h0*s),c=document.createElement('canvas');c.width=w;c.height=h;
   const x=c.getContext('2d',{willReadFrequently:true});x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.drawImage(el,sx,sy,w0,h0,0,0,w,h);
-  const d=x.getImageData(0,0,w,h),p=d.data,n=w*h,g=new Uint8Array(n);
-  for(let i=0,j=0;i<n;i++,j+=4)g[i]=(p[j]*299+p[j+1]*587+p[j+2]*114)/1000|0;
-  const W=w+1,ii=new Uint32Array(W*(h+1));   /* integral image: any neighbourhood average in four lookups */
-  for(let y=0;y<h;y++){let row=0;for(let xx=0;xx<w;xx++){row+=g[y*w+xx];ii[(y+1)*W+xx+1]=ii[y*W+xx+1]+row}}
-  const r=Math.max(20,Math.round(Math.max(w,h)/70));
-  for(let y=0;y<h;y++){const y0=Math.max(0,y-r),y1=Math.min(h,y+r+1);
-    for(let xx=0;xx<w;xx++){const x0=Math.max(0,xx-r),x1=Math.min(w,xx+r+1);
-      const m=(ii[y1*W+x1]-ii[y0*W+x1]-ii[y1*W+x0]+ii[y0*W+x0])/((y1-y0)*(x1-x0));
-      let v=m+(g[y*w+xx]-m)*2.5;v=v<0?0:v>255?255:v;const j=(y*w+xx)*4;p[j]=p[j+1]=p[j+2]=v}}
-  x.putImageData(d,0,0);return c;
+  return scGrayOfCanvas(c);
 }
+function scTurnBase(b,deg){
+  const src=scCanvasOf(b.g,b.w,b.h),a=Math.abs(deg)*Math.PI/180,w=Math.ceil(b.w*Math.cos(a)+b.h*Math.sin(a)),h=Math.ceil(b.w*Math.sin(a)+b.h*Math.cos(a));
+  let m=0;for(let i=0;i<b.g.length;i+=13)m+=b.g[i];m=Math.round(m/Math.ceil(b.g.length/13));
+  const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d');x.fillStyle='rgb('+m+','+m+','+m+')';x.fillRect(0,0,w,h);
+  x.translate(w/2,h/2);x.rotate(-deg*Math.PI/180);x.drawImage(src,-b.w/2,-b.h/2);
+  return scGrayOfCanvas(c);
+}
+const scVarCanvas=(b,kind)=>scCanvasOf(scVariantGray(b.g,b.w,b.h,kind),b.w,b.h);
+/* the original one-step prep, kept for callers that want just that */
+async function scPrep(img,box){const b=await scBase(img,box);return scVarCanvas(b,'local')}
 /* the lit screen of a photo, or null (never throws): a tiny copy of the photo is made and handed to scBoxFromGray */
 async function scScreenBox(img){
-  try{const el=await new Promise((ok,no)=>{const im=new Image();im.onload=()=>ok(im);im.onerror=()=>no(new Error('decode'));im.src=img.url});
+  try{const el=await scLoadEl(img);
     const k=200/Math.max(el.naturalWidth,el.naturalHeight),sw=Math.max(8,Math.round(el.naturalWidth*k)),sh=Math.max(8,Math.round(el.naturalHeight*k)),c=document.createElement('canvas');c.width=sw;c.height=sh;
     const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(el,0,0,sw,sh);const p=x.getImageData(0,0,sw,sh).data,g=new Uint8Array(sw*sh);
     for(let i=0,j=0;i<g.length;i++,j+=4)g[i]=(p[j]*299+p[j+1]*587+p[j+2]*114)/1000|0;
     return scBoxFromGray(g,sw,sh)}catch(e){return null}
 }
-function scRotate(cv,deg){const q=deg===90||deg===270,r=document.createElement('canvas');r.width=q?cv.height:cv.width;r.height=q?cv.width:cv.height;const x=r.getContext('2d');x.translate(r.width/2,r.height/2);x.rotate(deg*Math.PI/180);x.drawImage(cv,-cv.width/2,-cv.height/2);return r}
-function scSmall(cv,edge){const s=Math.min(1,edge/Math.max(cv.width,cv.height));if(s>=1)return cv;const c=document.createElement('canvas');c.width=Math.round(cv.width*s);c.height=Math.round(cv.height*s);c.getContext('2d').drawImage(cv,0,0,c.width,c.height);return c}
-/* how many words were read with real confidence: a sideways photo reads as almost none */
-const scGoodWords=d=>(Array.isArray(d&&d.words)?d.words:[]).filter(x=>x&&Number(x.confidence)>=60&&/^[A-Za-z0-9]{3,}$/.test(String(x.text||'').replace(/[^A-Za-z0-9]/g,'')||'')).length;
 /* turn the serial/IMEI location into a small zoomed picture to compare against */
 function scOcrCrops(res,pages){
   Object.keys((res&&res.fields)||{}).forEach(k=>{
@@ -8492,6 +8682,78 @@ function scOcrCrops(res,pages){
     try{f.crop=c.toDataURL('image/jpeg',0.9)}catch(e){}
   });
 }
+const scReadOf=r=>{const d=(r&&r.data)||{};return {text:d.text||'',conf:Number(d.confidence)||0,words:(d.words||[]).map(x=>({t:x.text,c:x.confidence,b:x.bbox})),raw:d}};
+/* the "Serial number" label in a reading, as {x0,y0,x1,y1} (null if it was not read) */
+function scSerialLabelBox(words){
+  const ws=Array.isArray(words)?words:[];
+  for(let i=0;i<ws.length;i++){
+    const t=String(ws[i].t||'').toLowerCase().replace(/[^a-z/]/g,''),n=String(ws[i+1]&&ws[i+1].t||'').toLowerCase().replace(/[^a-z]/g,'');
+    if(!ws[i].b)continue;
+    if(t==='serial'||t==='s/n'||t==='sn'||(t==='service'&&n==='tag')||(t==='identifying'&&n==='number'))return ws[i].b;
+  }
+  return null;
+}
+/* cut the serial row out of the grey picture, enlarge it and read it three ways with only serial-type characters allowed */
+async function scSerialPass(w,T,base,words){
+  const lb=scSerialLabelBox(words);if(!lb||!base)return [];
+  const lh=Math.max(8,lb.y1-lb.y0),x0=Math.max(0,Math.round(lb.x0-lh*0.5)),y0=Math.max(0,Math.round(lb.y0-lh*0.6)),x1=Math.min(base.w,Math.round(lb.x0+lh*30)),y1=Math.min(base.h,Math.round(lb.y1+lh*2.2));
+  const cw=x1-x0,ch=y1-y0;if(cw<20||ch<10)return [];
+  const sub=new Uint8Array(cw*ch);for(let y=0;y<ch;y++)sub.set(base.g.subarray((y0+y)*base.w+x0,(y0+y)*base.w+x0+cw),y*cw);
+  const s=Math.min(4,Math.max(1,70/lh)),sc=document.createElement('canvas');sc.width=Math.round(cw*s);sc.height=Math.round(ch*s);
+  sc.getContext('2d').drawImage(scCanvasOf(sub,cw,ch),0,0,sc.width,sc.height);
+  const big=scGrayOfCanvas(sc),out=[];
+  try{
+    await w.setParameters({tessedit_char_whitelist:SC_WL,tessedit_pageseg_mode:T.PSM?T.PSM.SINGLE_BLOCK:'6'});
+    for(const kind of ['local','flat','bin']){
+      try{const r=scReadOf(await w.recognize(scVarCanvas(big,kind)));out.push(r)}catch(e){}
+    }
+  }finally{try{await w.setParameters({tessedit_char_whitelist:'',tessedit_pageseg_mode:T.PSM?T.PSM.AUTO:'3'})}catch(e){}}
+  return out;
+}
+/* Intel names carry their generation twice ("11th Gen ... i5-11400H"). When the two disagree (a "41th Gen" misread), the model number is the one to trust: it is longer and harder to misread. */
+function scCpuFixGen(v){
+  const s=String(v==null?'':v),g=s.match(/(\d{1,2})\s*(?:st|nd|rd|th)\s+Gen/i),m=s.match(/\bi[3579]-?\s?(\d{4,5})/i);
+  if(!g||!m)return s;
+  const d=m[1],gen=d.length===5?d.slice(0,2):(+d[0]>=2?d[0]:d.slice(0,2)),n=+g[1];
+  if(n===+gen||+gen<2||+gen>15)return s;
+  const suf=gen==='1'?'st':gen==='2'?'nd':gen==='3'?'rd':'th';
+  return s.replace(g[0],gen+suf+' Gen');
+}
+/* every reading is parsed on its own and the fields vote: a value most readings agree on beats one misread (a "41th Gen" in one of six readings never wins).
+   A shorter reading backs a longer one that contains it ("Windows 11" backs "Windows 11 Home": the short one just lost the end of the line). */
+function scOcrVoteFields(readResults){
+  const out={},rs=(Array.isArray(readResults)?readResults:[]).filter(Boolean),nz=v=>String(v==null?'':v).toLowerCase().replace(/[^a-z0-9]/g,''),rank={high:3,medium:2,low:1};
+  const keys={};rs.forEach(r=>Object.keys(r.fields||{}).forEach(k=>{if(r.fields[k]&&!/serial|imei/i.test(k))keys[k]=1}));
+  Object.keys(keys).forEach(k=>{
+    const g={};rs.forEach(r=>{let f=r.fields&&r.fields[k];if(!f||!f.value)return;
+      if(k==='cpu'){const fx=scCpuFixGen(f.value);if(fx!==f.value)f=Object.assign({},f,{value:fx})}
+      if(k==='model'){const fx=String(f.value).replace(/\s+Rename(?:\s+this\s+PC)?\s*$/i,'');if(fx!==f.value)f=Object.assign({},f,{value:fx})}   /* the button next to the model name */
+      const n=nz(f.value);if(!n)return;
+      const e=g[n]||(g[n]={votes:0,best:null});e.votes++;if(!e.best||(rank[f.confidence]||0)>(rank[e.best.confidence]||0))e.best=f});
+    const ns=Object.keys(g),sup={};
+    ns.forEach(n=>{sup[n]=g[n].votes;ns.forEach(m=>{if(m!==n&&m.length>=4&&n.includes(m))sup[n]+=g[m].votes})});
+    const top=ns.sort((a,b)=>sup[b]-sup[a]||b.length-a.length)[0];
+    if(top)out[k]={field:g[top].best,votes:sup[top],of:rs.length,n:top,counts:ns.reduce((o,x)=>{o[x]=g[x].votes;return o},{})};
+  });
+  return out;
+}
+/* applies the vote to one parsed result: fills a missing field, or replaces a value that fewer readings back. Never touches serials. */
+function scOcrApplyVote(res,vote,image){
+  const nz=v=>String(v==null?'':v).toLowerCase().replace(/[^a-z0-9]/g,'');
+  Object.keys(vote||{}).forEach(k=>{
+    const v=vote[k];if(!v||v.votes<2)return;
+    const cur=res.fields[k],curN=cur?nz(cur.value):'';
+    if(cur&&curN===v.n)return;
+    if(cur&&(cur.image!==image||(v.counts[curN]||0)>=v.votes))return;
+    const f=Object.assign({},v.field,{image});
+    if(f.confidence==='low'&&v.votes>=3)f.confidence='medium';
+    delete f.bbox;
+    res.fields[k]=f;
+  });
+  return res;
+}
+/* a poor reading is worth a second look: fewer than 6 spec fields found, or a low confidence */
+function scReadIsWeak(text,conf){const r=scOcrParse([{n:1,text,conf,words:[]}]);return Object.values(r.fields).filter(Boolean).length<6||Number(conf)<75}
 /* page text -> result, on this device. Throws if the reader cannot start. Shared by "Read without AI" and "Smart read". */
 async function scOcrCompute(){
   let w=null,pages=[];
@@ -8502,34 +8764,88 @@ async function scOcrCompute(){
     w=await T.createWorker('eng',1,{logger:m=>{if(m&&m.status==='recognizing text')st('Reading photo '+cur+' of '+SC.imgs.length+'… '+Math.round((m.progress||0)*100)+'%')}});
     for(let i=0;i<SC.imgs.length;i++){
       cur=i+1;st('Reading photo '+cur+' of '+SC.imgs.length+'…');
-      let cv=await scPrep(SC.imgs[i]);
-      let r=await w.recognize(cv),d=(r&&r.data)||{},turned=false;
+      let base=await scBase(SC.imgs[i]);
+      /* tilted text reads far better after straightening; a wrong guess is harmless (it is only applied for a clear tilt) */
+      try{const dg=scTiltDeg(base.g,base.w,base.h);if(dg)base=scTurnBase(base,dg)}catch(e){}
+      let cv=scVarCanvas(base,'local');
+      let r=scReadOf(await w.recognize(cv)),d=r.raw,turned=false;
       /* a photo taken sideways reads as almost nothing: try both quarter turns on a small copy and keep the best one */
       if(scGoodWords(d)<10){
-        const sm=scSmall(cv,1100);let best={deg:0,n:scGoodWords(d)};
+        const sm=scSmall(cv,700);let best={deg:0,n:scGoodWords(d)};
         for(const deg of [90,270]){try{const rr=await w.recognize(scRotate(sm,deg)),n=scGoodWords((rr&&rr.data)||{});if(n>=10&&n>best.n*2)best={deg,n}}catch(e){}}
-        if(best.deg){cv=scRotate(cv,best.deg);r=await w.recognize(cv);d=(r&&r.data)||{};turned=true}
+        if(best.deg){cv=scRotate(cv,best.deg);base=scGrayOfCanvas(cv);r=scReadOf(await w.recognize(cv));d=r.raw;turned=true}
       }
-      const pg={n:i+1,text:d.text||'',conf:d.confidence,words:(d.words||[]).map(x=>({t:x.text,c:x.confidence,b:x.bbox})),cv};
+      const pg={n:i+1,text:r.text,conf:r.conf,words:r.words,cv};
+      const reads=[{text:r.text,conf:r.conf,words:r.words,base}];
       /* a settings screenshot with sparse labels often reads badly in "auto" mode: if little was found, read it again as sparse text and keep both */
       if(T.PSM&&scGoodWords(d)>=8&&Object.values(scOcrParse([pg]).fields).filter(Boolean).length<6){
         try{await w.setParameters({tessedit_pageseg_mode:T.PSM.SPARSE_TEXT});
-          const r2=await w.recognize(cv),d2=(r2&&r2.data)||{};
-          pg.text+='\n'+(d2.text||'');pg.words=pg.words.concat((d2.words||[]).map(x=>({t:x.text,c:x.confidence,b:x.bbox})));pg.conf=Math.max(Number(pg.conf)||0,Number(d2.confidence)||0);
+          const r2=scReadOf(await w.recognize(cv));
+          reads.push({text:r2.text,conf:r2.conf,words:r2.words,base});
           await w.setParameters({tessedit_pageseg_mode:T.PSM.AUTO})}catch(e){}
       }
-      /* a photo of a screen taken at an angle, with a keyboard or desk around it, reads far better when the reader looks at just the lit screen. The cropped reading is added to the full-frame one (never replaces it), so nothing the full photo read is lost. Skipped for a photo that was turned sideways, and for a screenshot that already fills the frame. */
-      if(!turned){try{
+      /* "is there text here at all?": count confidently read words. A pile of low-confidence junk (wood grain, keyboards) is not text; a few confident words are. */
+      const conf70=o=>(Array.isArray(o&&o.words)?o.words:[]).filter(x=>x&&Number(x.confidence)>=70&&/^[A-Za-z0-9]{3,}$/.test(String(x.text||'').replace(/[^A-Za-z0-9]/g,'')||'')).length;
+      let textual=conf70(d)>=8;
+      const weak0=scReadIsWeak(reads.map(x=>x.text).join('\n'),Math.max(...reads.map(x=>x.conf)));
+      let flatDone=false;
+      /* weak first read: one cheap look with the lighting removed settles whether this is a hard-to-read screen or just a photo of a laptop */
+      const junk=Array.isArray(d.words)&&d.words.length>=300&&Number(d.confidence)<40;   /* hundreds of low-confidence scraps = wood grain and keyboards, not text */
+      if(weak0&&!turned&&!junk){
+        try{const rx=scReadOf(await w.recognize(scVarCanvas(base,'flat')));flatDone=true;
+          if(conf70(rx.raw)>=8||scGoodWords(rx.raw)>=8){textual=true;reads.push({text:rx.text,conf:rx.conf,words:rx.words,base})}}catch(e){}
+      }
+      let cropBase=null;
+      /* a photo of a screen taken at an angle, with a keyboard or desk around it, reads far better when the reader looks at just the lit screen. */
+      if(!turned&&textual){try{
         const box=await scScreenBox(SC.imgs[i]);
-        if(box){const cc=await scPrep(SC.imgs[i],box),rc=await w.recognize(cc),dc=(rc&&rc.data)||{};
-          if(scGoodWords(dc)>=10){pg.text=(dc.text||'')+'\n'+pg.text;pg.conf=Math.max(Number(pg.conf)||0,Number(dc.confidence)||0)}}
+        if(box){let cb=await scBase(SC.imgs[i],box);try{const dg=scTiltDeg(cb.g,cb.w,cb.h);if(dg)cb=scTurnBase(cb,dg)}catch(e){}
+          const rc=scReadOf(await w.recognize(scVarCanvas(cb,'local')));
+          if(scGoodWords(rc.raw)>=10||conf70(rc.raw)>=8){reads.push({text:rc.text,conf:rc.conf,words:rc.words,base:cb});cropBase=cb}}
       }catch(e){}}
+      /* still weak (glare, shadow, dark mode, low light, huge or tiny text): read it again with the other clean-ups and fuse the results */
+      if(textual){
+        const joined=reads.map(x=>x.text).join('\n'),bestConf=Math.max(...reads.map(x=>x.conf));
+        if(scReadIsWeak(joined,bestConf)){
+          st('Reading photo '+cur+' of '+SC.imgs.length+' again, a different way…');
+          const b2=cropBase||base;
+          for(const kind of (cropBase||!flatDone?['flat','bin']:['bin'])){
+            try{const rx=scReadOf(await w.recognize(scVarCanvas(b2,kind)));if(scGoodWords(rx.raw)>=6||conf70(rx.raw)>=6)reads.push({text:rx.text,conf:rx.conf,words:rx.words,base:b2})}catch(e){}
+          }
+        }
+      }
+      /* serials: collect every reading of the serial line, then let them vote */
+      const sreads=[];
+      const isBatt=/battery\s*report|installed\s*batteries/i.test(reads.map(x=>x.text).join('\n'));
+      if(!isBatt){
+        reads.forEach(x=>scOcrSerials({text:x.text}).forEach(v=>sreads.push({v,w:1})));
+        const lab=reads.find(x=>scSerialLabelBox(x.words));
+        if(lab){try{const sp=await scSerialPass(w,T,lab.base,lab.words);sp.forEach(x=>scOcrSerials({text:x.text}).forEach(v=>sreads.push({v,w:1.5})))}catch(e){}}
+      }
+      pg.vote=reads.length>1?scOcrVoteFields(reads.map(x=>scOcrParse([{n:1,text:x.text,conf:x.conf,words:[]}]))):null;
+      pg.serialC=sreads.length>1?scSerialConsensus(sreads):null;
+      pg.text=scOcrFuse(reads)||r.text;pg.conf=Math.max(...reads.map(x=>x.conf));
       pages.push(pg);
     }
-    const res=scOcrParse(pages);scOcrCrops(res,pages);
+    const res=scOcrParse(pages);
+    /* a serial the readings agree on beats a single misread, and settles a disagreement between photos; it never overrides without at least two agreeing readings */
+    try{
+      const cs=pages.map(p=>p.serialC&&p.serialC.fsupport>=2?Object.assign({img:p.n},p.serialC):null).filter(Boolean).sort((a,b)=>b.fsupport-a.fsupport);
+      const top=cs[0];
+      if(top&&!(cs[1]&&scFoldId(cs[1].value)!==scFoldId(top.value)&&cs[1].fsupport>=top.fsupport)){
+        const pg=pages.find(p=>p.n===top.img),loc=scOcrLoc(pg,top.value);
+        res.fields.serial={value:top.value,confidence:scSerialConf(top),evidence:'serial '+top.value+' (read '+top.reads+' ways)',image:top.img};
+        if(loc.b)res.fields.serial.bbox=loc.b;
+        res.conflicts=res.conflicts.filter(c=>!/serial number/i.test(c));
+      }
+    }catch(e){}
+    try{pages.forEach(p=>{if(p.vote)scOcrApplyVote(res,p.vote,p.n)})}catch(e){}
+    scOcrCrops(res,pages);
     return res;
   }finally{pages=[];if(w){try{w.terminate()}catch(_){}}}
 }
+/*OCR-PREP-END*/
+
 async function scOcrRun(){
   if(SC.busy||!SC.imgs.length)return;
   SC.busy=true;SC.msg='';SC.bad=false;SC.why='';SC.fail='';SC.prog='Getting the reader ready…';scRender();scPillUpdate();
