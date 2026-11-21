@@ -7921,6 +7921,15 @@ function scAssumeApply(o,K,rawIn){
   }
   if(a.kind==='desktop'&&has('Original Charger')&&!scHas(o.V['Original Charger']))put('Original Charger','Yes','desktop / tower: charger included by default');
 }
+const SC_CHARGER_LABEL_ON=true;
+function scChargerChip(o,res){
+  const f=BY.bpc;if(!f||!o||!o.V||!f.f.some(x=>x.k==='Original Charger'))return;
+  if(scHas(o.V['Original Charger']))return;   /* already chosen (a desktop default, or read by the AI): nothing to offer */
+  const n=(Array.isArray(res&&res.notes)?res.notes:[]).find(x=>x&&x.kind==='charger'&&typeof x.text==='string');if(!n)return;
+  const what=scTxt(n.text).replace(/^Charger label:\s*/i,'').slice(0,40);if(!what)return;
+  o.fix=o.fix||{};
+  o.fix['Original Charger']={why:'A power adapter label ('+what+') is in photo '+(+n.image||1)+'. Tap Yes only if it came with this device:',vals:['Yes']};
+}
 /*ASSUME-END*/
 /* ----- Post-scan tidy-up, Bought PC form only. Additive: one line turns it off, and any problem means the untouched scan result is used.
    GPU 1 = integrated, GPU 2 = dedicated; storage without "(shows N GB)"; screen as "15.6in, 144Hz"; Notes keep battery lines only (display, software, storage,
@@ -7988,6 +7997,8 @@ function scNormalizeBuild(b,formId,res,rawIn){
   try{if(HX_SIMILAR_ON&&typeof hxOffer==='function'){const c=JSON.parse(JSON.stringify(o));hxOffer(c,rawIn,K,{isInt});Object.assign(o,c)}}catch(e){}
   /* 7. (Assumed screen / charger) fills only what is still empty: laptop screen from past entries with a *, desktop N/A + charger Yes. Skipped when SC_ASSUME_ON is false. */
   try{if(SC_ASSUME_ON&&typeof scAssumeApply==='function'){const c=JSON.parse(JSON.stringify(o));scAssumeApply(c,K,rawIn);Object.assign(o,c)}}catch(e){}
+  /* 8. (Charger label) a power adapter's label seen in a photo is offered as a "Yes" tap chip for Original Charger. Never filled in: the photo may show someone else's brick. Skipped when SC_CHARGER_LABEL_ON is false. */
+  try{if(SC_CHARGER_LABEL_ON&&typeof scChargerChip==='function'){const c=JSON.parse(JSON.stringify(o));scChargerChip(c,res);Object.assign(o,c)}}catch(e){}
   return o;
 }
 /*OCR-MEM-START*/
@@ -8233,6 +8244,18 @@ function scOcrLoc(pg,val){
   if(w&&w.b&&isFinite(w.b.x0)&&isFinite(w.b.x1)&&isFinite(w.b.y0)&&isFinite(w.b.y1))return {c:Number(w.c),b:{x0:w.b.x0,y0:w.b.y0,x1:w.b.x1,y1:w.b.y1}};
   return {c:Number(pg&&pg.conf),b:null};
 }
+/* A power adapter's own label: it prints a wall-socket INPUT (100-240V and/or 50/60Hz) AND a DC OUTPUT (volts + amps). A laptop's own regulatory label only has a DC input ("Rated: 15V 4A"), so it never counts.
+   Returns e.g. "20.2V 3A", or null. The DC symbol is often misread as a stray letter, so a few junk characters are allowed between the volts and the amps. */
+function scOcrCharger(text){
+  try{
+    const t=String(text==null?'':text).replace(/\s+/g,' ');
+    if(!/\b1[01]\d?\s*[-\u2013\u2014~]{1,2}\s*2[2-5]0\s*V\b|\b50\s*[\/-]\s*60\s*Hz\b/i.test(t))return null;
+    const m=t.match(/\b(?:out\s*put|output|dc\s*out(?:put)?|out)\b[^0-9]{0,8}(\d{1,2}(?:\.\d{1,2})?)\s*V[^0-9]{0,10}?(\d{1,2}(?:\.\d{1,3})?)\s*A\b/i);
+    if(!m)return null;
+    const v=parseFloat(m[1]),a=parseFloat(m[2]);
+    return v>=5&&v<=48&&a>=0.3&&a<=15?m[1]+'V '+m[2]+'A':null;
+  }catch(e){return null}
+}
 const SC_SER_LABEL='(?:serial\\s*(?:number|no\\.?|#)?(?:\\s*\\(\\s*system\\s*\\))?|service\\s*tag|identifying\\s*number|s\\s*/\\s*n|sn)';
 function scOcrSerials(pg){
   const L=scOcrLines(pg&&pg.text),out=[];
@@ -8355,6 +8378,7 @@ function scOcrParse(pages){
     const pay=scOcrPay(all);
     if(pay){PAY.push({pay,pg});return}
     const L=scOcrLines(all);
+    {const cg=scOcrCharger(all);if(cg)note('charger','Charger label: '+cg,pg)}   /* only ever offered as a tap chip, never filled in */
     /* serial / IMEI */
     const batt=/battery\s*report|installed\s*batteries/i.test(all);   /* a Windows battery report lists the BATTERY's serial number, not the computer's */
     if(!batt)scOcrSerials(pg).forEach(v=>{const loc=scOcrLoc(pg,v),c=Number(loc.c);add('serial',v,'serial '+v,pg,{conf:c>=85?'medium':'low',bbox:loc.b})});
@@ -9046,7 +9070,7 @@ document.addEventListener('click',e=>{
       else{scReset();show(scScreen())}
     }
     else if(a==='hist'){const k=t.dataset.k,v=t.dataset.v;if(k&&v&&cur&&cur.f.some(x=>x.k===k)&&!scHas(V[k])){V[k]=v;const el=$$('input.lg-in').find(i=>i.dataset.k===k);if(el)el.value=v;const g=t.closest('.sc-sg');if(g)g.remove();saveDraft()}}
-    else if(a==='fix'){const k=t.dataset.k,v=t.dataset.v;if(k&&v&&cur&&cur.f.some(x=>x.k===k)&&(t.dataset.ow==='1'||!scHas(V[k]))){V[k]=v;const el=$$('input.lg-in').find(i=>i.dataset.k===k);if(el)el.value=v;const g=t.closest('.sc-sg');if(g)g.remove();saveDraft()}}
+    else if(a==='fix'){const k=t.dataset.k,v=t.dataset.v;if(k&&v&&cur&&cur.f.some(x=>x.k===k)&&(t.dataset.ow==='1'||!scHas(V[k]))){V[k]=v;const el=$$('input.lg-in').find(i=>i.dataset.k===k);if(el)el.value=v;$$('[data-lg="pick"]').forEach(bt=>{if(bt.dataset.k===k)bt.setAttribute('aria-pressed',bt.dataset.v===v?'true':'false')});const g=t.closest('.sc-sg');if(g)g.remove();saveDraft()}}
     else if(a==='open'){show(scScreen())}
     else if(a==='min'){closeOverlay();toast('Still scanning. You can keep using the site.')}
     else if(a==='pill'){if(scGuard()){SC.fail='';show(scScreen());scPillUpdate()}}
