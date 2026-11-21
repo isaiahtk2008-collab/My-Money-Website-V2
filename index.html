@@ -7930,6 +7930,67 @@ function scChargerChip(o,res){
   o.fix=o.fix||{};
   o.fix['Original Charger']={why:'A power adapter label ('+what+') is in photo '+(+n.image||1)+'. Tap Yes only if it came with this device:',vals:['Yes']};
 }
+/* ----- Phone and accessory scan helpers (Part 3). Tap chips ONLY: nothing here ever fills a field. One master flag plus one flag per feature; any problem leaves the plain scan result untouched.
+   Bought phone: a power adapter label in a photo offers "Yes" chips for Charger, Original Box and Case (tap only if it came with the phone).
+   Bought accessory: the same label offers "Charger/power adapter" under Included Accessories; Connection Type is offered from past entries of the same model
+   (2+ entries, 60% agree), else a few common guesses for the item type; Item Type is offered from the model name. Color is never guessed. ----- */
+const SC_EXTRA_ON=true,SC_PHONE_CHARGER_ON=true,SC_ACC_CHARGER_ON=true,SC_ACC_CONN_ON=true,SC_ACC_TYPE_ON=true;
+const SC_ACC_TYPE_RES=[['Monitor',/\bmonitors?\b|\bultrawide\b/i],['Mouse',/\b(?:mouse|mice)\b/i],['Keyboard',/\bkeyboards?\b|\bkeychron\b/i],['Controller',/\b(?:controller|gamepad|dualsense|dualshock|joy-?con)s?\b/i],['Headphones',/\bheadphones?\b|\bheadsets?\b/i],['Earbuds',/\bearbuds?\b|\bairpods?\b|\bgalaxy\s*buds\b/i],['Watch',/\bwatch\b/i]];
+const SC_ACC_CONN_GUESS={Monitor:['HDMI/DisplayPort'],Mouse:['Wired USB-A','Wireless 2.4GHz','Bluetooth'],Keyboard:['Wired USB-A','Wireless 2.4GHz','Bluetooth'],Controller:['Bluetooth','Wired USB-C'],Headphones:['Bluetooth','3.5mm Audio'],Earbuds:['Bluetooth'],Watch:['Bluetooth']};
+function scAccType(model){
+  const hit=SC_ACC_TYPE_RES.filter(p=>p[1].test(String(model||''))).map(p=>p[0]);
+  return hit.length===1?hit[0]:null;   /* two different types in one name = unclear, offer nothing */
+}
+function scAccConnHist(model,raw,opts){
+  try{
+    const nrm=s=>String(s==null?'':s).toUpperCase().replace(/[^A-Z0-9]/g,'');
+    const cell=(r,h)=>{if(!r||typeof r!=='object')return '';const t=nrm(h);for(const k of Object.keys(r))if(nrm(k)===t){const v=r[k];return v==null?'':String(v).replace(/\s+/g,' ').trim()}return ''};
+    const nm=nrm(model);if(!nm)return null;
+    const tab=raw&&raw.BoughtAccess;if(!tab||!Array.isArray(tab.rows))return null;
+    const cnt=new Map();let t=0;
+    tab.rows.forEach(r=>{if(nrm(cell(r,'Model'))!==nm)return;
+      const vs=cell(r,'Connection Type').split(/\s*,\s*/).map(x=>opts.find(o=>nrm(o)===nrm(x))).filter(Boolean);
+      if(!vs.length)return;const key=[...new Set(vs)].sort().join(', ');t++;cnt.set(key,(cnt.get(key)||0)+1)});
+    let best=null;cnt.forEach((c,key)=>{if(!best||c>best.c)best={key,c}});
+    if(!best||best.c<2||best.c/t<0.6)return null;
+    return {val:best.key,c:best.c,t};
+  }catch(e){return null}
+}
+function scExtraBuild(b,formId,res,rawIn){
+  if((formId!=='bphone'&&formId!=='bacc')||!b||!b.V||!Array.isArray(b.filled))return b;
+  const f=BY[formId];if(!f)return b;
+  const o=JSON.parse(JSON.stringify(b));o.fix=o.fix&&typeof o.fix==='object'?o.fix:{};
+  const fd=k=>f.f.find(x=>x.k===k),chip=(k,why,vals,extra)=>{if(!fd(k)||o.fix[k])return;o.fix[k]=Object.assign({why,vals},extra||{})};
+  const n=(Array.isArray(res&&res.notes)?res.notes:[]).find(x=>x&&x.kind==='charger'&&typeof x.text==='string');
+  const what=n?scTxt(n.text).replace(/^Charger label:\s*/i,'').slice(0,40):'';
+  const lab='A power adapter label ('+what+') is in photo '+(n?(+n.image||1):1)+'. ';
+  if(formId==='bphone'){
+    if(SC_PHONE_CHARGER_ON&&what){
+      if(!scHas(o.V['Charger']))chip('Charger',lab+'Tap Yes only if it came with this phone:',['Yes']);
+      if(!scHas(o.V['Original Box']))chip('Original Box','Tap Yes only if the original box came with this phone:',['Yes']);
+      if(!scHas(o.V['Case']))chip('Case','Tap Yes only if a case came with this phone:',['Yes']);
+    }
+  }else{
+    const model=String(o.V['Model']||'').trim();
+    if(SC_ACC_CHARGER_ON&&what){
+      const cur=Array.isArray(o.V['Included Accessories'])?o.V['Included Accessories']:[];
+      if(!cur.includes('Charger/power adapter')&&!cur.includes('None'))chip('Included Accessories',lab+'Tap to add it only if it came with this item:',['Charger/power adapter'],{multi:true,ow:true});
+    }
+    let type=scHas(o.V['Item Type'])?String(o.V['Item Type']):null;
+    if(SC_ACC_TYPE_ON&&!type&&model){const t=scAccType(model),tf=fd('Item Type');
+      if(t&&tf&&tf.o.includes(t)){chip('Item Type','Looks like a '+t.toLowerCase()+' from the model name. Tap to use it:',[t]);type=t}}
+    if(SC_ACC_CONN_ON&&!scHas(o.V['Connection Type'])){
+      const cf=fd('Connection Type');
+      if(cf){
+        let raw=rawIn;if(raw===undefined){try{raw=(typeof store!=='undefined'&&store)?(store.base||store.raw):null}catch(e){raw=null}}
+        const h=model?scAccConnHist(model,raw,cf.o):null;
+        if(h)chip('Connection Type','Past entries of this model ('+h.c+' of '+h.t+') had this. Tap to use it:',[h.val],{multi:true});
+        else if(type&&SC_ACC_CONN_GUESS[type])chip('Connection Type','No past entries of this model. Common for a '+type.toLowerCase()+' (a guess, tap what applies):',SC_ACC_CONN_GUESS[type].filter(x=>cf.o.includes(x)),{multi:true});
+      }
+    }
+  }
+  return Object.keys(o.fix).length?o:b;   /* nothing offered = the very same object back */
+}
 /*ASSUME-END*/
 /* ----- Post-scan tidy-up, Bought PC form only. Additive: one line turns it off, and any problem means the untouched scan result is used.
    GPU 1 = integrated, GPU 2 = dedicated; storage without "(shows N GB)"; screen as "15.6in, 144Hz"; Notes keep battery lines only (display, software, storage,
@@ -7937,7 +7998,8 @@ function scChargerChip(o,res){
    Nothing is invented: anything unclear stays blank. ----- */
 const SC_NORMALIZE_ON=true;
 function scNormalizeBuild(b,formId,res,rawIn){
-  if(formId!=='bpc'||!b||!b.V||!Array.isArray(b.filled))return b;
+  if(formId!=='bpc'){try{if(SC_EXTRA_ON&&typeof scExtraBuild==='function')return scExtraBuild(b,formId,res,rawIn)||b}catch(e){}return b}   /* phone / accessory chips (Part 3); anything else is returned untouched */
+  if(!b||!b.V||!Array.isArray(b.filled))return b;
   const o=JSON.parse(JSON.stringify(b)),f=BY[formId];
   o.fix={};o.checks=Array.isArray(o.checks)?o.checks:[];o.noteLines=Array.isArray(o.noteLines)?o.noteLines:[];
   const has=k=>f.f.some(x=>x.k===k);
@@ -8130,7 +8192,7 @@ function scBanner(b,formId){
   const rows=b.filled.map(x=>`<li><b>${E(lab(x.k))}:</b> ${E(String(x.val).length>90?String(x.val).slice(0,90)+'…':x.val)}${x.assumed?' <em>'+E(x.assumed)+'</em>':x.hist?' <em>from a past purchase</em>':x.conf==='medium'?' <em>double-check</em>':''}${x.ev?` <small>saw “${E(x.ev)}”${x.img?' in photo '+x.img:''}</small>`:''}</li>`).join('');
   const crops=b.filled.filter(x=>x.crop&&/Serial/.test(x.k)).map(x=>`<div class="sc-id"><span>${E(lab(x.k))} as read: <b>${E(x.val)}</b>. Compare it with this zoomed photo:</span><img class="sc-crop" src="${E(x.crop)}" alt="Zoomed photo of the ${E(lab(x.k))}"></div>`).join('');
   const sug=Object.keys(b.suggest||{}).filter(k=>!scHas(V[k])).map(k=>`<div class="sc-sg" data-sg="${E(k)}"><span>${E(lab(k))}, from past purchases of this model (tap to use):</span> ${b.suggest[k].map(v=>`<button type="button" class="chip-b" data-sc="hist" data-k="${E(k)}" data-v="${E(v)}">${E(v)}</button>`).join('')}</div>`).join('');
-  const fixs=Object.keys(b.fix||{}).filter(k=>b.fix[k]&&Array.isArray(b.fix[k].vals)&&(b.fix[k].ow||!scHas(V[k]))).map(k=>`<div class="sc-sg" data-sg="${E(k)}"><span>${E(b.fix[k].why)}</span> ${b.fix[k].vals.map(v=>`<button type="button" class="chip-b" data-sc="fix" data-k="${E(k)}" data-v="${E(v)}"${b.fix[k].ow?' data-ow="1"':''}>${E(v)}</button>`).join('')}</div>`).join('');
+  const fixs=Object.keys(b.fix||{}).filter(k=>b.fix[k]&&Array.isArray(b.fix[k].vals)&&(b.fix[k].ow||!scHas(V[k]))).map(k=>`<div class="sc-sg" data-sg="${E(k)}"><span>${E(b.fix[k].why)}</span> ${b.fix[k].vals.map(v=>`<button type="button" class="chip-b" data-sc="fix" data-k="${E(k)}" data-v="${E(v)}"${b.fix[k].ow?' data-ow="1"':''}${b.fix[k].multi?' data-multi="1"':''}>${E(v)}</button>`).join('')}</div>`).join('');
   const thumbs=SC.imgs.map((i,n)=>`<a href="${E(i.url)}" target="_blank" rel="noopener" aria-label="Open photo ${n+1}"><img src="${E(i.url)}" alt="Photo ${n+1}"></a>`).join('');
   top.insertAdjacentHTML('afterend',`<div class="sc-ban" id="sc-ban"><b>Filled from ${SC.imgs.length} photo${SC.imgs.length===1?'':'s'}. Nothing is logged yet.</b>
     <p>Check the highlighted fields against your photos, fix or add anything, then press Log entry.${idFilled?' Compare the serial number / IMEI character by character.':''}</p>
@@ -9070,6 +9132,7 @@ document.addEventListener('click',e=>{
       else{scReset();show(scScreen())}
     }
     else if(a==='hist'){const k=t.dataset.k,v=t.dataset.v;if(k&&v&&cur&&cur.f.some(x=>x.k===k)&&!scHas(V[k])){V[k]=v;const el=$$('input.lg-in').find(i=>i.dataset.k===k);if(el)el.value=v;const g=t.closest('.sc-sg');if(g)g.remove();saveDraft()}}
+    else if(a==='fix'&&t.dataset.multi==='1'){const k=t.dataset.k,v=t.dataset.v,fd=cur&&cur.f.find(x=>x.k===k);if(k&&v&&fd&&fd.t==='multi'){const ex=fd.ex||[],add=String(v).split(/\s*,\s*/).filter(x=>fd.o.includes(x));if(add.length){let arr=Array.isArray(V[k])?V[k].slice():[];if(add.some(x=>ex.includes(x)))arr=[];else arr=arr.filter(z=>!ex.includes(z));add.forEach(x=>{if(!arr.includes(x))arr.push(x)});V[k]=arr;$$('[data-lg="pick"]').forEach(bt=>{if(bt.dataset.k===k)bt.setAttribute('aria-pressed',arr.includes(bt.dataset.v)?'true':'false')});const g=t.closest('.sc-sg');if(g){t.remove();if(!g.querySelector('[data-sc="fix"]'))g.remove()}saveDraft()}}}
     else if(a==='fix'){const k=t.dataset.k,v=t.dataset.v;if(k&&v&&cur&&cur.f.some(x=>x.k===k)&&(t.dataset.ow==='1'||!scHas(V[k]))){V[k]=v;const el=$$('input.lg-in').find(i=>i.dataset.k===k);if(el)el.value=v;$$('[data-lg="pick"]').forEach(bt=>{if(bt.dataset.k===k)bt.setAttribute('aria-pressed',bt.dataset.v===v?'true':'false')});const g=t.closest('.sc-sg');if(g)g.remove();saveDraft()}}
     else if(a==='open'){show(scScreen())}
     else if(a==='min'){closeOverlay();toast('Still scanning. You can keep using the site.')}
