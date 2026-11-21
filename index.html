@@ -7286,7 +7286,7 @@ function getVal(x){const k=x.k,v=V[k],o=(V[k+'#']||'').trim();
   if(x.t==='multi')return (Array.isArray(v)?v:[]).map(a=>a==='Other'?o:a).filter(Boolean).join(', ');
   if(x.t==='radio'||x.t==='yn')return v==='Other'&&x.x?o:(v||'');
   if(x.t==='select'||x.t==='item'||x.pick)return v==='__o'?o:(v||'');
-  return String(v==null?'':v).trim()}
+  const s=String(v==null?'':v).trim();return k==='Screen Size, Hertz'?s.replace(/\s*\*+$/,''):s}   /* the * on an assumed screen size is for the form only, never saved */
 function payload(f){const out={};f.f.forEach(x=>{const s=getVal(x);if(s==='')return;
   if(x.t==='money'||x.t==='int'||x.t==='dec')out[x.k]=numOf(s);
   else if(x.t==='pct')out[x.k]=numOf(s)/100;
@@ -7873,6 +7873,55 @@ function hxOfferHtml(b){
   }catch(e){return ''}
 }
 /*SIMILAR-END*/
+/*ASSUME-START*/
+/* ----- Assumed screen / charger, Bought PC form only (scan flow). Additive: SC_ASSUME_ON=false turns it off and any problem leaves the scan result untouched.
+   Laptops (tablets and all-in-ones too): an EMPTY "Screen Size, Hertz" gets the value most past purchases of the same model had (at least 2 entries and 60% agreement),
+   shown with a trailing * in the form only. The * is removed when the entry is logged (getVal), and only cleanly logged values are ever counted as history.
+   Desktops / towers / mini PCs: screen "N/A" and Original Charger "Yes". Unknown device type or no clear majority = nothing is filled.
+   Anything a photo read is never replaced. The device type comes from your past entries of that model first, then from the model name read off the About screen. ----- */
+const SC_ASSUME_ON=true;
+const SC_PC_DESKTOP_RE=/\b(?:tower|desktop|mini[\s-]?pc|mac\s*mini|nuc\d*|optiplex|prodesk|elitedesk|thinkcentre|poweredge|aurora|ideacentre|veriton|small form factor|sff|usff|custom\s*(?:build|built|pc)|diy|xps\s*8\d{3}|omen\s*(?:25|30|40|45)l)\b/i;
+const SC_PC_LAPTOP_RE=/\b(?:laptop|notebook|macbook|thinkpad|latitude|elitebook|probook|zbook|vivobook|zenbook|zephyrus|surface\s*(?:laptop|book|pro|go)|yoga|ideapad|spectre|chromebook|razer\s*blade|rog\s*(?:flow|strix\s*scar|strix\s*g\d+)|gram|tuf\s*(?:gaming\s*)?[af]\d+|legion\s*(?:slim|pro|5|7)|all[\s-]?in[\s-]?one|aio)\b/i;
+function scAssumeScreen(model,cpu,raw){
+  const out={kind:null,val:null,c:0,t:0};
+  try{
+    const nrm=s=>String(s==null?'':s).toUpperCase().replace(/[^A-Z0-9]/g,'');
+    const cell=(r,h)=>{if(!r||typeof r!=='object')return '';const t=nrm(h);for(const k of Object.keys(r))if(nrm(k)===t){const v=r[k];return v==null?'':String(v).replace(/\s+/g,' ').trim()}return ''};
+    const nm=nrm(model);if(!nm)return out;
+    const tab=raw&&raw.BoughtPCs,rows=tab&&Array.isArray(tab.rows)?tab.rows.filter(r=>nrm(cell(r,'PC model'))===nm):[];
+    /* one vote per past entry: "N/A" = desktop, a complete "13.3in, 60Hz" = laptop; anything else is ignored */
+    const vote=r=>{const s=cell(r,'Screen Size, Hertz');if(/\*\s*$/.test(s))return null;if(/^n\s*\/?\s*a$/i.test(s))return {k:'desktop',v:'N/A'};
+      const m=s.match(/(\d{2}(?:[.,]\d)?)\s*-?\s*(?:inch(?:es)?|in\b|")?\s*[,\/]?\s*(\d{2,3})\s*Hz/i);if(!m)return null;
+      const n=parseFloat(m[1].replace(',','.')),hz=+m[2];if(!(n>=10&&n<=34&&hz>=24&&hz<=540))return null;return {k:'laptop',v:String(n)+'in, '+hz+'Hz'}};
+    const tally=rs=>{const cnt=new Map();let t=0;rs.forEach(r=>{const v=vote(r);if(v){t++;const key=v.k+'|'+v.v;cnt.set(key,(cnt.get(key)||0)+1)}});
+      let best=null;cnt.forEach((c,key)=>{if(!best||c>best.c)best={key,c}});
+      if(!best||best.c<2||best.c/t<0.6)return null;
+      const i=best.key.indexOf('|');return {k:best.key.slice(0,i),v:best.key.slice(i+1),c:best.c,t}};
+    const cp=nrm(cpu),sub=cp?rows.filter(r=>nrm(cell(r,'CPU (and specs)'))===cp):[];
+    const w=(sub.length>=2&&tally(sub))||tally(rows);
+    if(w){out.kind=w.k;if(w.k==='laptop'){out.val=w.v;out.c=w.c;out.t=w.t}return out}
+    const mt=String(model);
+    if(SC_PC_DESKTOP_RE.test(mt))out.kind='desktop';else if(SC_PC_LAPTOP_RE.test(mt))out.kind='laptop';
+  }catch(e){return {kind:null,val:null,c:0,t:0}}
+  return out;
+}
+function scAssumeApply(o,K,rawIn){
+  const f=BY.bpc;if(!f||!o||!o.V||!Array.isArray(o.filled))return;
+  const has=k=>f.f.some(x=>x.k===k);
+  let raw=rawIn;if(raw===undefined){try{raw=(typeof store!=='undefined'&&store)?(store.base||store.raw):null}catch(e){raw=null}}
+  const model=String(o.V[K.md]||'').trim();if(!model)return;
+  const a=scAssumeScreen(model,o.V['CPU (and specs)'],raw);if(!a.kind)return;
+  const put=(k,val,why)=>{const e={k,val:String(val),conf:'high',ev:'',img:0,crop:null,assumed:why},i=o.filled.findIndex(x=>x.k===k);if(i>=0)o.filled[i]=e;else o.filled.push(e);o.V[k]=val};
+  const sc=K.sc,cur=o.filled.find(x=>x.k===sc);
+  /* free = empty, or only filled from a past purchase; a value the photos read is never replaced, and a tap chip already offered is left alone */
+  const free=!scHas(o.V[sc])||(cur&&cur.hist===true);
+  if(has(sc)&&free&&!(o.fix&&o.fix[sc])){
+    if(a.kind==='desktop')put(sc,'N/A','desktop / tower: no screen');
+    else if(a.val)put(sc,a.val+'*','assumed from '+a.c+' of '+a.t+' past entries, check it');
+  }
+  if(a.kind==='desktop'&&has('Original Charger')&&!scHas(o.V['Original Charger']))put('Original Charger','Yes','desktop / tower: charger included by default');
+}
+/*ASSUME-END*/
 /* ----- Post-scan tidy-up, Bought PC form only. Additive: one line turns it off, and any problem means the untouched scan result is used.
    GPU 1 = integrated, GPU 2 = dedicated; storage without "(shows N GB)"; screen as "15.6in, 144Hz"; Notes keep battery lines only (display, software, storage,
    cosmetic, included and other spec lines are dropped); a close model in your sheet and a missing integrated GPU / screen size are offered as tap chips (b.fix).
@@ -7937,6 +7986,8 @@ function scNormalizeBuild(b,formId,res,rawIn){
   }catch(e){}
   /* 6. (Use similar entry) an earlier logged device with this exact model: only OFFERED (o.hx, plus tap chips), never applied. Skipped when HX_SIMILAR_ON is false. */
   try{if(HX_SIMILAR_ON&&typeof hxOffer==='function'){const c=JSON.parse(JSON.stringify(o));hxOffer(c,rawIn,K,{isInt});Object.assign(o,c)}}catch(e){}
+  /* 7. (Assumed screen / charger) fills only what is still empty: laptop screen from past entries with a *, desktop N/A + charger Yes. Skipped when SC_ASSUME_ON is false. */
+  try{if(SC_ASSUME_ON&&typeof scAssumeApply==='function'){const c=JSON.parse(JSON.stringify(o));scAssumeApply(c,K,rawIn);Object.assign(o,c)}}catch(e){}
   return o;
 }
 /*OCR-MEM-START*/
@@ -8004,13 +8055,13 @@ function scMemSave(m){try{LS.set('lg.ocrmem',JSON.stringify(m))}catch(e){}}
 function scMemReset(){try{LS.set('lg.ocrmem','')}catch(e){}}
 let SC_LAST=null;
 function scMemApplyBuild(b,formId){
-  const sg=scMemSuggest(scMemGet(),b.filled);
+  const sg=scMemSuggest(scMemGet(),b.filled.filter(x=>!x.assumed));   /* an assumed value is a guess, not a reading: it is never "corrected" by what the reader learned */
   sg.forEach(s=>{const x=b.filled.find(y=>y.k===s.k);if(!x||Array.isArray(b.V[s.k]))return;
     x.raw=x.val;x.val=s.to;b.V[s.k]=s.to;
     b.checks.push('Changed "'+scTxt(x.raw).slice(0,50)+'" to "'+scTxt(s.to).slice(0,50)+'" ('+s.why+').')});
   return b;
 }
-function scMemNoteFill(formId,b){try{SC_LAST={t:Date.now(),formId,filled:b.filled.map(x=>({k:x.k,val:String(x.val),raw:x.raw}))}}catch(e){SC_LAST=null}}
+function scMemNoteFill(formId,b){try{SC_LAST={t:Date.now(),formId,filled:b.filled.filter(x=>!x.assumed).map(x=>({k:x.k,val:String(x.val),raw:x.raw}))}}catch(e){SC_LAST=null}}
 function scMemLearn(f){
   try{if(!SC_LAST||!f||SC_LAST.formId!==f.id||Date.now()-SC_LAST.t>72e5){SC_LAST=null;return}
     const last=SC_LAST;SC_LAST=null;scMemSave(scMemRecord(scMemGet(),last.filled,V))}catch(e){}
@@ -8065,7 +8116,7 @@ function scBanner(b,formId){
   const d=$('#overlay .drawer.lg'),top=d&&$('.lg-top',d);if(!top||$('#sc-ban',d))return;
   const f=BY[formId],lab=k=>(f.f.find(x=>x.k===k)||{}).l||k;
   const idFilled=b.filled.some(x=>/Serial/.test(x.k));
-  const rows=b.filled.map(x=>`<li><b>${E(lab(x.k))}:</b> ${E(String(x.val).length>90?String(x.val).slice(0,90)+'…':x.val)}${x.hist?' <em>from a past purchase</em>':x.conf==='medium'?' <em>double-check</em>':''}${x.ev?` <small>saw “${E(x.ev)}”${x.img?' in photo '+x.img:''}</small>`:''}</li>`).join('');
+  const rows=b.filled.map(x=>`<li><b>${E(lab(x.k))}:</b> ${E(String(x.val).length>90?String(x.val).slice(0,90)+'…':x.val)}${x.assumed?' <em>'+E(x.assumed)+'</em>':x.hist?' <em>from a past purchase</em>':x.conf==='medium'?' <em>double-check</em>':''}${x.ev?` <small>saw “${E(x.ev)}”${x.img?' in photo '+x.img:''}</small>`:''}</li>`).join('');
   const crops=b.filled.filter(x=>x.crop&&/Serial/.test(x.k)).map(x=>`<div class="sc-id"><span>${E(lab(x.k))} as read: <b>${E(x.val)}</b>. Compare it with this zoomed photo:</span><img class="sc-crop" src="${E(x.crop)}" alt="Zoomed photo of the ${E(lab(x.k))}"></div>`).join('');
   const sug=Object.keys(b.suggest||{}).filter(k=>!scHas(V[k])).map(k=>`<div class="sc-sg" data-sg="${E(k)}"><span>${E(lab(k))}, from past purchases of this model (tap to use):</span> ${b.suggest[k].map(v=>`<button type="button" class="chip-b" data-sc="hist" data-k="${E(k)}" data-v="${E(v)}">${E(v)}</button>`).join('')}</div>`).join('');
   const fixs=Object.keys(b.fix||{}).filter(k=>b.fix[k]&&Array.isArray(b.fix[k].vals)&&(b.fix[k].ow||!scHas(V[k]))).map(k=>`<div class="sc-sg" data-sg="${E(k)}"><span>${E(b.fix[k].why)}</span> ${b.fix[k].vals.map(v=>`<button type="button" class="chip-b" data-sc="fix" data-k="${E(k)}" data-v="${E(v)}"${b.fix[k].ow?' data-ow="1"':''}>${E(v)}</button>`).join('')}</div>`).join('');
