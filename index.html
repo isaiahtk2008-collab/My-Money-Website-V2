@@ -1382,6 +1382,10 @@ tr.grp:hover td{background:var(--surface2)}
 .empty{padding:36px 16px;text-align:center;color:var(--muted)}
 .empty b{display:block;color:var(--ink);font-size:15px;margin-bottom:4px}
 .activef{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.typef{display:flex;gap:8px 16px;flex-wrap:wrap;align-items:center;margin:0 0 14px}
+.typef .tfg{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.typef .seg{flex-wrap:wrap}
+.typef .seg button span{opacity:.65;font-weight:500;margin-left:4px}
 .cols{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
 .cols label{display:inline-flex;gap:6px;align-items:center;font-size:12.5px;padding:3px 10px;border:var(--ap3-w,1px) solid var(--ap3-lc,var(--line));border-radius:99px;cursor:pointer}
 .note{font-size:12.5px;color:var(--muted);background:var(--surface2);padding:8px 12px;border-radius:10px}
@@ -4868,10 +4872,29 @@ function burnCard(){
   }catch(e){return ''}
 }
 
+/* "Whose expense?" filter + sort for the Spending view. Display only: the sheet's "Personal or Business Expense?"
+   values (Personal / For Others / Business) are never changed, only shown as Myself / Others / Business. */
+const TAG_OPTS=[['Personal','Myself'],['For Others','Others'],['Business','Business']];
+const tagLabel=v=>({'Personal':'Myself','For Others':'Others'}[v]||v);
+const TX_SORTS=[['date',-1,'Newest'],['date',1,'Oldest'],['amount',-1,'Biggest'],['tag',1,'By type']];
+function typeFilterRow(ss){
+  const tally=new Map(ss.tags.map(t=>[t.k,t]));
+  const known=TAG_OPTS.map(o=>o[0]);
+  const extra=[...new Set([...ss.tags.map(t=>t.k),S.F.tag].filter(Boolean))].filter(k=>!known.includes(k));
+  const btn=(v,l)=>{const t=tally.get(v);return `<button data-act="tagf" data-v="${esc(v)}" aria-pressed="${(S.F.tag||'')===v}">${esc(l)}${t?`<span>${M(t.v)}</span>`:''}</button>`};
+  const cs=(TS.tx&&TS.tx.sort)||{k:'date',dir:-1};
+  return `<div class="typef">
+    <div class="tfg"><span class="hint" style="color:var(--muted)">Whose expense?</span>
+      <div class="seg" role="group" aria-label="Filter expenses by who they are for"><button data-act="tagf" data-v="" aria-pressed="${!S.F.tag}">All</button>${TAG_OPTS.map(o=>btn(o[0],o[1])).join('')}${extra.map(k=>btn(k,k)).join('')}</div></div>
+    <div class="tfg"><span class="hint" style="color:var(--muted)">Sort purchases</span>
+      <div class="seg" role="group" aria-label="Sort purchases">${TX_SORTS.map(([k,dir,l])=>`<button data-act="txsort" data-k="${k}" data-dir="${dir}" aria-pressed="${cs.k===k&&cs.dir===dir}">${l}</button>`).join('')}</div></div>
+  </div>`;
+}
+
 function vSpending(){
   const D=store.D,R=RG(),gran=S.gran||autoGran(R);const ss=spendingStats(D,R,S.F,gran);
   const active=Object.entries(S.F).filter(e=>e[1]);
-  const html=`${active.length?`<div class="activef"><span class="hint" style="color:var(--muted)">Filtered by</span>${active.map(([k,v])=>`<button class="chip-b" data-act="filt" data-k="${k}" data-v="${esc(v)}" aria-pressed="true">${esc(v)}${ICON.x.replace('<svg','<svg class="x"')}</button>`).join('')}<button class="chip-b" data-act="clearf">Clear all</button></div>`:''}
+  const html=`${typeFilterRow(ss)}${active.length?`<div class="activef"><span class="hint" style="color:var(--muted)">Filtered by</span>${active.map(([k,v])=>`<button class="chip-b" data-act="filt" data-k="${k}" data-v="${esc(v)}" aria-pressed="true">${esc(k==='tag'?tagLabel(v):v)}${ICON.x.replace('<svg','<svg class="x"')}</button>`).join('')}<button class="chip-b" data-act="clearf">Clear all</button></div>`:''}
   <div class="grid g4">
     ${kpi({label:'Total spent',val:M(ss.total),delta:dlt(ss.total,ss.prevTotal),inverse:true,spark:ss.cur,sub:'vs previous',tip:'Sum of purchases in the range. Refunds are excluded.'})}
     ${kpi({label:'Daily average',val:M(ss.perDay),delta:dlt(ss.perDay,ss.prevTotal/R.len),inverse:true,sub:'per day',tip:'Total ÷ number of days in the range, including days with no spending.'})}
@@ -4894,11 +4917,11 @@ function vSpending(){
     ${card('Things you keep buying',ss.freq.length?`<div class="list">${ss.freq.map(f=>`<div class="li"><span class="tx"><b>${esc(f.k)}</b><span>${f.n} times</span></span><span class="rt">${M(f.v)}</span></div>`).join('')}</div>`:'<div class="empty">Nothing repeated 3 or more times in this range.</div>')}
   </div>
   ${card('All purchases',tableShell('tx',{
-    placeholder:'Search item, place, category, notes',sort:{k:'date',dir:-1},group:true,hidden:['notes'],sumKey:r=>r.amount,sumLabel:'spent',rows:()=>spendRows(store.D,RG(),S.F),
-    text:r=>[r.item,r.category,r.place,r.payment,r.tag,r.notes].join(' '),
+    placeholder:'Search item, place, category, notes',sort:{k:'date',dir:-1},group:true,hidden:['notes'],sumKey:r=>r.amount,sumLabel:'spent',rows:()=>spendRows(store.D,RG(),S.F).sort((a,b)=>b.date-a.date),
+    text:r=>[r.item,r.category,r.place,r.payment,r.tag,tagLabel(r.tag),r.notes].join(' '),
     cols:[{k:'date',h:'Date',val:r=>+r.date,cell:r=>`<span title="${fdy(r.date)}">${fd(r.date)}</span>`,csv:r=>dkey(r.date)},{k:'item',h:'Item'},
       {k:'category',h:'Category',cell:r=>`<span class="pill"><i class="dot" style="background:${catColor(r.category)}"></i>${esc(r.category)}</span>`},{k:'place',h:'Where'},{k:'payment',h:'Paid with'},
-      {k:'tag',h:'Type',val:r=>r.tag||'Untagged',cell:r=>esc(r.tag||'—')},{k:'notes',h:'Notes'},{k:'amount',h:'Amount',num:true,cell:r=>M(r.amount)}]}))}`;
+      {k:'tag',h:'Type',val:r=>r.tag||'Untagged',cell:r=>esc(r.tag?tagLabel(r.tag):'—')},{k:'notes',h:'Notes'},{k:'amount',h:'Amount',num:true,cell:r=>M(r.amount)}]}))}`;
   return {html,mount(){
     const o=baseOpts({legend:true});o.interaction={mode:'index',intersect:false};
     mkChart('trend',{data:{labels:ss.buckets.map(b=>b.label),datasets:[{type:'bar',label:'This period',data:ss.cur,backgroundColor:cv('--c1'),borderRadius:4,order:2},{type:'line',label:'Previous period',data:ss.prev,borderColor:cv('--faint'),borderDash:[5,4],pointRadius:0,borderWidth:2,tension:.3,order:1}]},options:o},
@@ -6942,6 +6965,8 @@ document.addEventListener('click',e=>{
     case 'rstat':S.rstat=d.v;render();break;
     case 'rtrade':S.rtrade=d.v;render();break;
     case 'filt':S.F[d.k]=S.F[d.k]===d.v?null:d.v;render();break;
+    case 'tagf':S.F.tag=d.v||null;render();break;
+    case 'txsort':{const st=TS.tx;if(st){st.sort={k:d.k,dir:+d.dir};if(d.k!=='date')st.group=false}render();break}
     case 'clearf':S.F={};render();break;
     case 'clearall':{S.F={};S.rstat='All';S.rtrade='All';const st=TS[d.t];if(st){st.q='';const i=$('#'+d.t+'-q');if(i)i.value=''}render();break}
     case 'bucket':S.bucket=S.bucket===+d.v?null:+d.v;render();break;
