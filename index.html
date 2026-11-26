@@ -1568,6 +1568,21 @@ button.iss-btn:hover,button.iss-btn:focus-visible{background:var(--surface2)}
   .top .row1 #syncpill{grid-column:3;grid-row:2;margin-left:0}
   .top .row1 #secbtn{width:44px;height:44px;min-width:44px;padding:0;border-radius:50%;background:var(--surface2);color:var(--ink);border:var(--ap3-w,1px) solid color-mix(in srgb,var(--line) 60%,transparent)}
 }
+
+/* Other income colours (not reselling profit): loans teal, kept deposits magenta, future paychecks olive. */
+:root{--inc-loan:#0b7f8f;--inc-loan-soft:#dff3f6;--inc-dep:#b5338a;--inc-dep-soft:#fbe4f2;--inc-pay:#6a7d12;--inc-pay-soft:#eef2d3;--inc-resell:#2f6fe4}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--inc-loan:#4fd1e0;--inc-loan-soft:#0f2f35;--inc-dep:#f08ac9;--inc-dep-soft:#3a1630;--inc-pay:#c2d255;--inc-pay-soft:#2b3210;--inc-resell:#7fb0ff}}
+:root[data-theme="dark"]{--inc-loan:#4fd1e0;--inc-loan-soft:#0f2f35;--inc-dep:#f08ac9;--inc-dep-soft:#3a1630;--inc-pay:#c2d255;--inc-pay-soft:#2b3210;--inc-resell:#7fb0ff}
+.inc-chip{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap}
+.inc-chip i{width:8px;height:8px;border-radius:50%;background:currentColor;display:inline-block}
+.inc-chip.loan{color:var(--inc-loan);background:var(--inc-loan-soft)}
+.inc-chip.dep{color:var(--inc-dep);background:var(--inc-dep-soft)}
+.inc-chip.pay{color:var(--inc-pay);background:var(--inc-pay-soft)}
+.inc-chip.resell{color:var(--inc-resell);background:var(--surface2)}
+.inc-src .inc-row{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 4px}
+.inc-src .inc-bar{display:flex;height:10px;border-radius:999px;overflow:hidden;background:var(--surface2)}
+.inc-src .inc-bar span{display:block;height:100%}
+.inc-src .inc-tot{font-size:22px;font-weight:800}
 </style>
 <style id="mm-visibility">
 /* Visibility + nav reorder (additive; delete this block to undo the look). Higher contrast, larger nav, clearer cards and focus. */
@@ -3290,6 +3305,23 @@ function kpi(o){
     <span class="lab">${esc(o.label)}</span><span class="val">${o.val}</span>
     <span class="foot"><span>${o.delta!==undefined?deltaChip(o.delta,o.inverse):''}${o.sub?`<span class="sub"> ${o.sub}</span>`:''}</span>${spark(o.spark)}</span></${tag}>`;
 }
+/* Chips and the "Profit by source" strip. Reselling blue, loans teal, kept deposits magenta (paychecks later: --inc-pay). */
+function incChip(kind, label, n) {
+  const v = Math.round(n || 0);
+  return `<span class="inc-chip ${kind}"><i></i>${esc(label)} ${v < 0 ? '-' : '+'}${M(Math.abs(n || 0))}</span>`;
+}
+function profitSourcesCard(resell, oi) {
+  if (!oi || !(oi.loanN || oi.depN)) return '';
+  const parts = [{ k: 'resell', v: resell || 0, c: 'var(--inc-resell)' }, { k: 'loan', v: oi.loan, c: 'var(--inc-loan)' }, { k: 'dep', v: oi.dep, c: 'var(--inc-dep)' }];
+  const mag = parts.reduce((t, p) => t + Math.abs(p.v), 0) || 1;
+  const total = Math.round(((resell || 0) + oi.total) * 100) / 100;
+  const bar = parts.filter(p => p.v !== 0).map(p => `<span style="width:${(Math.abs(p.v) / mag * 100).toFixed(2)}%;background:${p.c}"></span>`).join('');
+  return `<section class="card inc-src" aria-label="Profit by source"><header><h3>Profit by source</h3></header>
+    <div class="inc-tot">${total < 0 ? '-' : ''}${M(Math.abs(total))} <span style="font-size:13px;font-weight:600;color:var(--muted)">all sources, this range</span></div>
+    <div class="inc-bar" role="img" aria-label="Share of each source">${bar}</div>
+    <div class="inc-row">${incChip('resell', 'Reselling', resell || 0)}${oi.loanN ? incChip('loan', 'Loans', oi.loan) : ''}${oi.depN ? incChip('dep', 'Kept deposits', oi.dep) : ''}</div>
+    <p class="hint" style="margin:6px 0 0">Reselling profit above is unchanged. Loans and kept deposits are added separately, in their own colours.</p></section>`;
+}
 function card(title,body,right='',cls=''){return `<section class="card ${cls}"><header><h3>${title}</h3>${right}</header>${body}</section>`}
 function bars(list,o={}){
   if(!list.length)return '<div class="empty">Nothing here for this range.</div>';
@@ -4609,8 +4641,9 @@ function mmHomeHero(o) {
     var profitPrev = o.profitPrev != null ? o.profitPrev : null;
     var spendTotal = o.spendTotal || 0;
     var spendPrev = o.spendPrev != null ? o.spendPrev : null;
-    var netTotal = profitTotal - spendTotal;
-    var netPrev = (profitPrev == null || spendPrev == null) ? null : (profitPrev - spendPrev);
+    var extraTotal = o.extraTotal || 0;
+    var netTotal = profitTotal + extraTotal - spendTotal;
+    var netPrev = (profitPrev == null || spendPrev == null) ? null : (profitPrev + (o.extraPrev || 0) - spendPrev);
     var inv = o.inv || { vals: [], labels: [], total: 0, gain: 0 };
     var dProfit = dlt(profitTotal, profitPrev);
     var dSpend = dlt(spendTotal, spendPrev);
@@ -4666,9 +4699,9 @@ function mmHomeHero(o) {
           } else if (mKey === 'net') {
             var pArr = o.profit || [], sArr = o.spend || [], nArr = [];
             var len = Math.max(pArr.length, sArr.length);
-            for (var i = 0; i < len; i++) nArr.push((pArr[i] || 0) - (sArr[i] || 0));
-            return { lab: 'Net (profit minus spending)', vals: nArr, labels: o.labels || [], tot: netTotal, delta: dNet, inverse: false,
-              sub: 'profit minus spending', fmtBig: function(v) { return SM(v); }, aria: 'Net: ' + mny(netTotal) };
+            for (var i = 0; i < len; i++) nArr.push((pArr[i] || 0) + ((o.extra || [])[i] || 0) - (sArr[i] || 0));
+            return { lab: o.extraTotal ? 'Net (all profit minus spending)' : 'Net (profit minus spending)', vals: nArr, labels: o.labels || [], tot: netTotal, delta: dNet, inverse: false,
+              sub: o.extraParts ? ('profit minus spending ' + o.extraParts) : 'profit minus spending', fmtBig: function(v) { return SM(v); }, aria: 'Net: ' + mny(netTotal) };
           } else if (mKey === 'inv') {
             var gainStr = (inv.gain >= 0 ? '+' : '') + mny(inv.gain);
             return { lab: 'Invested', vals: inv.vals || [], labels: inv.labels || [], tot: inv.total || 0, delta: null, inverse: false,
@@ -4814,13 +4847,16 @@ function vHome(){
   const ins=insights(D,R,ss,rs),att=attention(D),act=activity(D);
   const avgAge=st.avgAge==null?'':' · avg '+Math.round(st.avgAge)+' days old';
   let hero={html:'',mount(){}};
-  try{hero=mmHomeHero({R,labels:ss.buckets.map(b=>b.label),profit:rs.spark,spend:ss.cur,profitTotal:rs.profit,profitPrev:rs.prevProfit,spendTotal:ss.total,spendPrev:ss.prevTotal,sales:rs.sold.length,perDay:ss.perDay,inv:{vals:ts.map(x=>x.v),labels:ts.map(x=>fdy(x.d)),total:inv.total,gain:inv.gain}})}catch(e){}
+  let oi=null,oiPrev=0,oiSer=[],oiChips='';
+  try{const om=owedModel(store.base||store.raw);if(om&&om.hasOwed){oi=owedIncomeStats(om,R);oiPrev=owedIncomeStats(om,{start:R.pStart,end:R.pEnd}).total;oiSer=owedIncomeSeries(om,ss.buckets);if(oi.loanN)oiChips+=incChip('loan','Loans',oi.loan);if(oi.depN)oiChips+=incChip('dep','Kept deposits',oi.dep)}}catch(e){oi=null}
+  try{hero=mmHomeHero({extraTotal:oi?oi.total:0,extraPrev:oiPrev,extra:oiSer,extraParts:oiChips,R,labels:ss.buckets.map(b=>b.label),profit:rs.spark,spend:ss.cur,profitTotal:rs.profit,profitPrev:rs.prevProfit,spendTotal:ss.total,spendPrev:ss.prevTotal,sales:rs.sold.length,perDay:ss.perDay,inv:{vals:ts.map(x=>x.v),labels:ts.map(x=>fdy(x.d)),total:inv.total,gain:inv.gain}})}catch(e){}
   const html=`${hero.html}${mmHomeQuick()}<div class="grid g4 mm3-kpis">
     ${kpi({label:'Reselling profit',val:SM(rs.profit),delta:dlt(rs.profit,rs.prevProfit),spark:rs.spark,sub:plural(rs.sold.length,'sale'),tip:'Profit = sale price − purchase price, for items sold in the selected range. Compared with the previous period of equal length.',act:'goto',v:'reselling'})}
     ${kpi({label:'Spending',val:M(ss.total),delta:dlt(ss.total,ss.prevTotal),inverse:true,spark:ss.cur,sub:mny(ss.perDay)+'/day',tip:'Everything you bought in the range. Refunds are left out. A rise shows in red because it means more money out.',act:'goto',v:'spending'})}
     ${kpi({label:'Invested',val:M(inv.total),delta:undefined,spark:ts.map(x=>x.v),sub:`<span class="${inv.gain>=0?'pos':'neg'}">${SM(inv.gain)}</span> all-time`,tip:'Latest logged value of every portfolio. Gain = value − everything you added.',act:'goto',v:'investing'})}
     ${kpi({label:'Cash tied up in stock',val:M(st.cash),sub:plural(st.stock.length,'item')+avgAge,tip:st.tradeValue>0?'Real cash paid for devices that have not sold yet. Trade-in value is not counted as cash.':'What you paid for devices that have not sold yet.',act:'goto',v:'inventory'})}
   </div>
+  ${profitSourcesCard(rs.profit,oi)}
   ${card('Insights',ins.length?`<div class="insights" style="--n:${Math.min(ins.length,6)}">${ins.slice(0,6).map(x=>`<button class="ins" data-act="${x.act}" data-v="${x.v||''}" data-k="${x.k||''}" data-x="${esc(x.x||'')}" data-id="${x.id||''}"><span class="ic">${ICON[x.i]||ICON.bulb}</span><p>${x.t}</p></button>`).join('')}</div>`:'<div class="empty">Insights appear once there is enough history.</div>','<span class="hint">Fresh picks every day</span>','mm3-ins')}
   <div class="grid g21 mm3-g21">
     <div class="mm3-chartcard">${card('Money in and out, last 12 months',chartBox('homeChart'),homeControls())}</div>
@@ -4949,6 +4985,7 @@ function velocityHtml(rs,kind){
 function vReselling(){
   const D=store.D,R=RG(),k=S.kind;const rs=resellingStats(D,R,k);
   const stl=S.rstat;
+  let oiR=null;try{const omR=owedModel(store.base||store.raw);if(omR&&omR.hasOwed)oiR=owedIncomeStats(omR,R)}catch(e){oiR=null}
   const html=`<div class="sect">${seg('kind',[['All','All'],['Phone','Phones'],['PC','PCs'],['Accessory','Accessories']],k)}<span class="hint" style="color:var(--muted)">Sales are counted by sale date</span></div>
   ${rs.sold.length<3?`<div class="note">${rs.sold.length===0?'No sales in this range.':'Only '+plural(rs.sold.length,'sale')+' in this range, so take the averages with a grain of salt.'} Try a longer range.</div>`:''}
   <div class="grid g6">
@@ -4959,6 +4996,7 @@ function vReselling(){
     ${kpi({label:'Sell-through',val:rs.sellThrough==null?'0%':pct(rs.sellThrough),sub:'all-time, sold ÷ bought',tip:'Share of everything you ever bought that has sold. Not limited to the date range.'})}
     ${kpi({label:'Win rate',val:rs.sold.length?pct(rs.win):'0%',sub:'sales with profit',tip:'Share of sales in the range that made money.'})}
   </div>
+  ${k==='All'?profitSourcesCard(rs.profit,oiR):''}
   <div class="grid g2">
     ${card('Cumulative profit',chartBox('cum'),'<span class="hint">Each point is one sale</span>')}
     ${card('Profit per month',chartBox('perm'))}
@@ -5223,6 +5261,8 @@ function owedModel(raw, today = TODAY) {
         daysIn,
         daysLeft,
         overdue,
+        /* Money kept when the buyer never picked up: the deposit paid. Only set for a Forfeited deposit. */
+        forfeit: statusLower === 'forfeited' ? paid : null,
         notes,
         _hadTotal: totPresent,
         _hadPaid: hadPaid
@@ -5275,6 +5315,12 @@ function owedModel(raw, today = TODAY) {
   loanLoss = Math.round(loanLoss * 100) / 100;
   const loanNet = Math.round((loanProfit - loanLoss) * 100) / 100;
 
+  let depForfeited = 0, depForfeitedN = 0;
+  for (const d of deps) {
+    if (!d.open && d.forfeit != null && d.forfeit > 0) { depForfeited += d.forfeit; depForfeitedN++; }
+  }
+  depForfeited = Math.round(depForfeited * 100) / 100;
+
   let depHeld = 0;
   let depBalance = 0;
   let depOpen = 0;
@@ -5302,7 +5348,9 @@ function owedModel(raw, today = TODAY) {
     loanNet,
     loansClosed,
     loansProfitN,
-    loansLossN
+    loansLossN,
+    depForfeited,
+    depForfeitedN
   };
 
   return {
@@ -5314,6 +5362,41 @@ function owedModel(raw, today = TODAY) {
     untyped,
     totals
   };
+}
+
+/* OTHER INCOME: money that is NOT reselling profit, kept apart so it can be shown in its own colours.
+   loan = closed loans (came back minus went out, can be negative); dep = deposits kept after a Forfeited close.
+   Future paychecks get a third colour (--inc-pay) and a third key here. R (optional {start,end}) limits by the day it closed. */
+function owedIncomeItems(om) {
+  const out = [];
+  if (!om || !om.hasOwed) return out;
+  for (const l of om.loans || []) {
+    if (l.open || l.net == null) continue;
+    out.push({ kind: 'loan', date: l.closed || l.dateOut || null, amount: l.net });
+  }
+  for (const x of om.deps || []) {
+    if (x.open || x.forfeit == null || !(x.forfeit > 0)) continue;
+    out.push({ kind: 'dep', date: x.closed || x.dateIn || null, amount: x.forfeit });
+  }
+  return out;
+}
+function owedIncomeStats(om, R) {
+  const out = { loan: 0, loanN: 0, dep: 0, depN: 0, total: 0 };
+  const all = !R || !R.start || !R.end;
+  for (const it of owedIncomeItems(om)) {
+    if (!all && !(it.date && it.date >= R.start && it.date <= R.end)) continue;
+    out[it.kind] += it.amount;
+    out[it.kind + 'N']++;
+  }
+  out.loan = Math.round(out.loan * 100) / 100;
+  out.dep = Math.round(out.dep * 100) / 100;
+  out.total = Math.round((out.loan + out.dep) * 100) / 100;
+  return out;
+}
+/* One number per chart bucket (buckets are {s,e} dates), so the Home Net line can include other income. */
+function owedIncomeSeries(om, buckets) {
+  const items = owedIncomeItems(om);
+  return (buckets || []).map(b => Math.round(items.reduce((t, it) => t + (it.date && it.date >= b.s && it.date <= b.e ? it.amount : 0), 0) * 100) / 100);
 }
 
 function owedDue(item) {
@@ -6168,11 +6251,13 @@ function vOwed() {
       + kpi({ label: 'Loan profit', val: `<span style="color:var(--good)">${M(t.loanProfit)}</span>`, sub: `${t.loansProfitN} closed loan${t.loansProfitN === 1 ? '' : 's'} paid back more than lent` })
       + kpi({ label: 'Loan losses', val: t.loanLoss > 0 ? `<span style="color:var(--bad)">${M(t.loanLoss)}</span>` : M(0), sub: `${t.loansLossN} closed loan${t.loansLossN === 1 ? '' : 's'} paid back less than lent` })
       + kpi({ label: 'Net from loans', val: `<span style="color:var(${t.loanNet < 0 ? '--bad' : '--good'})">${t.loanNet < 0 ? '-' : ''}${M(Math.abs(t.loanNet))}</span>`, sub: `${t.loansClosed} closed loan${t.loansClosed === 1 ? '' : 's'}` }) + `</div>` : '');
+  const depKept = t.depForfeitedN > 0 ? `<div class="grid g4" style="margin-top:12px">`
+    + kpi({ label: 'Kept from deposits', val: `<span style="color:var(--inc-dep)">${M(t.depForfeited)}</span>`, sub: `${t.depForfeitedN} forfeited deposit${t.depForfeitedN === 1 ? '' : 's'} (not reselling profit)` }) + `</div>` : '';
   const missing = (title, tab) => `<div class="empty"><b>${title} tab missing</b>Add a tab named "${tab}" to your sheet, then press Refresh.</div>`;
   const loanCard = card('Loans out', m.hasLoans ? owedRows(m.loans, 'loan') : missing('Loans', 'Loans'), `<button type="button" class="btn sec" data-lg="open" data-id="loan">Add loan</button>`);
   const depCard = card('Deposits waiting', m.hasDeps ? owedRows(m.deps, 'dep') : missing('Deposits', 'Deposits'), `<button type="button" class="btn sec" data-lg="open" data-id="dep">Add deposit</button>`);
   const untypedNote = m.untyped ? `<p class="hint" style="margin-top:12px">${m.untyped} row${m.untyped === 1 ? '' : 's'} in the Owed tab ${m.untyped === 1 ? 'has' : 'have'} a name but no Type (Loan or Deposit), so ${m.untyped === 1 ? 'it is' : 'they are'} not shown here.</p>` : '';
-  return { html: `${kpis}${owedBackupHtml(m)}${untypedNote}<div style="display:flex;flex-direction:column;gap:20px;margin-top:20px">${loanCard}${depCard}</div>` };
+  return { html: `${kpis}${depKept}${owedBackupHtml(m)}${untypedNote}<div style="display:flex;flex-direction:column;gap:20px;margin-top:20px">${loanCard}${depCard}</div>` };
 }
 
 function owedOpenEdit(kind, id, closing) {
