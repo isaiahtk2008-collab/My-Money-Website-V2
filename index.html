@@ -7636,6 +7636,9 @@ async function submit(){
     try{scTrackDraft(f.id,false)}catch(e){}
     try{remember(f)}catch(e){}
     try{scMemLearn(f)}catch(e){}
+    /* The scan that filled this entry is used up: forget its result so it cannot re-fill the form and save a new draft later.
+       A scan that is still running or waiting for review (a different phone) is left alone. */
+    try{if(!SC.busy&&!SC.pending){SC.res=null;scPillUpdate()}}catch(e){}
     busy=false;
     try{bumpChanges()}catch(e){}
     try{badge()}catch(e){}
