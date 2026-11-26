@@ -7682,6 +7682,27 @@ function scF(fl,key){
 }
 const SC_FORM={buy:{phone:'bphone',pc:'bpc',accessory:'bacc'},sell:{phone:'sphone',pc:'spc',accessory:'sacc'}};
 const SC_NOTE={battery:'Battery',software:'Software',storage:'Storage',display:'Display',cosmetic:'Cosmetic',included:'Included',other:'Other'};
+/*SC-NAMES-START*/
+/* ----- Full device names + Pixel EID serial (scan flow, additive). Each switch below turns its part off; any problem leaves the plain reading untouched.
+   Full name: the screen shows "Pixel 9 Pro", the form gets "Google Pixel 9 Pro" ("Apple MacBook Air ...", "HP OMEN 25L GT12"...). Only well-known product lines get a brand; anything else is left as read.
+   Pixel serial: a Pixel's EID (32 digits, About phone) is used as its serial number; its IMEI goes to Notes. ----- */
+const SC_FULLNAME_ON=true;
+const SC_PIXEL_EID_ON=true;
+const SC_BRAND_OF=[[/^(?:Pixel)\b/i,'Google'],[/^(?:iPhone|iPad|MacBook|iMac|Mac\s?mini|Mac\s?Studio|Mac\s?Pro|AirPods|Magic\s+(?:Mouse|Keyboard|Trackpad))\b/i,'Apple'],[/^Galaxy\b/i,'Samsung'],
+  [/^(?:ThinkPad|IdeaPad|Legion|Yoga|LOQ)\b/i,'Lenovo'],[/^Surface\b/i,'Microsoft'],[/^(?:XPS|Inspiron|Latitude|Precision|Vostro|Alienware)\b/i,'Dell'],
+  [/^(?:ROG|Zenbook|Vivobook|TUF)\b/i,'ASUS'],[/^(?:EliteBook|ProBook|ZBook|Pavilion|Spectre|Envy|OMEN|Victus)\b/i,'HP'],
+  [/^(?:Nitro|Predator|Aspire|Swift|Spin|TravelMate)\b/i,'Acer'],[/^(?:Katana|Stealth|Raider|Sword|Cyborg|Thin)\b/i,'MSI']];
+const SC_BRAND_HAS=/^(?:Google|Apple|Samsung|HP|Dell|Lenovo|ASUS|Acer|MSI|Microsoft|Razer|Huawei|OnePlus|Motorola|Sony|LG|Xiaomi|Logitech|Corsair|SteelSeries|HyperX|Anker|Belkin|JBL|Jabra|Sennheiser|Bose|Beats)\b/i;
+function scFullName(model){
+  const s=String(model==null?'':model).replace(/\s+/g,' ').trim();
+  if(!s||SC_BRAND_HAS.test(s))return s;
+  for(const [re,b] of SC_BRAND_OF)if(re.test(s))return b+' '+s;
+  return s;
+}
+/* an EID is 32 digits starting 89 whose two last digits are a check (the whole number leaves remainder 1 when divided by 97, like the IMEI's check digit). An OCR slip like O for 0 or l for 1 is repaired first; a reading that fails the check is NOT an EID and is never filled. */
+function scEidClean(v){const d=String(v==null?'':v).replace(/[\s:\-]/g,'').replace(/[OoDQ]/g,'0').replace(/[lI|!]/g,'1').replace(/[Ss]/g,'5').replace(/B/g,'8');
+  if(!/^89\d{30}$/.test(d))return null;let r=0;for(let i=0;i<d.length;i++)r=(r*10+(d.charCodeAt(i)-48))%97;return r===1?d:null}
+/*SC-NAMES-END*/
 
 /* ----- Past-purchase suggestions (Phase 1). Reads ONLY the bought rows the page already loaded; sends nothing, stores nothing.
    Strong ID from the photo (model number / identifier, found in the scan's notes) or an exact normalised model name selects past rows.
@@ -7739,6 +7760,10 @@ function scBuild(formId,res,rawIn){
   /* serial and IMEI: exact characters, never filled when unclear. An IMEI must also pass its check digit. */
   let serial=null,imei=null;
   const sr=scF(fl,'serial'),im=scF(fl,'imei');
+  /* Pixel: the EID stands in for the serial number (only a 32-digit EID that passes its check is used) */
+  let eid=null;const ed=scF(fl,'eid'),mdl=scF(fl,'model');
+  const isPixel=typeof SC_PIXEL_EID_ON!=='undefined'&&SC_PIXEL_EID_ON&&typeof scEidClean==='function'&&!!(mdl&&/\bpixel\b/i.test(String(mdl.v)));
+  if(typeof scEidClean==='function'&&ed){const v=scEidClean(ed.v);if(v&&ed.conf!=='low')eid=Object.assign({},ed,{v,conf:'high'});else if(isPixel)o.checks.push('The EID looked like "'+scTxt(ed.v).slice(0,40)+'" but was not clear enough (it must be 32 digits and pass the check test), so it was left blank. Read it from the photo.')}
   if(sr){const v=scIdN(sr.v);if(sr.conf!=='low'&&/^[A-Z0-9]{5,25}$/.test(v)&&!SC_JUNK_ID.test(v))serial=Object.assign({},sr,{v});else o.checks.push('The serial number looked like "'+scTxt(sr.v).slice(0,40)+'" but was not clear enough, so it was left blank. Read it from the photo.')}
   if(im){const d=String(im.v).replace(/\D/g,'');if(im.conf!=='low'&&d.length===15&&scLuhn(d))imei=Object.assign({},im,{v:d});else o.checks.push('The IMEI could not be read reliably (it must be 15 digits and pass the check-digit test), so it was left blank. Dial *#06# and photograph that screen.')}
   const isBuy=/^b/.test(formId);
@@ -7765,10 +7790,11 @@ function scBuild(formId,res,rawIn){
   }
   if(isBuy){
     const idk='Serial Number';
-    if(formId==='bphone'){const main=imei||serial;if(main)put(idk,main.v,main);if(imei&&serial)o.noteLines.push('Serial: '+serial.v);}
+    if(formId==='bphone'&&isPixel&&eid){put(idk,eid.v,eid);if(imei)o.noteLines.push('IMEI: '+imei.v);if(serial)o.noteLines.push('Serial: '+serial.v)}
+    else if(formId==='bphone'){const main=imei||serial;if(main)put(idk,main.v,main);if(imei&&serial)o.noteLines.push('Serial: '+serial.v);if(eid)o.noteLines.push('EID: '+eid.v)}
     else{if(serial)put(idk,serial.v,serial);if(imei)o.noteLines.push('IMEI: '+imei.v)}
     const model=formId==='bpc'?'PC model':formId==='bphone'?'Phone Model':'Model';
-    text(model,'model');text('Color','color');
+    text(model,'model',(typeof SC_FULLNAME_ON!=='undefined'&&SC_FULLNAME_ON&&typeof scFullName==='function')?v=>scFullName(v):null);text('Color','color');
     const stor=(v,s)=>{const m=scMarketed(s.totalGB);const tb=n=>n>=1024?(n/1024)+'TB':n+'GB';return m?(s.totalGB===m?tb(m):tb(m)+' (shows '+scTxt(s.v).replace(/\s*GB$/i,'')+' GB)'):v};
     if(formId==='bpc'){
       text('CPU (and specs)','cpu');text('GPU 1 (and specs)','gpu1');text('GPU 2 (and specs)','gpu2');
@@ -7785,10 +7811,10 @@ function scBuild(formId,res,rawIn){
     }
   }else{
     /* selling: only the device is picked (by an exact serial/IMEI match against what is unsold), the rest stays yours to fill */
-    const itemF=f.f.find(x=>x.t==='item'),ids=[serial&&serial.v,imei&&imei.v].filter(Boolean);
+    const itemF=f.f.find(x=>x.t==='item'),ids=[serial&&serial.v,imei&&imei.v,eid&&eid.v].filter(Boolean);
     if(ids.length&&itemF){
       const hits=unsold(f.kind).filter(x=>{const it=x.it,c=[it.serial,it.specs&&it.specs.IMEI].filter(Boolean).map(scIdN);return ids.some(i=>c.includes(i))});
-      if(hits.length===1)put(itemF.k,hits[0].l,serial||imei);
+      if(hits.length===1)put(itemF.k,hits[0].l,serial||imei||eid);
       else o.checks.push(hits.length?'More than one unsold device matches that serial/IMEI, so none was picked.':'No unsold device in your stock has that serial/IMEI ('+ids.join(', ')+'), so none was picked. Choose it yourself.');
     }else o.checks.push('No readable serial or IMEI was found, so the device was not picked. Choose it yourself.');
   }
@@ -8293,6 +8319,17 @@ function scOcrImeis(pg){
   });
   return out;
 }
+/* Android "About phone" lists the eSIM's EID (32 digits, sometimes wrapped onto the next line). Only a value that passes the EID check is returned. */
+function scOcrEids(pg){
+  const L=scOcrLines(pg&&pg.text),out=[];
+  L.forEach((l,i)=>{
+    const m=l.match(/(?:^|[^A-Za-z])EID\b\s*[:;]?\s*(.*)$/);if(!m)return;
+    const a=m[1],b=L[i+1]||'',c=L[i+2]||'';
+    const d=scEidClean(a)||scEidClean(a+b)||scEidClean(a+b+c)||scEidClean(b)||scEidClean(b+c);   /* the value may sit on the next line(s) when the label is alone or the number wraps */
+    if(d&&!out.includes(d))out.push(d);
+  });
+  return out;
+}
 const scNum=s=>parseFloat(String(s).replace(/,/g,''));
 const scSize=(n,u)=>/^t/i.test(u)?n*1024:n;
 const scGBtxt=(n,u)=>(Math.round(n*100)/100)+' '+String(u).toUpperCase();
@@ -8389,6 +8426,7 @@ function scOcrParse(pages){
     const batt=/battery\s*report|installed\s*batteries/i.test(all);   /* a Windows battery report lists the BATTERY's serial number, not the computer's */
     if(!batt)scOcrSerials(pg).forEach(v=>{const loc=scOcrLoc(pg,v),c=Number(loc.c);add('serial',v,'serial '+v,pg,{conf:c>=85?'medium':'low',bbox:loc.b})});
     scOcrImeis(pg).forEach(d=>{imeis.push({d,pg});add('imei',d,'IMEI '+d,pg,{conf:'high',bbox:scOcrLoc(pg,d).b})});
+    scOcrEids(pg).forEach(d=>add('eid',d,'EID '+d,pg,{conf:'high'}));   /* passes the EID check, so as sure as an IMEI */
     L.forEach((l0,i)=>{
       /* common OCR slip: a 1 read as l/I in front of a screen size ("l3.3-inch") */
       const l=l0.replace(/\b[lI](\d(?:[.,]\d)?)(?=\s?-?\s?inch)/gi,'1$1').replace(/\b(iPhone\s+)[lI](?=[0-7](?:\s|$))/g,(m,a)=>a+'1');   /* "iPhone l3" is iPhone 13 */
@@ -8405,7 +8443,10 @@ function scOcrParse(pages){
       if((m=l.match(/\bmodel\s*identifier\s*[:;]?\s*([A-Za-z]+\d+,\d+)\b/i))){const id=m[1];note('other','Model identifier: '+id,pg);const nm=SC_MAC_ID[Object.keys(SC_MAC_ID).find(k=>k.toLowerCase()===id.toLowerCase())];if(nm)add('model3',nm,l,pg,{conf:'medium'})}
       if((m=l.match(/\bmodel\s*(?:number|no\.?)?\s*[:;]?\s*(A[12]\d{3})\b/i))){const an=m[1].toUpperCase();note('other','Model number: '+an,pg);if(SC_MAC_A[an])add('model3',SC_MAC_A[an],l,pg,{conf:'medium'})}
       else if((m=l.match(/\bmodel\s*(?:number|no\.?)\s*[:;]?\s+([A-Z0-9][A-Z0-9\-/]{3,19})\b/i)))note('other','Model number: '+m[1].toUpperCase(),pg);
-      if((m=l.match(SC_BRAND)))add('model2',m[1].replace(/\s{2,}/g,' '),l,pg,{conf:'medium'});
+      /* HP OMEN desktops: Windows shows "OMEN 25L Desktop GT12-0xxx"; the name people use is "OMEN 25L GT12" (the trailing part is a regional code) */
+      const om=l.match(/\bOMEN\s+(\d{2}L?)\s+(?:Gaming\s+)?Desktop(?:\s+PC)?\s+([A-Z]{2}\d{2})(?:-[0-9A-Za-z]{1,5})?\b/i);
+      if(om)add('model2','OMEN '+om[1].toUpperCase()+' '+om[2].toUpperCase(),l,pg,{conf:'medium'});
+      else if((m=l.match(SC_BRAND)))add('model2',m[1].replace(/\s{2,}/g,' '),l,pg,{conf:'medium'});
       /* CPU / chip: labelled, or recognised by its name alone (Task Manager, sticker, "Chip Apple M1") */
       const cl=(m=l.match(/\b(?:chip|processor|cpu)\s*[:;]?\s+(?!serial)(\S.{3,70})$/i))?m[1].replace(/\((?:R|TM)\)/gi,'').replace(/\s+(?:CPU\s*)?@\s*\d.*$/i,'').replace(/\s*\(\s*\d(?:\.\d+)?\s*GHz\s*\)\s*$/i,'').replace(/\s+(?:CPU\s*)?\d(?:\.\d+)?\s*GHz.*$/i,'').replace(/\s+with\s+(?:AMD\s+)?Radeon.*$/i,'').replace(/\s{2,}/g,' ').trim():'';
       if(m&&SC_CPU_OK.test(cl)&&!/^@/.test(cl))add('cpu',cl,l,pg);
@@ -8472,7 +8513,7 @@ function scOcrParse(pages){
     {const m=J.match(/(\d{3,4})\s*[x×]\s*(\d{3,4})\s*,?\s*(\d{2,3})\s*Hz/i);if(m){note('display','Resolution '+m[1]+' × '+m[2]+', '+m[3]+' Hz',pg);add('hz',m[3],m[0],pg)}}
   });
   /* one value per field: if photos disagree, leave it blank and say so. "Same" is judged per kind of value. */
-  const fields={model:null,color:null,serial:null,imei:null,cpu:null,gpu1:null,gpu2:null,ram:null,storage:null,screen:null,os:null,chargerIncluded:null,boxIncluded:null,caseIncluded:null,connection:null,payAmount:null,payParty:null,payDate:null,payDirection:null};
+  const fields={model:null,color:null,serial:null,imei:null,eid:null,cpu:null,gpu1:null,gpu2:null,ram:null,storage:null,screen:null,os:null,chargerIncluded:null,boxIncluded:null,caseIncluded:null,connection:null,payAmount:null,payParty:null,payDate:null,payDirection:null};
   const norm=s=>String(s).toUpperCase().replace(/[^A-Z0-9]/g,'');
   const rank={high:3,medium:2,low:1};
   const pick=(key,label,o)=>{
@@ -8498,6 +8539,7 @@ function scOcrParse(pages){
   if(fields.screen&&!/Hz/i.test(fields.screen.value)){const hz=[...new Set((C.hz||[]).map(c=>c.v))];if(hz.length===1)fields.screen.value+=', '+hz[0]+'Hz'}
   {const c=pick('serial','serial number');if(c)fields.serial=out(c,c.bbox?{bbox:c.bbox}:null)}
   {const c=(C.imei||[])[0];if(c)fields.imei=out(c,c.bbox?{bbox:c.bbox}:null)}   /* a dual-SIM phone has two real IMEIs: the first is used, the others go to Notes */
+  {const c=(C.eid||[])[0];if(c)fields.eid=out(c)}   /* the EID passed its check; two different EIDs would be two devices, so the first is used */
   imeis.slice(0,3).forEach((x,i)=>{if(fields.imei&&x.d!==fields.imei.value)note('other','IMEI '+(i+1)+': '+x.d,x.pg)});
   {const uniq=[];(C.gpu||[]).forEach(c=>{const n=norm(c.v);if(!uniq.some(u=>{const q=norm(u.v);return q.includes(n)||n.includes(q)}))uniq.push(c)});
    const ord=uniq.filter(c=>!/intel/i.test(c.v)).concat(uniq.filter(c=>/intel/i.test(c.v)));
@@ -8804,7 +8846,7 @@ function scCpuFixGen(v){
    A shorter reading backs a longer one that contains it ("Windows 11" backs "Windows 11 Home": the short one just lost the end of the line). */
 function scOcrVoteFields(readResults){
   const out={},rs=(Array.isArray(readResults)?readResults:[]).filter(Boolean),nz=v=>String(v==null?'':v).toLowerCase().replace(/[^a-z0-9]/g,''),rank={high:3,medium:2,low:1};
-  const keys={};rs.forEach(r=>Object.keys(r.fields||{}).forEach(k=>{if(r.fields[k]&&!/serial|imei/i.test(k))keys[k]=1}));
+  const keys={};rs.forEach(r=>Object.keys(r.fields||{}).forEach(k=>{if(r.fields[k]&&!/serial|imei|eid/i.test(k))keys[k]=1}));
   Object.keys(keys).forEach(k=>{
     const g={};rs.forEach(r=>{let f=r.fields&&r.fields[k];if(!f||!f.value)return;
       if(k==='cpu'){const fx=scCpuFixGen(f.value);if(fx!==f.value)f=Object.assign({},f,{value:fx})}
