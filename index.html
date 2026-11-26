@@ -5173,6 +5173,8 @@ function owedModel(raw, today = TODAY) {
       const open = statusLower === '' || statusLower === 'out' || statusLower === 'open';
       const daysOut = datePrimary ? Math.max(0, diffD(datePrimary, today)) : null;
       const overdue = Boolean(open && daysLeft !== null && daysLeft < 0);
+      /* Result of a CLOSED loan: what came back minus what went out. Above 0 is profit, below 0 is a loss. Open loans have no result yet (null). */
+      const net = open ? null : Math.round((repaid - loaned) * 100) / 100;
 
       loans.push({
         id,
@@ -5191,6 +5193,7 @@ function owedModel(raw, today = TODAY) {
         daysOut,
         daysLeft,
         overdue,
+        net,
         notes,
         _hadLoaned: totPresent,
         _hadRepaid: hadPaid
@@ -5260,6 +5263,18 @@ function owedModel(raw, today = TODAY) {
     }
   }
 
+  /* Closed loans only: each one that came back with more than was lent is profit, each one that came back with less is a loss. */
+  let loanProfit = 0, loanLoss = 0, loansClosed = 0, loansProfitN = 0, loansLossN = 0;
+  for (const l of loans) {
+    if (l.open || l.net == null) continue;
+    loansClosed++;
+    if (l.net > 0) { loanProfit += l.net; loansProfitN++; }
+    else if (l.net < 0) { loanLoss += -l.net; loansLossN++; }
+  }
+  loanProfit = Math.round(loanProfit * 100) / 100;
+  loanLoss = Math.round(loanLoss * 100) / 100;
+  const loanNet = Math.round((loanProfit - loanLoss) * 100) / 100;
+
   let depHeld = 0;
   let depBalance = 0;
   let depOpen = 0;
@@ -5281,7 +5296,13 @@ function owedModel(raw, today = TODAY) {
     depBalance,
     depOpen,
     depOverdue,
-    overdue: loansOverdue + depOverdue
+    overdue: loansOverdue + depOverdue,
+    loanProfit,
+    loanLoss,
+    loanNet,
+    loansClosed,
+    loansProfitN,
+    loansLossN
   };
 
   return {
@@ -5301,6 +5322,41 @@ function owedDue(item) {
   if (d < 0) return { text: `${-d} day${s(-d)} overdue`, tone: 'bad' };
   if (d === 0) return { text: 'Due today', tone: 'warn' };
   return { text: `Due in ${d} day${s(d)}`, tone: d <= 3 ? 'warn' : 'good' };
+}
+
+/* Wording and colour for the result of a closed loan (net = repaid minus loaned). */
+function owedResult(net) {
+  if (net == null) return { text: '', tone: '', kind: 'open' };
+  if (net > 0) return { text: `Profit ${mny(net)}`, tone: 'good', kind: 'profit' };
+  if (net < 0) return { text: `Loss ${mny(-net)}`, tone: 'bad', kind: 'loss' };
+  return { text: 'Even', tone: '', kind: 'even' };
+}
+
+/* Live preview inside the close dialog: what the loan's result would be if saved as typed. Read-only; returns {text, tone} or null when it cannot be worked out. */
+function owedClosePreview(item, repayText, statusText) {
+  if (!item || item.loaned == null) return null;
+  const closing = owedStr(statusText).toLowerCase() !== 'out';
+  if (!closing) return null;
+  const t = owedStr(repayText);
+  const add = t === '' ? 0 : num(t);
+  if (add == null || add < 0) return null;
+  const r = owedResult(Math.round((item.repaid + add - item.loaned) * 100) / 100);
+  return { text: `This closes as: ${r.text}`, tone: r.tone };
+}
+
+/* Everything still open, for the + button's "Close a loan or deposit" list. Only entries with a Row ID can be changed, so only those are listed. */
+function owedCloseList(m) {
+  const out = [];
+  if (!m || !m.hasOwed) return out;
+  for (const l of m.loans) if (l.open && l.id) out.push({ kind: 'loan', id: l.id, name: l.name, what: l.item, left: l.owed, due: l.due });
+  for (const d of m.deps) if (d.open && d.id) out.push({ kind: 'dep', id: d.id, name: d.name, what: d.device, left: d.balance, due: d.pickup });
+  out.sort((a, b) => {
+    if (a.due && b.due) return a.due.getTime() - b.due.getTime();
+    if (a.due) return -1;
+    if (b.due) return 1;
+    return 0;
+  });
+  return out;
 }
 
 /* Shared by both kinds: amount parsing and date checking. Returns {error} or the parsed values. */
@@ -5436,7 +5492,7 @@ function owedDeviceFor(dep) {
 function owedDetailGrid(x, isLoan) {
   const d = v => (v ? fdy(v) : '—');
   const rows = isLoan
-    ? [['Amount loaned', mny(x.loaned)], ['Repaid', mny(x.repaid)], ['Balance left', mny(x.owed)], ['Date loaned', d(x.dateOut)], ['Return by', d(x.due)], ['Date closed', d(x.closed)], ['Status', x.status || 'Out'], ['Phone / Email', x.contact || '—'], ['Notes', x.notes || '—']]
+    ? [['Amount loaned', mny(x.loaned)], ['Repaid', mny(x.repaid)], ['Balance left', mny(x.owed)], ['Date loaned', d(x.dateOut)], ['Return by', d(x.due)], ['Date closed', d(x.closed)], ['Result', owedResult(x.net).text || '—'], ['Status', x.status || 'Out'], ['Phone / Email', x.contact || '—'], ['Notes', x.notes || '—']]
     : [['Total price', mny(x.total)], ['Deposit paid', mny(x.paid)], ['Balance', mny(x.balance)], ['Deposit taken', d(x.dateIn)], ['Pickup by', d(x.pickup)], ['Date closed', d(x.closed)], ['Status', x.status || 'Waiting'], ['Phone / Email', x.contact || '—'], ['Notes', x.notes || '—']];
   return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 16px;margin:8px 0">`
     + rows.map(r => `<div><div class="hint">${esc(r[0])}</div><div>${esc(r[1])}</div></div>`).join('') + `</div>`;
@@ -5464,8 +5520,10 @@ function owedRows(items, kind, openN) {
     html += `<details style="margin-top:14px"><summary style="cursor:pointer;color:var(--muted);font-weight:600">Closed (${closed.length})</summary><div style="margin-top:8px">`
       + closed.map(x => {
         const dt = x.closed ? fdy(x.closed) : '';
+        const res = isLoan ? owedResult(x.net) : null;
+        const resHtml = res && res.text ? `<span class="chip ${res.tone}" style="margin-right:6px">${esc(res.text)}</span>` : '';
         const who = `${esc(x.name)}${(isLoan ? x.item : x.device) ? ` <span class="hint" style="color:var(--muted)">(${esc(isLoan ? x.item : x.device)})</span>` : ''}`;
-        return `<details style="border-bottom:var(--ap3-w,1px) solid var(--ap3-lc,var(--line));padding:6px 0;font-size:13px"><summary style="cursor:pointer;display:flex;justify-content:space-between;gap:10px"><span>${who}</span><span class="hint">${esc(x.status || 'Closed')}${dt ? ' · ' + esc(dt) : ''}</span></summary>`
+        return `<details style="border-bottom:var(--ap3-w,1px) solid var(--ap3-lc,var(--line));padding:6px 0;font-size:13px"><summary style="cursor:pointer;display:flex;justify-content:space-between;gap:10px"><span>${who}</span><span class="hint">${resHtml}${esc(x.status || 'Closed')}${dt ? ' · ' + esc(dt) : ''}</span></summary>`
           + `${owedDetailGrid(x, isLoan)}<div>${editBtn(x) || '<span class="hint">Needs a Row ID</span>'}</div></details>`;
       }).join('') + `</div></details>`;
   }
@@ -6105,7 +6163,11 @@ function vOwed() {
     + kpi({ label: 'Owed to you', val: M(t.owedToMe), sub: `${t.loansOpen} open loan${t.loansOpen === 1 ? '' : 's'}` })
     + kpi({ label: 'Overdue', val: t.overdue > 0 ? `<span style="color:var(--bad)">${t.overdue}</span>` : String(t.overdue), sub: 'loans and deposits past their date' })
     + kpi({ label: 'Deposits held', val: M(t.depHeld), sub: `${t.depOpen} waiting for pickup` })
-    + kpi({ label: 'Due at pickup', val: M(t.depBalance), sub: 'still owed on deposit devices' }) + `</div>`;
+    + kpi({ label: 'Due at pickup', val: M(t.depBalance), sub: 'still owed on deposit devices' }) + `</div>`
+    + (t.loansClosed > 0 ? `<div class="grid g4" style="margin-top:12px">`
+      + kpi({ label: 'Loan profit', val: `<span style="color:var(--good)">${M(t.loanProfit)}</span>`, sub: `${t.loansProfitN} closed loan${t.loansProfitN === 1 ? '' : 's'} paid back more than lent` })
+      + kpi({ label: 'Loan losses', val: t.loanLoss > 0 ? `<span style="color:var(--bad)">${M(t.loanLoss)}</span>` : M(0), sub: `${t.loansLossN} closed loan${t.loansLossN === 1 ? '' : 's'} paid back less than lent` })
+      + kpi({ label: 'Net from loans', val: `<span style="color:var(${t.loanNet < 0 ? '--bad' : '--good'})">${t.loanNet < 0 ? '-' : ''}${M(Math.abs(t.loanNet))}</span>`, sub: `${t.loansClosed} closed loan${t.loansClosed === 1 ? '' : 's'}` }) + `</div>` : '');
   const missing = (title, tab) => `<div class="empty"><b>${title} tab missing</b>Add a tab named "${tab}" to your sheet, then press Refresh.</div>`;
   const loanCard = card('Loans out', m.hasLoans ? owedRows(m.loans, 'loan') : missing('Loans', 'Loans'), `<button type="button" class="btn sec" data-lg="open" data-id="loan">Add loan</button>`);
   const depCard = card('Deposits waiting', m.hasDeps ? owedRows(m.deps, 'dep') : missing('Deposits', 'Deposits'), `<button type="button" class="btn sec" data-lg="open" data-id="dep">Add deposit</button>`);
@@ -6113,16 +6175,19 @@ function vOwed() {
   return { html: `${kpis}${owedBackupHtml(m)}${untypedNote}<div style="display:flex;flex-direction:column;gap:20px;margin-top:20px">${loanCard}${depCard}</div>` };
 }
 
-function owedOpenEdit(kind, id) {
+function owedOpenEdit(kind, id, closing) {
   const m = owedModel(store.base || store.raw), isLoan = kind === 'loan';
   const item = (isLoan ? m.loans : m.deps).find(x => x.id === id);
   if (!item) { toast('That entry is no longer there. Press Refresh.'); return; }
-  const title = isLoan ? 'Update loan' : 'Update deposit';
+  const title = closing ? (isLoan ? 'Close loan' : 'Close deposit') : (isLoan ? 'Update loan' : 'Update deposit');
   const summary = isLoan ? `${item.item || 'Loan'} · balance ${mny(item.owed)}` : `${item.device || 'Deposit'} · ${mny(item.balance)} still to pay`;
   const curDate = isLoan ? (item.due ? isoDay(item.due) : '') : (item.pickup ? isoDay(item.pickup) : '');
   const statuses = isLoan ? OWED_LOAN_STATUSES : OWED_DEP_STATUSES;
-  const cur = (item.status || '').toLowerCase() === 'open' || !item.status ? statuses[0].toLowerCase() : item.status.toLowerCase();
+  /* Closing mode (from the + button): the status starts on the first closing choice (Returned / Picked Up) instead of the current open one. */
+  const cur = closing ? statuses[1].toLowerCase() : ((item.status || '').toLowerCase() === 'open' || !item.status ? statuses[0].toLowerCase() : item.status.toLowerCase());
   const opts = statuses.map(s => `<option value="${esc(s)}"${s.toLowerCase() === cur ? ' selected' : ''}>${esc(s)}</option>`).join('');
+  const prev = isLoan ? owedClosePreview(item, '', cur) : null;
+  const prevHtml = isLoan ? `<p class="hint" id="owed-net" aria-live="polite" style="margin:8px 0 0;font-weight:600;${prev && prev.tone ? `color:var(--${prev.tone})` : ''}">${prev ? esc(prev.text) : ''}</p>` : '';
   openOverlay(`<form class="palbox" style="padding:20px" role="dialog" aria-modal="true" aria-label="${title}" data-owedform="${kind}" data-oid="${esc(id)}" novalidate>
     <div class="dh"><div><h2>${title}</h2><p class="hint" style="color:var(--muted)">${esc(item.name)} · ${esc(summary)}</p></div><button type="button" class="ibtn" data-act="close" aria-label="Close">${ICON.x}</button></div>
     <div class="ed-grid">
@@ -6130,8 +6195,27 @@ function owedOpenEdit(kind, id) {
       <div class="ed-f"><label for="owed-date">${isLoan ? 'Return by' : 'Pick up by'}</label><input type="date" id="owed-date" value="${esc(curDate)}"></div>
     </div>
     <div class="ed-f"><label for="owed-status">Status</label><select id="owed-status">${opts}</select></div>
+    ${prevHtml}
     <p class="ed-msg" id="ed-msg" role="alert" hidden></p>
-    <div class="ed-actions"><button type="button" class="btn sec" data-act="close">Cancel</button><button type="submit" class="btn">Save changes</button></div></form>`, 'pal');
+    <div class="ed-actions"><button type="button" class="btn sec" data-act="close">Cancel</button><button type="submit" class="btn">${closing ? 'Close it' : 'Save changes'}</button></div></form>`, 'pal');
+}
+
+/* Keeps the "This closes as: Profit / Loss" line under the status in step with what is typed. Read-only. */
+document.addEventListener('input', e => owedRefreshPreview(e));
+document.addEventListener('change', e => owedRefreshPreview(e));
+function owedRefreshPreview(e) {
+  try {
+    const f = e.target && e.target.closest && e.target.closest('[data-owedform="loan"]');
+    if (!f) return;
+    const out = document.getElementById('owed-net');
+    if (!out) return;
+    const m = owedModel(store.base || store.raw);
+    const item = m.loans.find(x => x.id === f.dataset.oid);
+    const g = k => { const el = document.getElementById(k); return el ? el.value : ''; };
+    const p = item ? owedClosePreview(item, g('owed-pay'), g('owed-status')) : null;
+    out.textContent = p ? p.text : '';
+    out.style.color = p && p.tone ? `var(--${p.tone})` : '';
+  } catch (err) { /* a preview problem must never block saving */ }
 }
 
 async function owedSave(kind, id) {
@@ -7364,7 +7448,29 @@ function menuScreen(){
      Dot colours follow each form's position in FORMS so they stay the same as before the reorder. */
   const groups=['Money','Buying','Selling'].map(g=>`<h4 class="lg-gh">${g}</h4><div class="list">${menuForms(g).map(f=>{const n=FORMS.indexOf(f)+1;const d=J('lg.d.'+f.id,null),deco=ssRowDecor(f.id,SS),dr=draftState(d),drAttr=(dr&&!deco.cls)?` data-dr="${dr}"`:'',drBadge=(dr&&!deco.cls)?'<i class="ss-b ss-b-draft" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l4-1L19 8l-3-3L5 16z"/></svg></i>':'';
     return `<button class="li${deco.cls}" data-lg="open" data-id="${f.id}"><span class="ic"${deco.iconAttrs}${drAttr}>${FORM_ICO[f.id]||'<i class="dot" style="background:var(--c'+n+')"></i>'}${deco.badge}${drBadge}</span><span class="tx"><b>${E(f.t)}</b><span>${E(f.s)}</span></span>${dr?`<span class="pill draft${dr==='stale'?' glow-draft':''}">${dr==='stale'?'Draft · waiting':'Draft'}</span>`:''}${chev()}</button>`}).join('')}</div>`).join('');
-  return `<div class="lg-top"><div><h2>Log an entry</h2><p>Goes straight to your sheet</p></div><div class="lg-r"><button class="ibtn" data-lg="settings" aria-label="Sheet connection and queue">${ICO.cfg}</button>${xbtn()}</div></div><div class="lg-stat">${status}</div><button class="lg-scan" data-sc="fresh" type="button"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span><span class="tx"><b>Scan photos</b><span>Pre-fill a form from pictures</span></span></button>${groups}<h4 class="lg-gh">Tools</h4><div class="list"><button class="li" data-lg="calc"><span class="tx"><b>Margin calculator</b><span>Work out a listing price from cost and target profit</span></span>${chev()}</button></div><div style="height:24px"></div>`;
+  return `<div class="lg-top"><div><h2>Log an entry</h2><p>Goes straight to your sheet</p></div><div class="lg-r"><button class="ibtn" data-lg="settings" aria-label="Sheet connection and queue">${ICO.cfg}</button>${xbtn()}</div></div><div class="lg-stat">${status}</div><button class="lg-scan" data-sc="fresh" type="button"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span><span class="tx"><b>Scan photos</b><span>Pre-fill a form from pictures</span></span></button>${groups}${owedCloseMenuHtml()}<h4 class="lg-gh">Tools</h4><div class="list"><button class="li" data-lg="calc"><span class="tx"><b>Margin calculator</b><span>Work out a listing price from cost and target profit</span></span>${chev()}</button></div><div style="height:24px"></div>`;
+}
+
+/* "Close a loan or deposit" in the + menu. Lists every open loan and deposit; picking one opens the normal close dialog (same safe, logged edit as the Owed tab).
+   Any problem here is swallowed so the + menu itself can never fail to open. */
+function owedCloseMenuHtml(){
+  try{
+    const m=owedModel(store.base||store.raw);if(!m.hasOwed)return '';
+    const n=owedCloseList(m).length;
+    return `<h4 class="lg-gh">Loans &amp; deposits</h4><div class="list"><button class="li" data-lg="owedclose"><span class="tx"><b>Close a loan or deposit</b><span>${n?n+' open · log the payback and see profit or loss':'Nothing open right now'}</span></span>${chev()}</button></div>`;
+  }catch(e){return ''}
+}
+function owedCloseScreen(){
+  let list=[];
+  try{list=owedCloseList(owedModel(store.base||store.raw))}catch(e){list=[]}
+  const rows=list.map(x=>{
+    const isLoan=x.kind==='loan';
+    const sub=[x.what,(isLoan?'owes ':'balance ')+mny(x.left),x.due?(isLoan?'return by ':'pick up by ')+fdy(x.due):''].filter(Boolean).join(' · ');
+    return `<button class="li" data-lg="owedpick" data-kind="${x.kind}" data-oid="${E(x.id)}"><span class="tx"><b>${E(x.name)} <span class="hint" style="color:var(--muted)">· ${isLoan?'Loan':'Deposit'}</span></b><span>${E(sub)}</span></span>${chev()}</button>`;
+  }).join('');
+  return `<div class="lg-top"><div style="display:flex;gap:10px;align-items:center"><button class="ibtn" data-lg="menu" aria-label="Back to all forms">${ICO.back}</button><div><h2>Close a loan or deposit</h2><p>Pick the one that was paid back or picked up</p></div></div><div class="lg-r">${xbtn()}</div></div>`
+    +(rows?`<div class="list">${rows}</div>`:`<div class="empty"><b>Nothing open</b>There are no open loans or deposits. Use Loan out or Deposit taken to add one.</div>`)
+    +`<div style="height:24px"></div>`;
 }
 
 function fieldHtml(f,i){
@@ -9248,6 +9354,8 @@ document.addEventListener('click',e=>{
   const t=e.target.closest('[data-lg]');if(!t)return;const a=t.dataset.lg,d=t.dataset;
   switch(a){
     case 'menu':cur=null;show(menuScreen());flush(true);break;
+    case 'owedclose':cur=null;show(owedCloseScreen());break;
+    case 'owedpick':{const k=d.kind==='dep'?'dep':'loan',oid=d.oid;closeOverlay();setTimeout(()=>owedOpenEdit(k,oid,true),0);break}
     case 'open':openForm(d.id,false);break;
     case 'swform':{if(d.v==='IPO')openForm('ipo',false);else if(d.v==='Pre-IPO')openForm('preipo',false);
       else{openForm('trade',false);V['Asset Type']=d.v;$$('[data-lg="pick"]').forEach(b=>{if(b.dataset.k==='Asset Type')b.setAttribute('aria-pressed',b.dataset.v===d.v)});saveDraft()}break}
