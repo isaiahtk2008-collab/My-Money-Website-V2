@@ -7415,8 +7415,9 @@ window.mmSellFromDeposit=function(info){
 };
 /* ---------- Open / draft ---------- */
 const dKey=id=>'lg.d.'+id;
+const INFL_KEY='lg.inflight';
 const meaningful=()=>cur&&Object.keys(V).some(k=>{const x=fOf(k.replace(/#$/,''));if(!x||x.t==='date')return false;const v=V[k];return Array.isArray(v)?v.length:String(v||'').trim()});
-function saveDraft(){clearTimeout(saveT);saveT=setTimeout(()=>{if(!cur)return;if(meaningful())W(dKey(cur.id),{v:V,ts:Date.now()});else{LS.set(dKey(cur.id),'');if(typeof scTrackDraft==='function')scTrackDraft(cur.id,false)}},300)}
+function saveDraft(){clearTimeout(saveT);saveT=setTimeout(()=>{if(!cur||busy)return;if(meaningful())W(dKey(cur.id),{v:V,ts:Date.now()});else{LS.set(dKey(cur.id),'');if(typeof scTrackDraft==='function')scTrackDraft(cur.id,false)}},300)}
 function openForm(id,rep){
   cur=BY[id];V={};let ts=0;const d=J(dKey(id),null);
   if(!rep&&d&&d.v){V=d.v;ts=d.ts||Date.now()}
@@ -7603,6 +7604,16 @@ async function flush(silent){
   if(sent){afterSend();if(!silent)toast(sent===1?'Sent 1 waiting entry':`Sent ${sent} waiting entries`)}
   return sent}
 
+/* An entry that was mid-send when the page closed (or the phone slept) is moved to the waiting queue, so it is sent again.
+   The sheet script ignores an id it has already saved, so this can never add a second row. */
+function adoptInflight(){
+  try{
+    if(busy)return;const it=J(INFL_KEY,null);if(!it)return;
+    if(!it.id||!it.tab&&!it.req){LS.set(INFL_KEY,'');return}
+    if(Date.now()-(it.ts||0)<60000)return;   /* still being sent, most likely by another open tab */
+    const q=J('lg.q',[]);if(!q.some(x=>x&&x.id===it.id)){q.push(it);if(!W('lg.q',q))return}
+    LS.set(INFL_KEY,'');badge()
+  }catch(e){}}
 async function submit(){
   if(busy||!cur)return;const f=cur;const okF=validate(f),okP=payValidate(f);if(!okF)return;
   if(!okP){const w=$$('.lg-f').find(e=>e.dataset.f==='Cash Received');w&&w.scrollIntoView({block:'center',behavior:'smooth'});if(!$('#toasts .toast'))toast('Check the highlighted fields');return}
@@ -7610,9 +7621,26 @@ async function submit(){
   const trade=tradeOn(f);const item=trade?tradeItem(f):{id:uid(),form:f.id,tab:f.tab,values:payload(f),ts:Date.now()};if(!trade)item.sum=summ(f,item.values);
   busy=true;const btn=$('[data-lg="submit"]');if(btn){btn.disabled=true;btn.textContent='Sending…'}
   let st='queued',err='';
-  if(LS.get('lgUrl')&&navigator.onLine!==false){try{const r=await send(item);st=r.unverified?'unsure':'sent'}catch(e){if(e&&e.fatal){err=e.message;item.err=err}}}
-  if(st==='queued'){const q=J('lg.q',[]);q.push(item);W('lg.q',q)}
-  clearTimeout(saveT);remember(f);scMemLearn(f);LS.set(dKey(f.id),'');scTrackDraft(f.id,false);busy=false;bumpChanges();badge();setTimeout(showBackupBanner,600);
+  clearTimeout(saveT);
+  /* Safety copy first: the entry is also kept under "in flight" while it is being sent. If the page is closed or the phone
+     sleeps before Google answers, the entry is picked up again next time (the script ignores an id it already saved),
+     so the draft can be cleared right away and never lingers after a send that really landed. */
+  const sending=!!(LS.get('lgUrl')&&navigator.onLine!==false);
+  if(sending&&W(INFL_KEY,item))LS.set(dKey(f.id),'');
+  try{
+    if(sending){try{const r=await send(item);st=r.unverified?'unsure':'sent'}catch(e){if(e&&e.fatal){err=e.message;item.err=err}}}
+    if(st==='queued'){const q=J('lg.q',[]);if(!q.some(x=>x&&x.id===item.id))q.push(item);W('lg.q',q)}
+  }finally{
+    /* Whatever happened above, the draft is cleared and the form is released. Each helper is wrapped so none can stop the others. */
+    LS.set(dKey(f.id),'');LS.set(INFL_KEY,'');
+    try{scTrackDraft(f.id,false)}catch(e){}
+    try{remember(f)}catch(e){}
+    try{scMemLearn(f)}catch(e){}
+    busy=false;
+    try{bumpChanges()}catch(e){}
+    try{badge()}catch(e){}
+    setTimeout(showBackupBanner,600);
+  }
   if(st!=='queued'){addOverlay(item);afterSend()}
   const sd=sellDep&&!trade&&sellDep.formId===f.id&&V[(f.f.find(x=>x.t==='item')||{}).k]===sellDep.label?sellDep:null;if(sd)sellDep=null;
   if(sd&&st!=='queued'&&typeof owedCloseDepositAfterSale==='function')owedCloseDepositAfterSale(sd.depId).then(r=>toast(r&&r.ok?'Deposit closed as Picked Up':'Sale logged. Close the deposit manually in Owed (Update, Picked Up).'));
@@ -7630,6 +7658,8 @@ async function submit(){
    :'Saved on this device. It will send automatically when this page can reach Google.';
   show(`<div class="lg-top"><span></span>${xbtn()}</div><div class="lg-done"><div class="ok ${w?'w':''}">${ok?'✓':st==='unsure'?'✓':'•'}</div><h2>${st==='queued'?'Saved':'Logged'}</h2><p>${msg}</p>
    <div class="row"><button class="btn" data-lg="again" data-id="${f.id}">Add another</button><button class="btn sec" data-lg="menu">All forms</button>${st==='queued'?'<button class="btn sec" data-lg="settings">Connection</button>':''}</div></div>`);
+  /* The entry is finished: nothing on this screen may save a draft of it again, and a stray Ctrl/Cmd+Enter cannot send it a second time. */
+  clearTimeout(saveT);cur=null;V={};
 }
 
 /* ---------- Scan photos: read photos of a device and PRE-FILL a form (it never logs anything) ----------
@@ -9983,8 +10013,9 @@ window.__mmExpiryHandlesInvest=()=>{const c=load(); return c.enabled&&c.invest&&
 setTimeout(check,3500); setInterval(check,60000);
 }catch(err){console.error('Expiry banner failed to start (site unaffected):',err)}})();
 
+adoptInflight();
 setTimeout(()=>flush(true),2500);
-setInterval(()=>{if(qn()&&!document.hidden)flush(true)},60000);
+setInterval(()=>{adoptInflight();if(qn()&&!document.hidden)flush(true)},60000);
 }catch(err){console.error('Log module failed to start (site unaffected):',err)}
 })();
 </script>
