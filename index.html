@@ -1295,6 +1295,11 @@ button.kpi:hover{border-color:var(--accent)}
 /* Money in/out chart: legend badges + Net Profit switch (additive, hc- prefix) */
 .hc-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .hc-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:var(--surface2);color:var(--muted);font-size:12.5px;font-weight:600;line-height:1.2;--sw:var(--c2)}
+.hc-badge{border:0;cursor:pointer;font-family:inherit;transition:opacity .15s,background .15s}
+.hc-badge:hover{background:var(--line)}
+.hc-badge:focus-visible{outline:2px solid var(--c1);outline-offset:2px}
+.hc-badge[aria-pressed="false"]{opacity:.45}
+.hc-badge[aria-pressed="false"] .hc-sw{background:var(--faint)}
 .hc-badge.line{--sw:var(--c3)}
 .hc-badge.oi-loan{--sw:var(--oi-loan,#3b82f6)}
 .hc-badge.oi-dep{--sw:var(--oi-dep,#a78bfa)}
@@ -3418,7 +3423,7 @@ function incomeColors(){try{if(typeof window!=='undefined'&&typeof window.mmIncC
 // Fade a #rrggbb colour to the given alpha (anything else is returned unchanged).
 function fadeColor(c,a){const m=/^#([0-9a-f]{6})$/i.exec(c||'');if(!m)return c;const n=parseInt(m[1],16);return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`}
 // Header controls: colour-coded legend badges plus the Net Profit switch.
-function homeControls(oi){oi=oi||{};return `<span class="hc-controls"><span class="hc-badge"><i class="hc-sw bar"></i>Spending</span><span class="hc-badge line"><i class="hc-sw ln"></i>Reselling profit</span>${oi.loan?'<span class="hc-badge oi-loan"><i class="hc-sw ln"></i>Loan profit</span>':''}${oi.dep?'<span class="hc-badge oi-dep"><i class="hc-sw ln"></i>Forfeited deposits</span>':''}<button type="button" class="hc-switch" id="homeNet" role="switch" aria-checked="false"><span class="hc-track"><i></i></span>Net Profit</button></span>`}
+function homeControls(oi){oi=oi||{};const b=(cls,sw,label)=>`<button type="button" class="hc-badge${cls}" data-hc-ds="${label}" aria-pressed="true" title="Click to show or hide"><i class="hc-sw ${sw}"></i>${label}</button>`;return `<span class="hc-controls">${b('','bar','Spending')}${b(' line','ln','Reselling profit')}${oi.loan?b(' oi-loan','ln','Loan profit'):''}${oi.dep?b(' oi-dep','ln','Forfeited deposits'):''}<button type="button" class="hc-switch" id="homeNet" role="switch" aria-checked="false"><span class="hc-track"><i></i></span>Net Profit</button></span>`}
 // Chart.js config for the Money in/out chart. Builds its own options; the shared baseOpts() is only read, never changed.
 function homeChartConfig(labels,sp,pr,ui){
   const ink=ui.ink,bar=ui.bar,ln=ui.ln,peak=homePeak(pr);
@@ -4935,6 +4940,11 @@ function vHome(){
       const cfg=homeChartConfig(B.map(b=>b.label),sp,pr,{loanAmt,depAmt,loanCol:oiC.loan,depCol:oiC.dep,ink:cv('--muted'),grid:cv('--line'),bar:cv('--c2'),ln:cv('--c3'),net:cv('--c1'),bg:cv('--bg'),ink2:cv('--ink'),privacy:!!S.privacy,still:matchMedia('(prefers-reduced-motion:reduce)').matches});
       mkChart('homeChart',cfg,summary);enhanced=true;
       const sw=document.getElementById('homeNet'),ch=typeof Chart!=='undefined'&&Chart.getChart?Chart.getChart('homeChart'):null;
+      if(ch)document.querySelectorAll('#view .hc-badge[data-hc-ds]').forEach(bt=>bt.addEventListener('click',()=>{
+        const k=ch.data.datasets.findIndex(d=>d.label===bt.dataset.hcDs);if(k<0)return;
+        const on=bt.getAttribute('aria-pressed')!=='true';bt.setAttribute('aria-pressed',on?'true':'false');
+        ch.setDatasetVisibility(k,on);ch.update();
+      }));
       if(sw&&ch)sw.addEventListener('click',()=>{
         const on=sw.getAttribute('aria-checked')!=='true';sw.setAttribute('aria-checked',on?'true':'false');
         ch.setDatasetVisibility(2,on);ch.options.scales.y.min=homeYMin(ch.data.datasets[2].data,on);ch.update();
