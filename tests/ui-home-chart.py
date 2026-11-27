@@ -49,7 +49,7 @@ with sync_playwright() as p:
     cfg = lambda js: page.evaluate("(()=>{const c=window.__charts.filter(c=>c.canvas.id==='homeChart').pop();return " + js + "})()")
 
     # ---- header ----
-    check('legend shows a Spending badge and a Reselling profit badge', page.locator('#view .hc-badge').count() == 2 and 'Spending' in page.locator('#view .hc-badge').nth(0).inner_text() and 'Reselling profit' in page.locator('#view .hc-badge').nth(1).inner_text())
+    check('legend shows a Spending badge and a Reselling profit badge', page.locator('#view .hc-badge').count() == 3 and 'Spending' in page.locator('#view .hc-badge').nth(0).inner_text() and 'Reselling profit' in page.locator('#view .hc-badge').nth(1).inner_text())
     check('old plain-text hint is gone from this card', page.locator('#view .card:has(#homeChart) .hint').count() == 0)
     sw = page.locator('#homeNet')
     check('Net Profit switch exists, off by default, is a real switch', sw.count() == 1 and sw.get_attribute('aria-checked') == 'false' and sw.get_attribute('role') == 'switch' and 'Net Profit' in sw.inner_text())
