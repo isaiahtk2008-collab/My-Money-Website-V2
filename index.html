@@ -1296,6 +1296,14 @@ button.kpi:hover{border-color:var(--accent)}
 .hc-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .hc-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:var(--surface2);color:var(--muted);font-size:12.5px;font-weight:600;line-height:1.2;--sw:var(--c2)}
 .hc-badge.line{--sw:var(--c3)}
+.hc-badge.oi-loan{--sw:var(--oi-loan,#3b82f6)}
+.hc-badge.oi-dep{--sw:var(--oi-dep,#a78bfa)}
+/* Settings > Income colours */
+#inc-card .inc-row{display:flex;align-items:center;gap:12px;margin-top:12px;min-width:0}
+#inc-card .inc-row input[type=color]{width:44px;height:32px;padding:0;border:var(--ap3-w,1px) solid var(--ap3-lc,var(--line));border-radius:8px;background:transparent;cursor:pointer;flex:none}
+#inc-card .inc-row b{display:block;font-size:14px}
+#inc-card .inc-row small{display:block;color:var(--muted)}
+#inc-card .inc-sw{width:14px;height:14px;border-radius:50%;flex:none}
 .hc-sw{display:inline-block;flex:none;background:var(--sw)}
 .hc-sw.bar{width:10px;height:10px;border-radius:3px}
 .hc-sw.ln{width:14px;height:3px;border-radius:2px}
@@ -2201,6 +2209,63 @@ html.mm-fold-on.mm-fold-c-bl .mm-folded,html.mm-fold-on.mm-fold-c-br .mm-folded{
 /* Line thickness below 1 screen pixel: lines stay 1 screen pixel wide but fade, so they look thinner. Only active while data-ap3-fade is set (see the core script). */
 :root[data-ap3-fade] .m3-card,:root[data-ap3-fade] .m3-chip:not(.on){border-color:color-mix(in srgb,var(--md-sys-color-outline-variant) var(--ap3-fp,100%),transparent)}
 </style>
+<script id="mm-income-colors">
+/* Income colours: the colours of the profit that does NOT come from reselling (loan profit, forfeited deposits, and paychecks for later).
+   Saved on this device only (localStorage key "mm.inc.col"), never touches the sheet. Defaults: blue, purple, pink. Fully wrapped so it can never break the page. */
+(function () {
+  try {
+    var DEF = { loan: '#3b82f6', dep: '#a78bfa', pay: '#f472b6' };
+    var cur = { loan: DEF.loan, dep: DEF.dep, pay: DEF.pay };
+    var LABELS = { loan: ['Loan profit', 'Closed loans that came back with more than was lent (a loss shows below the line)'], dep: ['Forfeited deposits', 'Deposits you kept because the device was never picked up'], pay: ['Paychecks', 'Not used yet. Reserved for a future paychecks section'] };
+    function ok(v) { return typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v); }
+    try {
+      var s = JSON.parse(localStorage.getItem('mm.inc.col') || '{}');
+      for (var k in DEF) { if (s && ok(s[k])) cur[k] = s[k]; }
+    } catch (_) {}
+    function apply() {
+      try {
+        var st = document.documentElement.style;
+        st.setProperty('--oi-loan', cur.loan); st.setProperty('--oi-dep', cur.dep); st.setProperty('--oi-pay', cur.pay);
+      } catch (_) {}
+    }
+    function save() { try { localStorage.setItem('mm.inc.col', JSON.stringify(cur)); } catch (_) {} }
+    apply();
+    window.mmIncColors = function () { return { loan: cur.loan, dep: cur.dep, pay: cur.pay }; };
+    window.__mmIncomeColorsHtml = function () {
+      try {
+        var h = '<section class="m3-card" id="inc-card"><div class="m3-card-head"><span class="m3-icon" aria-hidden="true">palette</span><div><div class="m3-card-title">Income colours</div><div class="m3-card-sub">Colours for profit that is not from reselling. Saved on this device only.</div></div></div>';
+        for (var k in LABELS) {
+          h += '<div class="inc-row"><span class="inc-sw" style="background:' + cur[k] + '"></span><input type="color" data-inc-col="' + k + '" value="' + cur[k] + '" aria-label="' + LABELS[k][0] + ' colour"><div><b>' + LABELS[k][0] + '</b><small>' + LABELS[k][1] + '</small></div></div>';
+        }
+        h += '<div class="hfx-actions" style="margin-top:14px"><button type="button" class="chip-b" data-inc-reset="1">Reset colours</button></div></section>';
+        return h;
+      } catch (_) { return ''; }
+    };
+    function redraw() { try { if (typeof render === 'function') render(); } catch (_) {} }
+    document.addEventListener('input', function (e) {
+      try {
+        var t = e.target, k = t && t.getAttribute && t.getAttribute('data-inc-col');
+        if (!k || !ok(t.value)) return;
+        cur[k] = t.value; apply();
+        var sw = t.parentNode && t.parentNode.querySelector('.inc-sw'); if (sw) sw.style.background = t.value;
+      } catch (_) {}
+    });
+    document.addEventListener('change', function (e) {
+      try { var t = e.target; if (t && t.getAttribute && t.getAttribute('data-inc-col')) { save(); redraw(); } } catch (_) {}
+    });
+    document.addEventListener('click', function (e) {
+      try {
+        var b = e.target && e.target.closest ? e.target.closest('[data-inc-reset]') : null;
+        if (!b) return;
+        cur = { loan: DEF.loan, dep: DEF.dep, pay: DEF.pay }; save(); apply();
+        var card = document.getElementById('inc-card');
+        if (card) card.outerHTML = window.__mmIncomeColorsHtml();
+        redraw();
+      } catch (_) {}
+    });
+  } catch (_) {}
+})();
+</script>
 <script id="mm-appearance-v3-core">
 /* Appearance v3, part 1 (runs early so there is no flash): reads the saved fine-tuning choices and puts them on <html>.
    Keys (all strings; all synced with the sheet through the settings sync EXCEPT mm.hfx.line, which stays on this device): mm.hfx.round, mm.hfx.line, mm.hfx.text, mm.hfx.enl, mm.hfx.bg, mm.hfx.anim
@@ -3335,14 +3400,34 @@ function homeYMin(net,showNet){if(!showNet)return 0;const mn=Math.min(0,...(net|
 function homePeak(vals){let k=-1,mx=0;(vals||[]).forEach((v,i)=>{v=+v||0;if(v>mx){mx=v;k=i}});return k}
 // Net profit per month = reselling profit minus spending.
 function homeNet(pr,sp){return (pr||[]).map((v,i)=>(+v||0)-(+(sp||[])[i]||0))}
+/* ----- Other income (loan profit/loss + forfeited deposits), kept apart from reselling profit. Pure, read-only. ----- */
+// One entry per closed loan (signed result) and per forfeited deposit (the money kept), each dated by the day it closed.
+function otherIncomeEvents(om){
+  const out=[];if(!om||!om.hasOwed)return out;
+  for(const l of om.loans||[]){if(l.open||l.net==null||!l.net)continue;const d=l.closed||l.dateOut;if(d)out.push({kind:'loan',date:d,amt:l.net})}
+  for(const x of om.deps||[]){if(x.open||String(x.status||'').trim().toLowerCase()!=='forfeited'||!(x.paid>0))continue;const d=x.closed||x.dateIn;if(d)out.push({kind:'dep',date:d,amt:x.paid})}
+  return out;
+}
+// Sum of one kind between two dates (inclusive).
+function otherIncomeSum(ev,kind,s,e){let t=0;for(const x of ev||[]){if(x.kind===kind&&x.date>=s&&x.date<=e)t+=x.amt}return Math.round(t*100)/100}
+// Totals for a range plus the previous range: {loan,dep,total,pLoan,pDep,pTotal,any}.
+function otherIncomeRange(ev,R){const loan=otherIncomeSum(ev,'loan',R.start,R.end),dep=otherIncomeSum(ev,'dep',R.start,R.end),pLoan=otherIncomeSum(ev,'loan',R.pStart,R.pEnd),pDep=otherIncomeSum(ev,'dep',R.pStart,R.pEnd);
+  return{loan,dep,total:loan+dep,pLoan,pDep,pTotal:pLoan+pDep,any:(ev||[]).length>0}}
+// Saved colours for the extra profit sources (Settings > Income colours). Falls back to the defaults.
+function incomeColors(){try{if(typeof window!=='undefined'&&typeof window.mmIncColors==='function')return window.mmIncColors()}catch(e){}return{loan:'#3b82f6',dep:'#a78bfa',pay:'#f472b6'}}
 // Fade a #rrggbb colour to the given alpha (anything else is returned unchanged).
 function fadeColor(c,a){const m=/^#([0-9a-f]{6})$/i.exec(c||'');if(!m)return c;const n=parseInt(m[1],16);return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`}
 // Header controls: colour-coded legend badges plus the Net Profit switch.
-function homeControls(){return `<span class="hc-controls"><span class="hc-badge"><i class="hc-sw bar"></i>Spending</span><span class="hc-badge line"><i class="hc-sw ln"></i>Reselling profit</span><button type="button" class="hc-switch" id="homeNet" role="switch" aria-checked="false"><span class="hc-track"><i></i></span>Net Profit</button></span>`}
+function homeControls(oi){oi=oi||{};return `<span class="hc-controls"><span class="hc-badge"><i class="hc-sw bar"></i>Spending</span><span class="hc-badge line"><i class="hc-sw ln"></i>Reselling profit</span>${oi.loan?'<span class="hc-badge oi-loan"><i class="hc-sw ln"></i>Loan profit</span>':''}${oi.dep?'<span class="hc-badge oi-dep"><i class="hc-sw ln"></i>Forfeited deposits</span>':''}<button type="button" class="hc-switch" id="homeNet" role="switch" aria-checked="false"><span class="hc-track"><i></i></span>Net Profit</button></span>`}
 // Chart.js config for the Money in/out chart. Builds its own options; the shared baseOpts() is only read, never changed.
 function homeChartConfig(labels,sp,pr,ui){
-  const ink=ui.ink,bar=ui.bar,ln=ui.ln,net=homeNet(pr,sp),peak=homePeak(pr),max=homeYMax([...sp,...pr]);
-  const rank={1:0,0:1,2:2};
+  const ink=ui.ink,bar=ui.bar,ln=ui.ln,peak=homePeak(pr);
+  /* Other income (loans, forfeited deposits) stacks on top of the reselling line as its own coloured band. */
+  const lo=(ui.loanAmt||[]).map(v=>+v||0),dp=(ui.depAmt||[]).map(v=>+v||0);
+  const hasLoan=lo.some(v=>v!==0),hasDep=dp.some(v=>v!==0);
+  const loTot=pr.map((v,i)=>(+v||0)+(lo[i]||0)),allTot=loTot.map((v,i)=>v+(dp[i]||0));
+  const net=homeNet(allTot,sp),max=homeYMax([...sp,...pr,...allTot]);
+  const rank={1:0,0:1,2:2,3:3,4:4};
   const glow={id:'homeGlow',beforeDatasetsDraw(ch){
     try{const a=ch.tooltip&&ch.tooltip.getActiveElements?ch.tooltip.getActiveElements():[];if(!a.length)return;
       const el=ch.getDatasetMeta(0).data[a[0].index];if(!el)return;
@@ -3360,12 +3445,14 @@ function homeChartConfig(labels,sp,pr,ui){
   return {data:{labels,datasets:[
     {type:'bar',label:'Spending',data:sp,backgroundColor:bar,borderRadius:6,order:2},
     {type:'line',label:'Reselling profit',data:pr,borderColor:ln,backgroundColor:ln,cubicInterpolationMode:'monotone',tension:0,pointRadius:3,borderWidth:2.5,order:1},
-    {type:'line',label:'Net profit',data:net,hidden:true,borderColor:ui.net,backgroundColor:ui.net,cubicInterpolationMode:'monotone',tension:0,pointRadius:2,borderWidth:1.5,borderDash:[5,4],order:0}]},
+    {type:'line',label:'Net profit',data:net,hidden:true,borderColor:ui.net,backgroundColor:ui.net,cubicInterpolationMode:'monotone',tension:0,pointRadius:2,borderWidth:1.5,borderDash:[5,4],order:0},
+    ...(hasLoan?[{type:'line',label:'Loan profit',data:loTot,oiAmt:lo,borderColor:ui.loanCol,backgroundColor:fadeColor(ui.loanCol,.28),fill:1,cubicInterpolationMode:'monotone',tension:0,pointRadius:2,borderWidth:2,order:1}]:[]),
+    ...(hasDep?[{type:'line',label:'Forfeited deposits',data:allTot,oiAmt:dp,borderColor:ui.depCol,backgroundColor:fadeColor(ui.depCol,.28),fill:hasLoan?3:1,cubicInterpolationMode:'monotone',tension:0,pointRadius:2,borderWidth:2,order:1}]:[])]},
   options:{responsive:true,maintainAspectRatio:false,animation:ui.still?false:{duration:350},layout:{padding:{top:18}},
     interaction:{mode:'index',intersect:false},
     plugins:{legend:{display:false},tooltip:{enabled:!ui.privacy,backgroundColor:ui.ink2,titleColor:ui.bg,bodyColor:ui.bg,cornerRadius:10,padding:10,boxWidth:10,boxHeight:10,boxPadding:6,usePointStyle:false,
       itemSort:(a,b)=>(rank[a.datasetIndex]??9)-(rank[b.datasetIndex]??9),
-      callbacks:{label:c=>' '+c.dataset.label+': '+mny(c.parsed.y),labelColor:c=>({borderColor:'transparent',backgroundColor:c.dataset.type==='bar'?bar:c.dataset.borderColor,borderWidth:0,borderRadius:3})}}},
+      callbacks:{label:c=>' '+c.dataset.label+': '+mny(c.dataset.oiAmt?c.dataset.oiAmt[c.dataIndex]:c.parsed.y),labelColor:c=>({borderColor:'transparent',backgroundColor:c.dataset.type==='bar'?bar:c.dataset.borderColor,borderWidth:0,borderRadius:3})}}},
     scales:{x:{grid:{display:false},ticks:{color:ink,maxTicksLimit:13,maxRotation:0,autoSkip:true},border:{display:false}},
       y:{min:0,max,beginAtZero:true,grid:{color:fadeColor(ui.grid,.4)},border:{display:false},ticks:{color:ink,stepSize:500,includeBounds:false,maxTicksLimit:12,callback:v=>'$'+compact(v)}}}},
   plugins:[glow,pill]};
@@ -4813,17 +4900,24 @@ function vHome(){
   const D=store.D,R=RG(),g=autoGran(R);const ss=spendingStats(D,R,{},g),rs=resellingStats(D,R,'All'),inv=investingStats(D),st=inventoryStats(D),ts=totalSeries(D);
   const ins=insights(D,R,ss,rs),att=attention(D),act=activity(D);
   const avgAge=st.avgAge==null?'':' · avg '+Math.round(st.avgAge)+' days old';
+  /* Other income (closed loans + forfeited deposits) is added to the profit tile but shown in its own colours. */
+  let oiEv=[],oi={loan:0,dep:0,total:0,pTotal:0,any:false};
+  try{oiEv=otherIncomeEvents(owedModel(store.base||store.raw));oi=otherIncomeRange(oiEv,R)}catch(e){}
+  const oiC=incomeColors(),oiShow=oi.loan!==0||oi.dep!==0||oi.pTotal!==0;
+  const oiSub=plural(rs.sold.length,'sale')+(oi.loan!==0?` · <span style="color:${oiC.loan}">${oi.loan>0?'+':'−'}${mny(Math.abs(oi.loan))} loans</span>`:'')+(oi.dep!==0?` · <span style="color:${oiC.dep}">+${mny(oi.dep)} deposits</span>`:'');
   let hero={html:'',mount(){}};
   try{hero=mmHomeHero({R,labels:ss.buckets.map(b=>b.label),profit:rs.spark,spend:ss.cur,profitTotal:rs.profit,profitPrev:rs.prevProfit,spendTotal:ss.total,spendPrev:ss.prevTotal,sales:rs.sold.length,perDay:ss.perDay,inv:{vals:ts.map(x=>x.v),labels:ts.map(x=>fdy(x.d)),total:inv.total,gain:inv.gain}})}catch(e){}
   const html=`${hero.html}${mmHomeQuick()}<div class="grid g4 mm3-kpis">
-    ${kpi({label:'Reselling profit',val:SM(rs.profit),delta:dlt(rs.profit,rs.prevProfit),spark:rs.spark,sub:plural(rs.sold.length,'sale'),tip:'Profit = sale price − purchase price, for items sold in the selected range. Compared with the previous period of equal length.',act:'goto',v:'reselling'})}
+    ${oiShow
+      ?kpi({label:'Total profit',val:SM(rs.profit+oi.total),delta:dlt(rs.profit+oi.total,rs.prevProfit+oi.pTotal),spark:rs.spark,sub:oiSub,tip:'Reselling profit (sale price − purchase price) plus loan profit/loss and forfeited deposits for the selected range. The coloured parts underneath are not from reselling. Compared with the previous period of equal length.',act:'goto',v:'reselling'})
+      :kpi({label:'Reselling profit',val:SM(rs.profit),delta:dlt(rs.profit,rs.prevProfit),spark:rs.spark,sub:plural(rs.sold.length,'sale'),tip:'Profit = sale price − purchase price, for items sold in the selected range. Compared with the previous period of equal length.',act:'goto',v:'reselling'})}
     ${kpi({label:'Spending',val:M(ss.total),delta:dlt(ss.total,ss.prevTotal),inverse:true,spark:ss.cur,sub:mny(ss.perDay)+'/day',tip:'Everything you bought in the range. Refunds are left out. A rise shows in red because it means more money out.',act:'goto',v:'spending'})}
     ${kpi({label:'Invested',val:M(inv.total),delta:undefined,spark:ts.map(x=>x.v),sub:`<span class="${inv.gain>=0?'pos':'neg'}">${SM(inv.gain)}</span> all-time`,tip:'Latest logged value of every portfolio. Gain = value − everything you added.',act:'goto',v:'investing'})}
     ${kpi({label:'Cash tied up in stock',val:M(st.cash),sub:plural(st.stock.length,'item')+avgAge,tip:st.tradeValue>0?'Real cash paid for devices that have not sold yet. Trade-in value is not counted as cash.':'What you paid for devices that have not sold yet.',act:'goto',v:'inventory'})}
   </div>
   ${card('Insights',ins.length?`<div class="insights" style="--n:${Math.min(ins.length,6)}">${ins.slice(0,6).map(x=>`<button class="ins" data-act="${x.act}" data-v="${x.v||''}" data-k="${x.k||''}" data-x="${esc(x.x||'')}" data-id="${x.id||''}"><span class="ic">${ICON[x.i]||ICON.bulb}</span><p>${x.t}</p></button>`).join('')}</div>`:'<div class="empty">Insights appear once there is enough history.</div>','<span class="hint">Fresh picks every day</span>','mm3-ins')}
   <div class="grid g21 mm3-g21">
-    <div class="mm3-chartcard">${card('Money in and out, last 12 months',chartBox('homeChart'),homeControls())}</div>
+    <div class="mm3-chartcard">${card('Money in and out, last 12 months',chartBox('homeChart'),homeControls({loan:oiEv.some(x=>x.kind==='loan'),dep:oiEv.some(x=>x.kind==='dep')}))}</div>
     <div class="grid mm3-attw" style="align-content:start">
       ${card('Needs attention',att.length?`<div class="list">${att.map(x=>`<button class="li" data-act="${x.act}" data-v="${x.v}" data-k="${x.k||''}" data-x="${esc(x.x||'')}"><span class="ic">${ICON[x.i]}</span><span class="tx"><b style="white-space:normal">${x.t}</b><span>${esc(x.s)}</span></span>${ICON.chev.replace('<svg','<svg width="16" height="16"')}</button>`).join('')}</div>`:`<div class="empty"><b>All clear</b>Nothing needs your attention.</div>`,'','mm3-att')}
     </div>
@@ -4837,7 +4931,8 @@ function vHome(){
     const summary=`Monthly spending and reselling profit. Latest month: spending ${mny(sp[sp.length-1])}, profit ${mny(pr[pr.length-1])}.`;
     let enhanced=false;
     try{
-      const cfg=homeChartConfig(B.map(b=>b.label),sp,pr,{ink:cv('--muted'),grid:cv('--line'),bar:cv('--c2'),ln:cv('--c3'),net:cv('--c1'),bg:cv('--bg'),ink2:cv('--ink'),privacy:!!S.privacy,still:matchMedia('(prefers-reduced-motion:reduce)').matches});
+      const loanAmt=B.map(b=>otherIncomeSum(oiEv,'loan',b.s,b.e)),depAmt=B.map(b=>otherIncomeSum(oiEv,'dep',b.s,b.e));
+      const cfg=homeChartConfig(B.map(b=>b.label),sp,pr,{loanAmt,depAmt,loanCol:oiC.loan,depCol:oiC.dep,ink:cv('--muted'),grid:cv('--line'),bar:cv('--c2'),ln:cv('--c3'),net:cv('--c1'),bg:cv('--bg'),ink2:cv('--ink'),privacy:!!S.privacy,still:matchMedia('(prefers-reduced-motion:reduce)').matches});
       mkChart('homeChart',cfg,summary);enhanced=true;
       const sw=document.getElementById('homeNet'),ch=typeof Chart!=='undefined'&&Chart.getChart?Chart.getChart('homeChart'):null;
       if(sw&&ch)sw.addEventListener('click',()=>{
@@ -4949,10 +5044,17 @@ function velocityHtml(rs,kind){
 function vReselling(){
   const D=store.D,R=RG(),k=S.kind;const rs=resellingStats(D,R,k);
   const stl=S.rstat;
+  /* Other income only joins the "All" view (loans and deposits are not phones, PCs or accessories). */
+  let oi={loan:0,dep:0,total:0,pTotal:0};
+  try{if(k==='All')oi=otherIncomeRange(otherIncomeEvents(owedModel(store.base||store.raw)),R)}catch(e){}
+  const oiC=incomeColors(),oiShow=oi.loan!==0||oi.dep!==0||oi.pTotal!==0;
+  const oiSub=plural(rs.sold.length,'sale')+(oi.loan!==0?` · <span style="color:${oiC.loan}">${oi.loan>0?'+':'−'}${mny(Math.abs(oi.loan))} loans</span>`:'')+(oi.dep!==0?` · <span style="color:${oiC.dep}">+${mny(oi.dep)} deposits</span>`:'');
   const html=`<div class="sect">${seg('kind',[['All','All'],['Phone','Phones'],['PC','PCs'],['Accessory','Accessories']],k)}<span class="hint" style="color:var(--muted)">Sales are counted by sale date</span></div>
   ${rs.sold.length<3?`<div class="note">${rs.sold.length===0?'No sales in this range.':'Only '+plural(rs.sold.length,'sale')+' in this range, so take the averages with a grain of salt.'} Try a longer range.</div>`:''}
   <div class="grid g6">
-    ${kpi({label:'Profit',val:SM(rs.profit),delta:dlt(rs.profit,rs.prevProfit),spark:rs.spark,sub:plural(rs.sold.length,'sale'),tip:'Sale price − purchase price, summed over items sold in the range.'})}
+    ${oiShow
+      ?kpi({label:'Total profit',val:SM(rs.profit+oi.total),delta:dlt(rs.profit+oi.total,rs.prevProfit+oi.pTotal),spark:rs.spark,sub:oiSub,tip:'Reselling profit (sale price − purchase price) plus loan profit/loss and forfeited deposits in the range. The coloured parts underneath are not from reselling.'})
+      :kpi({label:'Profit',val:SM(rs.profit),delta:dlt(rs.profit,rs.prevProfit),spark:rs.spark,sub:plural(rs.sold.length,'sale'),tip:'Sale price − purchase price, summed over items sold in the range.'})}
     ${kpi({label:'Revenue',val:M(rs.revenue),delta:dlt(rs.revenue,rs.prevRevenue),sub:'sales total',tip:'Total sale prices in the range.'})}
     ${kpi({label:'Average ROI',val:rs.sold.length?pct(rs.roi):'0%',delta:dlt(rs.roi,rs.prevRoi),sub:'per flip',tip:'Profit ÷ purchase price, averaged per item.'})}
     ${kpi({label:'Days to sell',val:rs.days==null?(rs.sold.length?'—':'0 days'):Math.round(rs.days)+' days',delta:dlt(rs.days,rs.prevDays),inverse:true,sub:'average',tip:'Days from purchase date to sale date. Shorter is better, so a drop shows in green.'})}
@@ -5279,7 +5381,10 @@ function owedModel(raw, today = TODAY) {
   let depBalance = 0;
   let depOpen = 0;
   let depOverdue = 0;
+  /* Forfeited deposits: the customer never collected, so the money they put down is kept as profit (kept apart from reselling profit). */
+  let depForfeited = 0, depForfeitedN = 0;
   for (const d of deps) {
+    if (!d.open && String(d.status || '').trim().toLowerCase() === 'forfeited') { depForfeited += d.paid; depForfeitedN++; }
     if (d.open) {
       depHeld += d.paid;
       depBalance += d.balance;
@@ -5302,7 +5407,9 @@ function owedModel(raw, today = TODAY) {
     loanNet,
     loansClosed,
     loansProfitN,
-    loansLossN
+    loansLossN,
+    depForfeited: Math.round(depForfeited * 100) / 100,
+    depForfeitedN
   };
 
   return {
@@ -9658,6 +9765,7 @@ function secHtml(){
 ${typeof window.__mmNotifSettingsHtml==='function'?window.__mmNotifSettingsHtml():''}
 ${typeof window.__mmStatusSettingsHtml==='function'?window.__mmStatusSettingsHtml():''}
 ${typeof window.__mmHoverFxSettingsHtml==='function'?window.__mmHoverFxSettingsHtml():''}
+${typeof window.__mmIncomeColorsHtml==='function'?window.__mmIncomeColorsHtml():''}
 ${typeof window.__mmFoldSettingsHtml==='function'?window.__mmFoldSettingsHtml():''}
 <section class="m3-card">
   <div class="m3-card-head"><span class="m3-icon" aria-hidden="true">sync</span><div><div class="m3-card-title">Sheet Sync Connection</div><div class="m3-card-sub">Google Sheet and waiting entries</div></div></div>

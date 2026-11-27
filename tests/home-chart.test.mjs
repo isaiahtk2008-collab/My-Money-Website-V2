@@ -76,7 +76,7 @@ test('header controls: two colour-coded legend badges plus an accessible Net Pro
   assert.match(h, /hc-badge line[^>]*><i class="hc-sw ln"><\/i>Reselling profit/);
   assert.match(h, /<button[^>]*id="homeNet"[^>]*role="switch"[^>]*aria-checked="false"[^>]*>[\s\S]*Net Profit<\/button>/);
   assert.ok(!/data-act/.test(h), 'must not trigger the app-wide click handlers');
-  assert.match(html, /card\('Money in and out, last 12 months',chartBox\('homeChart'\),homeControls\(\)\)/);
+  assert.match(html, /card\('Money in and out, last 12 months',chartBox\('homeChart'\),homeControls\(\{loan:/);
 });
 
 test('chart config: monotone line, faded grid, $500 ticks, hidden Net Profit line, privacy respected', () => {
