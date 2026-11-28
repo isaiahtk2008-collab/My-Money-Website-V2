@@ -98,8 +98,8 @@ test('it is a normal Fine tuning row: listed, 0 to 600, "None" at 0, and Reset f
   assert.ok(/function resetFine\(\) \{ for \(var i = 0; i < NAMES\.length; i\+\+\)/.test(html));
 });
 
-test('stays on this device: not in the settings sync list and not in the Apps Script, so no redeploy is needed', () => {
-  assert.ok(!/mm\.hfx\.line/.test(gs));
+test('syncs to your other devices: in the settings sync list and in the Apps Script allow-list (the script needs the manual update)', () => {
+  assert.ok(/'mm\.hfx\.line'/.test(gs.match(/const SETTINGS_ALLOWED = \[([\s\S]*?)\];/)[1]));
   const sync = html.match(/var KEYS = \[([\s\S]*?)\];/)[1];
-  assert.ok(!/mm\.hfx\.line/.test(sync));
+  assert.ok(/'mm\.hfx\.line'/.test(sync));
 });

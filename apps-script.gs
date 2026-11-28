@@ -635,6 +635,7 @@ const SETTINGS_ALLOWED = [
   'mm.hfx.s', 'mm.hfx.dir', 'mm.hfx.col', 'mm.hfx.acc', 'mm.hfx.tile', 'mm.hfx.out', 'mm.hoverfx',
   'mm.hfx.round', 'mm.hfx.text', 'mm.hfx.enl', 'mm.hfx.bg', 'mm.hfx.anim', 'mm.hfx.amoled', 'mm.hfx.ink',
   'mm.clr.accent', 'mm.clr.glow', 'mm.clr.outline', 'mm.clr.tile.dark', 'mm.clr.tile.light',
+  'mm.hfx.line', 'mm.hfx.bgc', 'mm.inc.col', 'mm.expiry', 'mm.expiry.style', 'mm.kbdtips', 'mm.ap.recent',
   'mm.fold.corner', 'mm.fold.on', 'mm.notif', 'mm.auth.cred'
 ];
 const SETTINGS_NEEDS_SECRET = ['mm.auth.cred']; // the salted login hash is only kept/returned when SECRET is not empty
