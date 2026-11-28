@@ -44,7 +44,7 @@ function makeGuardSheet(name) {
   return sheet;
 }
 
-function makeScript({ secret = '', sheets = [] } = {}) {
+function makeScript({ secret = '', sheets = [], gsSrc = '' } = {}) {
   const created = [];
   const ss = {
     getSheets: () => sheets,
@@ -62,10 +62,11 @@ function makeScript({ secret = '', sheets = [] } = {}) {
     PropertiesService: { getScriptProperties: () => ({ getProperty: () => null, setProperty: () => {} }) },
     Utilities: { formatDate: (d, tz, f) => (f === 'yyyy-MM-dd' ? d.toISOString().slice(0, 10) : d.toISOString().slice(11, 19)) }
   };
-  let src = gs;
+  let src = gsSrc || gs;
   if (secret) {
-    src = gs.replace("const SECRET = '';", 'const SECRET = ' + JSON.stringify(secret) + ';');
-    assert.notEqual(src, gs, 'could not set SECRET for the test');
+    const base = src;
+    src = base.replace("const SECRET = '';", 'const SECRET = ' + JSON.stringify(secret) + ';');
+    assert.notEqual(src, base, 'could not set SECRET for the test');
   }
   vm.createContext(ctx);
   vm.runInContext(src, ctx);
@@ -600,4 +601,82 @@ test('Appearance reload picks up new saved choices and goes back to defaults for
   assert.ok(e.cls.has('mm-fx-off'));
   e.store.set('mm.hfx.dir', 'bogus'); e.sandbox.window.__mmHfxReload();
   assert.equal(st(e).dir, 'bottom', 'invalid values are ignored');
+});
+
+/* ================= sync coverage: every setting follows you to every device unless it is deliberately per-device ================= */
+const NEWLY_COVERED = ['mm.hfx.line', 'mm.hfx.bgc', 'mm.inc.col', 'mm.expiry', 'mm.expiry.style', 'mm.kbdtips', 'mm.ap.recent'];
+// Storage keys that must stay on one device, each with the reason. Anything new that is not synced has to be listed here on purpose.
+const DEVICE_ONLY = {
+  'mm.lgUrl': 'the sheet web app link: never leaves the device', 'mm.lgSecret': 'the sheet secret: never leaves the device',
+  'mm.auth.f': 'login lockout counter', 'mm.auth.u': 'login lockout time', 'mm.auth.method': 'how this device signs in',
+  'mm.unlocked': 'this device is signed in right now', 'mm.signedOutNote': 'one-time sign-out message for this device',
+  'mm.guest': 'this browser is a guest session', 'mm.guestEnded': 'this browser\'s guest session ended', 'mm.gvid': 'anonymous visitor id of this browser',
+  'mm.rc.v1': 'this device\'s saved copy of the sheet (a cache, not a setting)',
+  'mm.notif.dismissed': 'weekly reminder dismissed on this device', 'mm.expiry.snooze': 'banner snoozes on this device',
+  'mm.setfold': 'which settings sections are open', 'mm.ap.drawer': 'which Appearance panel is open', 'mm.ap.drawer3': 'which Appearance panel is open',
+  'mm.ap.tab': 'which Appearance tab is open', 'mm.fold.state': 'which cards are folded right now (changes constantly)'
+};
+const SYNC_INTERNAL = ['mm.sync.m', 'mm.sync.rl'];
+const GS_NEW_KEYS_LINE = "  'mm.hfx.line', 'mm.hfx.bgc', 'mm.inc.col', 'mm.expiry', 'mm.expiry.style', 'mm.kbdtips', 'mm.ap.recent',\n";
+
+test('coverage guard: every mm.* storage key in the page is either synced or deliberately listed as per-device', () => {
+  const synced = new Set(vm.runInContext('SETTINGS_ALLOWED', makeScript()));
+  const used = new Set();
+  html.split('\n').filter(l => !l.startsWith('const APPS_SCRIPT="')).forEach(l => {
+    for (const m of l.matchAll(/(['"`])(mm\.[A-Za-z0-9_.]*[A-Za-z0-9_])\1/g)) used.add(m[2]);
+  });
+  const orphans = [...used].filter(k => !synced.has(k) && !(k in DEVICE_ONLY) && !SYNC_INTERNAL.includes(k)).sort();
+  assert.deepEqual(orphans, [], 'New setting key(s) ' + orphans.join(', ') + ' are neither synced nor listed as per-device. To sync: add to KEYS in the settings-sync module AND SETTINGS_ALLOWED in apps-script.gs, then regenerate the embedded APPS_SCRIPT. To keep on one device: add to DEVICE_ONLY here with a reason.');
+  for (const k of Object.keys(DEVICE_ONLY)) { assert.ok(used.has(k), k + ' is listed as per-device but no longer exists in the page: remove it from the list'); assert.ok(!synced.has(k), k + ' is both synced and per-device'); }
+  for (const k of NEWLY_COVERED) assert.ok(synced.has(k), k + ' should be synced');
+  assert.ok(synced.size <= 40, 'one request carries at most 40 settings, so the synced list must not grow past 40 without raising SETTINGS_MAX_ITEMS in the script');
+});
+
+test('the newly covered settings travel from one device to another, together, and nothing else is sent', async () => {
+  const c = makeScript(), net = makeNet(c);
+  const A = makeDevice(net), B = makeDevice(net);
+  const vals = { 'mm.hfx.line': '3', 'mm.hfx.bgc': '#112233', 'mm.inc.col': '{"loan":"#ff0000"}', 'mm.expiry': '{"on":true}', 'mm.expiry.style': 'bar', 'mm.kbdtips': '0', 'mm.ap.recent': '["#112233"]' };
+  Object.entries(vals).forEach(([k, v]) => A.set(k, v));
+  await A.sync(); await B.sync();
+  for (const [k, v] of Object.entries(vals)) assert.equal(B.get(k), v, k + ' should arrive on the other device');
+  assert.deepEqual(sentKeys(net).sort(), Object.keys(vals).sort());
+  assert.deepEqual([...B.api.status().dirty], [], 'nothing left waiting on the receiving device');
+  assert.ok(B.calls.hfx >= 1, 'appearance settings re-apply live on the receiving device');
+  const posts = sent(net).length;
+  await B.sync(); await A.sync();
+  assert.equal(sent(net).length, posts, 'no echo: nothing is sent back');
+});
+
+test('per-device state (snoozes, dismissals, open panels, folded cards) is never sent', async () => {
+  const c = makeScript(), net = makeNet(c);
+  const A = makeDevice(net);
+  for (const k of ['mm.expiry.snooze', 'mm.notif.dismissed', 'mm.setfold', 'mm.ap.drawer', 'mm.ap.drawer3', 'mm.ap.tab', 'mm.fold.state', 'mm.rc.v1']) A.set(k, 'x');
+  A.set('mm.kbdtips', '1');
+  await A.sync();
+  assert.deepEqual(sentKeys(net), ['mm.kbdtips']);
+});
+
+test('an older script that turns the new settings away: they stay waiting, are not re-sent all session, and go out once the script is updated', async () => {
+  assert.ok(gs.includes(GS_NEW_KEYS_LINE), 'test needs the new-keys line in apps-script.gs');
+  const gsOld = gs.replace(GS_NEW_KEYS_LINE, '');
+  const sheets = [];
+  const oldC = makeScript({ sheets, gsSrc: gsOld }), netOld = makeNet(oldC);
+  const A = makeDevice(netOld);
+  A.set('mm.theme', 'dark'); A.set('mm.inc.col', '{"x":1}');
+  const r1 = await A.sync();
+  assert.equal(r1.ok, true, 'an older script must not look like a failure');
+  assert.deepEqual([...A.api.status().dirty], ['mm.inc.col'], 'the refused setting is still waiting, not marked as sent');
+  assert.equal(get(oldC, { action: 'settings' }).settings['mm.theme'].v, 'dark', 'allowed settings still sync normally');
+  const posts = sent(netOld).length;
+  await A.sync();
+  assert.equal(sent(netOld).length, posts, 'the refused setting is not re-sent every round');
+  // the script gets updated, the page reloads (fresh module, same stored settings and sync record)
+  const newC = makeScript({ sheets }), netNew = makeNet(newC);
+  const A2 = makeDevice(netNew, { pre: Object.fromEntries([...A.ls.m]) });
+  await A2.sync();
+  assert.ok(sentKeys(netNew).includes('mm.inc.col'), 'the value already on this device goes out once the script accepts it');
+  assert.deepEqual([...A2.api.status().dirty], []);
+  const B = makeDevice(netNew); await B.sync();
+  assert.equal(B.get('mm.inc.col'), '{"x":1}');
+  assert.equal(B.get('mm.theme'), 'dark');
 });
